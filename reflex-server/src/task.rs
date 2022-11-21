@@ -8,8 +8,8 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression, Reducible, Rewritable};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named,
-    SchedulerTransition, TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerTransition,
+    TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::task::{
     fetch::FetchHandlerTaskFactory,
@@ -157,44 +157,55 @@ where
     type Events<TInbox: TaskInbox<TAction>> =
         ServerTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>;
     type Dispose = ServerTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
             Self::Runtime(actor) => {
-                let (state, events, dispose) =
+                ServerTaskActorState::Runtime(
                     <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
-                (
-                    ServerTaskActorState::Runtime(state),
-                    ServerTaskEvents::Runtime(events),
-                    ServerTaskDispose::Runtime(dispose),
+                        actor,
+                    ),
                 )
             }
-            Self::DefaultHandlers(actor) => {
-                let (state, events, dispose) = <DefaultHandlersTaskActor<TConnect> as Actor<
-                    TAction,
-                    TTask,
-                >>::init(actor, inbox, context);
+            Self::DefaultHandlers(actor) => ServerTaskActorState::DefaultHandlers(
+                <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::init(actor),
+            ),
+            Self::WebSocketGraphQlServer(actor) => ServerTaskActorState::WebSocketGraphQlServer(
+                <WebSocketGraphQlServerTaskActor as Actor<TAction, TTask>>::init(actor),
+            ),
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::Runtime(actor) => <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
                 (
-                    ServerTaskActorState::DefaultHandlers(state),
-                    ServerTaskEvents::DefaultHandlers(events),
-                    ServerTaskDispose::DefaultHandlers(dispose),
+                    ServerTaskEvents::Runtime(events),
+                    dispose.map(ServerTaskDispose::Runtime),
                 )
+            }),
+            Self::DefaultHandlers(actor) => {
+                <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::events(actor, inbox)
+                    .map(|(events, dispose)| {
+                        (
+                            ServerTaskEvents::DefaultHandlers(events),
+                            dispose.map(ServerTaskDispose::DefaultHandlers),
+                        )
+                    })
             }
             Self::WebSocketGraphQlServer(actor) => {
-                let (state, events, dispose) = <WebSocketGraphQlServerTaskActor as Actor<
-                    TAction,
-                    TTask,
-                >>::init(actor, inbox, context);
-                (
-                    ServerTaskActorState::WebSocketGraphQlServer(state),
-                    ServerTaskEvents::WebSocketGraphQlServer(events),
-                    ServerTaskDispose::WebSocketGraphQlServer(dispose),
-                )
+                <WebSocketGraphQlServerTaskActor as Actor<TAction, TTask>>::events(actor, inbox)
+                    .map(|(events, dispose)| {
+                        (
+                            ServerTaskEvents::WebSocketGraphQlServer(events),
+                            dispose.map(ServerTaskDispose::WebSocketGraphQlServer),
+                        )
+                    })
             }
         }
     }

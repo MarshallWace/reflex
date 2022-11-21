@@ -9,7 +9,7 @@ use opentelemetry::trace::Tracer;
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression, Reducible, Rewritable};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, Redispatcher,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, Redispatcher,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
@@ -481,15 +481,63 @@ where
         TAction,
         TTask,
     >;
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State {
+        match self {
+            Self::Server(actor) => ServerCliTaskActorState::Server(<ServerActor<
+                T,
+                TFactory,
+                TAllocator,
+                TTransformHttp,
+                TTransformWs,
+                TGraphQlQueryLabel,
+                THttpMetricLabels,
+                TConnectionMetricLabels,
+                TOperationMetricLabels,
+                TTracer,
+            > as Actor<TAction, TTask>>::init(
+                actor
+            )),
+            Self::BytecodeInterpreter(actor) => {
+                ServerCliTaskActorState::BytecodeInterpreter(<BytecodeInterpreter<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TWorkerMetricLabels,
+                > as Actor<TAction, TTask>>::init(
+                    actor
+                ))
+            }
+            Self::ServerTask(actor) => {
+                ServerCliTaskActorState::ServerTask(<ServerTaskActor<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TConnect,
+                > as Actor<TAction, TTask>>::init(
+                    actor
+                ))
+            }
+            Self::Handler(actor) => ServerCliTaskActorState::Handler(<HandlerActor<
+                T,
+                TFactory,
+                TAllocator,
+                TConnect,
+                TReconnect,
+            > as Actor<TAction, TTask>>::init(
+                actor
+            )),
+            Self::Main(actor) => {
+                ServerCliTaskActorState::Main(<Redispatcher as Actor<TAction, TTask>>::init(actor))
+            }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
         match self {
             Self::Server(actor) => {
-                let (state, events, dispose) =
-                    <ServerActor<
+                <ServerActor<
                         T,
                         TFactory,
                         TAllocator,
@@ -500,56 +548,51 @@ where
                         TConnectionMetricLabels,
                         TOperationMetricLabels,
                         TTracer,
-                    > as Actor<TAction, TTask>>::init(actor, inbox, context);
-                (
-                    ServerCliTaskActorState::Server(state),
+                    > as Actor<TAction, TTask>>::events(actor, inbox).map(|(events, dispose)| {(
+
                     ServerCliTaskEvents::Server(events),
-                    ServerCliTaskDispose::Server(dispose),
-                )
+                    dispose.map(ServerCliTaskDispose::Server),
+                )})
+
             }
             Self::BytecodeInterpreter(actor) => {
-                let (state, events, dispose) =
-                    <BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels> as Actor<
+                <BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels> as Actor<
                         TAction,
                         TTask,
-                    >>::init(actor, inbox, context);
-                (
-                    ServerCliTaskActorState::BytecodeInterpreter(state),
+                    >>::events(actor, inbox).map(|(events, dispose)| {(
+
                     ServerCliTaskEvents::BytecodeInterpreter(events),
-                    ServerCliTaskDispose::BytecodeInterpreter(dispose),
-                )
+                    dispose.map(ServerCliTaskDispose::BytecodeInterpreter),
+                )})
+
             }
             Self::ServerTask(actor) => {
-                let (state, events, dispose) =
-                    <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
-                (
-                    ServerCliTaskActorState::ServerTask(state),
+                <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::events(
+                        actor, inbox,
+                    ).map(|(events, dispose)| {(
+
                     ServerCliTaskEvents::ServerTask(events),
-                    ServerCliTaskDispose::ServerTask(dispose),
-                )
+                    dispose.map(ServerCliTaskDispose::ServerTask),
+                )})
+
             }
             Self::Handler(actor) => {
-                let (state, events, dispose) =
-                    <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
                         TAction,
                         TTask,
-                    >>::init(actor, inbox, context);
-                (
-                    ServerCliTaskActorState::Handler(state),
+                    >>::events(actor, inbox).map(|(events, dispose)| {(
+
                     ServerCliTaskEvents::Handler(events),
-                    ServerCliTaskDispose::Handler(dispose),
-                )
+                    dispose.map(ServerCliTaskDispose::Handler),
+                )})
+
             }
             Self::Main(actor) => {
-                let (state, events, dispose) =
-                    <Redispatcher as Actor<TAction, TTask>>::init(actor, inbox, context);
-                (
-                    ServerCliTaskActorState::Main(state),
+                <Redispatcher as Actor<TAction, TTask>>::events(actor, inbox).map(|(events, dispose)| (
                     ServerCliTaskEvents::Main(events),
-                    ServerCliTaskDispose::Main(dispose),
-                )
+                    dispose.map(ServerCliTaskDispose::Main),
+                ))
+
             }
         }
     }

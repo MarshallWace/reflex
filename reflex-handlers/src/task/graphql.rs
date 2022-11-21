@@ -21,9 +21,9 @@ use hyper::Body;
 use pin_project::pin_project;
 use reflex::core::Uuid;
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, BoxedActionStream, Handler, HandlerContext, Matcher,
-    MessageData, Named, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode,
-    SchedulerTransition, TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorEvents, BoxedActionStream, Handler, HandlerContext, Matcher, MessageData,
+    Named, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::subscriptions::{
     deserialize_graphql_server_message, GraphQlSubscriptionClientMessage,
@@ -165,33 +165,41 @@ where
         GraphQlHandlerTaskEvents<TConnect, TInbox, TAction, TTask>;
     type Dispose = GraphQlHandlerTaskDispose<TConnect, TAction, TTask>;
 
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State {
+        match self {
+            Self::HttpFetch(actor) => GraphQlHandlerTaskActorState::HttpFetch(
+                <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<TAction, TTask>>::init(actor),
+            ),
+            Self::WebSocketConnection(actor) => GraphQlHandlerTaskActorState::WebSocketConnection(
+                <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::init(actor),
+            ),
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
         match self {
-            Self::HttpFetch(actor) => {
-                let (state, events, dispose) =
-                    <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
+            Self::HttpFetch(actor) => <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
                 (
-                    GraphQlHandlerTaskActorState::HttpFetch(state),
                     GraphQlHandlerTaskEvents::HttpFetch(events),
-                    GraphQlHandlerTaskDispose::HttpFetch(dispose),
+                    dispose.map(GraphQlHandlerTaskDispose::HttpFetch),
                 )
-            }
+            }),
             Self::WebSocketConnection(actor) => {
-                let (state, events, dispose) =
-                    <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
-                (
-                    GraphQlHandlerTaskActorState::WebSocketConnection(state),
-                    GraphQlHandlerTaskEvents::WebSocketConnection(events),
-                    GraphQlHandlerTaskDispose::WebSocketConnection(dispose),
+                <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::events(
+                    actor, inbox,
                 )
+                .map(|(events, dispose)| {
+                    (
+                        GraphQlHandlerTaskEvents::WebSocketConnection(events),
+                        dispose.map(GraphQlHandlerTaskDispose::WebSocketConnection),
+                    )
+                })
             }
         }
     }
@@ -439,16 +447,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = BoxedActionStream<TInbox::Message>;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (
-                Default::default(),
-                Box::pin(self.events(inbox, context)),
-                NoopDisposeCallback,
-            )
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Async(Box::pin(self.events(inbox)), None)
         }
 
         fn accept(&self, _action: &GraphQlHandlerHttpFetchCompleteAction) -> bool {
@@ -497,11 +503,7 @@ impl<TConnect> GraphQlHandlerHttpFetchTaskActor<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
-    fn events<TInbox, TAction>(
-        &self,
-        _inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, _inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action
@@ -650,16 +652,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = BoxedActionStream<TInbox::Message>;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (
-                Default::default(),
-                Box::pin(self.events(inbox, context)),
-                Default::default(),
-            )
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Async(Box::pin(self.events(inbox)), None)
         }
 
         fn accept(&self, _action: &GraphQlHandlerWebSocketConnectSuccessAction) -> bool {
@@ -747,11 +747,7 @@ dispatcher!({
 });
 
 impl GraphQlHandlerWebSocketConnectionTaskActor {
-    fn events<TInbox, TAction>(
-        &self,
-        inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action

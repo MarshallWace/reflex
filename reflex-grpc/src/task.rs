@@ -12,7 +12,7 @@ use futures::{future, stream, Future, FutureExt, Stream, StreamExt};
 use hyper::{http::uri::PathAndQuery, Uri};
 use reflex::core::Uuid;
 use reflex_dispatcher::{
-    Action, ActorInitContext, BoxedActionStream, HandlerContext, Matcher, MessageData,
+    Action, ActorEvents, BoxedActionStream, HandlerContext, Matcher, MessageData,
     NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
     TaskFactory, TaskInbox,
 };
@@ -408,16 +408,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = BoxedActionStream<TInbox::Message>;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (
-                Default::default(),
-                Box::pin(self.events(inbox, context)),
-                Default::default(),
-            )
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Async(Box::pin(self.events(inbox)), None)
         }
 
         fn accept(&self, _action: &GrpcHandlerConnectSuccessAction) -> bool {
@@ -543,11 +541,7 @@ dispatcher!({
 });
 
 impl GrpcHandlerConnectionTaskActor {
-    fn events<TInbox, TAction>(
-        &self,
-        inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action

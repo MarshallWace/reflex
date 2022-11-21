@@ -17,6 +17,7 @@ const TYPE_NAME_STATE: &'static str = "State";
 const TYPE_NAME_EVENTS: &'static str = "Events";
 const TYPE_NAME_DISPOSE: &'static str = "Dispose";
 const METHOD_NAME_INIT: &'static str = "init";
+const METHOD_NAME_EVENTS: &'static str = "events";
 const METHOD_NAME_ACCEPT: &'static str = "accept";
 const METHOD_NAME_SCHEDULE: &'static str = "schedule";
 const METHOD_NAME_HANDLE: &'static str = "handle";
@@ -57,6 +58,7 @@ struct DispatcherMacroOptions {
     events_type: ImplItemType,
     dispose_type: ImplItemType,
     init_method: ImplItemMethod,
+    events_method: ImplItemMethod,
     actor_impl_template: ItemImpl,
     handler_lifetime: Lifetime,
     handler_impl_template: ItemImpl,
@@ -127,6 +129,7 @@ fn parse_dispatcher_macro_options(body: Block) -> Result<DispatcherMacroOptions>
     let events_type = parse_impl_events_type(&mut impl_items, span)?;
     let dispose_type = parse_impl_dispose_type(&mut impl_items, span)?;
     let init_method = parse_impl_init_method(&mut impl_items, span)?;
+    let events_method = parse_impl_events_method(&mut impl_items, span)?;
     let handler_methods = parse_impl_handler_methods(&mut impl_items, span)?;
     let actor_impl_template = impl_template.clone();
     let handler_lifetime = Lifetime::new("'_a", impl_template.impl_token.span());
@@ -225,6 +228,7 @@ fn parse_dispatcher_macro_options(body: Block) -> Result<DispatcherMacroOptions>
         events_type,
         dispose_type,
         init_method,
+        events_method,
         actor_impl_template,
         handler_lifetime,
         handler_impl_template,
@@ -255,6 +259,7 @@ fn create_actor_impl(options: DispatcherMacroOptions) -> Result<TokenStream> {
         dispose_type,
         handler_struct,
         init_method,
+        events_method,
         handler_methods,
     } = options;
     let action_trait = create_action_trait_impl(action_trait)?;
@@ -262,6 +267,7 @@ fn create_actor_impl(options: DispatcherMacroOptions) -> Result<TokenStream> {
         events_type,
         dispose_type,
         init_method,
+        events_method,
         &actor_impl_template,
         &type_params,
     );
@@ -357,6 +363,7 @@ fn create_actor_init_impl(
     events_type: ImplItemType,
     dispose_type: ImplItemType,
     init_method: ImplItemMethod,
+    events_method: ImplItemMethod,
     template: &ItemImpl,
     type_params: &DispatcherTypeParameters,
 ) -> TokenStream {
@@ -384,6 +391,7 @@ fn create_actor_init_impl(
             ImplItem::Type(events_type),
             ImplItem::Type(dispose_type),
             ImplItem::Method(init_method),
+            ImplItem::Method(events_method),
         ],
     )
 }
@@ -882,6 +890,13 @@ fn parse_impl_init_method(
     span: Span,
 ) -> Result<ImplItemMethod> {
     parse_named_impl_method(METHOD_NAME_INIT, items, span)
+}
+
+fn parse_impl_events_method(
+    items: &mut impl Iterator<Item = ImplItem>,
+    span: Span,
+) -> Result<ImplItemMethod> {
+    parse_named_impl_method(METHOD_NAME_EVENTS, items, span)
 }
 
 fn parse_impl_handler_methods(

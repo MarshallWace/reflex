@@ -5,8 +5,8 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 
 use crate::{
-    Action, Actor, Handler, HandlerContext, MessageData, Named, SchedulerMode, TaskFactory,
-    TaskInbox, Worker,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    TaskFactory, TaskInbox, Worker,
 };
 
 pub enum EitherActor<T1, T2> {
@@ -52,28 +52,26 @@ where
 {
     type Events<TInbox: TaskInbox<TAction>> = EitherActorEvents<T1, T2, TInbox, TAction, TTask>;
     type Dispose = EitherActorDispose<T1, T2, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State {
+        match self {
+            Self::Left(inner) => Self::State::Left(inner.init()),
+            Self::Right(inner) => Self::State::Right(inner.init()),
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        context: &impl crate::ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
         match self {
-            Self::Left(inner) => {
-                let (state, events, dispose) = inner.init(inbox, context);
+            Self::Left(inner) => inner.events(inbox).map(|(events, dispose)| {
+                (Self::Events::Left(events), dispose.map(Self::Dispose::Left))
+            }),
+            Self::Right(inner) => inner.events(inbox).map(|(events, dispose)| {
                 (
-                    Self::State::Left(state),
-                    Self::Events::Left(events),
-                    Self::Dispose::Left(dispose),
-                )
-            }
-            Self::Right(inner) => {
-                let (state, events, dispose) = inner.init(inbox, context);
-                (
-                    Self::State::Right(state),
                     Self::Events::Right(events),
-                    Self::Dispose::Right(dispose),
+                    dispose.map(Self::Dispose::Right),
                 )
-            }
+            }),
         }
     }
 }

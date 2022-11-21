@@ -7,7 +7,7 @@ use opentelemetry::trace::{Span, Tracer};
 use pin_project::pin_project;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, validate::ValidateQueryGraphQlTransform};
@@ -225,72 +225,116 @@ where
         TAction,
         TTask,
     >;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
             Self::Runtime(inner) => {
-                let (state, events, dispose) = <RuntimeActor<T, TFactory, TAllocator> as Actor<
+                ServerActorState::Runtime(<RuntimeActor<T, TFactory, TAllocator> as Actor<
                     TAction,
                     TTask,
-                >>::init(inner, inbox, context);
-                (
-                    ServerActorState::Runtime(state),
-                    ServerActorEvents::Runtime(events),
-                    ServerActorDispose::Runtime(dispose),
-                )
+                >>::init(inner))
             }
-            Self::GraphQlServer(inner) => {
-                let (state, events, dispose) =
-                    <GraphQlServer<
-                        T,
-                        TFactory,
-                        TAllocator,
-                        TGraphQlQueryLabel,
-                        TOperationMetricLabels,
-                        TTracer,
-                    > as Actor<TAction, TTask>>::init(inner, inbox, context);
-                (
-                    ServerActorState::GraphQlServer(state),
-                    ServerActorEvents::GraphQlServer(events),
-                    ServerActorDispose::GraphQlServer(dispose),
-                )
-            }
+            Self::GraphQlServer(inner) => ServerActorState::GraphQlServer(<GraphQlServer<
+                T,
+                TFactory,
+                TAllocator,
+                TGraphQlQueryLabel,
+                TOperationMetricLabels,
+                TTracer,
+            > as Actor<TAction, TTask>>::init(
+                inner
+            )),
             Self::HttpGraphQlServer(inner) => {
-                let (state, events, dispose) =
-                    <HttpGraphQlServer<
-                        T,
-                        TFactory,
-                        ChainedHttpGraphQlServerQueryTransform<
-                            Option<ValidateQueryGraphQlTransform<'static, String>>,
-                            TTransformHttp,
-                        >,
-                        THttpMetricLabels,
-                    > as Actor<TAction, TTask>>::init(inner, inbox, context);
-                (
-                    ServerActorState::HttpGraphQlServer(state),
-                    ServerActorEvents::HttpGraphQlServer(events),
-                    ServerActorDispose::HttpGraphQlServer(dispose),
-                )
+                ServerActorState::HttpGraphQlServer(<HttpGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedHttpGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformHttp,
+                    >,
+                    THttpMetricLabels,
+                > as Actor<TAction, TTask>>::init(
+                    inner
+                ))
             }
             Self::WebSocketGraphQlServer(inner) => {
-                let (state, events, dispose) =
-                    <WebSocketGraphQlServer<
-                        T,
-                        TFactory,
-                        ChainedWebSocketGraphQlServerQueryTransform<
-                            Option<ValidateQueryGraphQlTransform<'static, String>>,
-                            TTransformWs,
-                        >,
-                        TConnectionMetricLabels,
-                    > as Actor<TAction, TTask>>::init(inner, inbox, context);
+                ServerActorState::WebSocketGraphQlServer(<WebSocketGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedWebSocketGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformWs,
+                    >,
+                    TConnectionMetricLabels,
+                > as Actor<TAction, TTask>>::init(
+                    inner
+                ))
+            }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::Runtime(inner) => <RuntimeActor<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(inner, inbox)
+            .map(|(events, dispose)| {
                 (
-                    ServerActorState::WebSocketGraphQlServer(state),
-                    ServerActorEvents::WebSocketGraphQlServer(events),
-                    ServerActorDispose::WebSocketGraphQlServer(dispose),
+                    ServerActorEvents::Runtime(events),
+                    dispose.map(ServerActorDispose::Runtime),
                 )
+            }),
+            Self::GraphQlServer(inner) => {
+                <GraphQlServer<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TGraphQlQueryLabel,
+                    TOperationMetricLabels,
+                    TTracer,
+                > as Actor<TAction, TTask>>::events(inner, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        ServerActorEvents::GraphQlServer(events),
+                        dispose.map(ServerActorDispose::GraphQlServer),
+                    )
+                })
+            }
+            Self::HttpGraphQlServer(inner) => {
+                <HttpGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedHttpGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformHttp,
+                    >,
+                    THttpMetricLabels,
+                > as Actor<TAction, TTask>>::events(inner, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        ServerActorEvents::HttpGraphQlServer(events),
+                        dispose.map(ServerActorDispose::HttpGraphQlServer),
+                    )
+                })
+            }
+            Self::WebSocketGraphQlServer(inner) => {
+                <WebSocketGraphQlServer<
+                    T,
+                    TFactory,
+                    ChainedWebSocketGraphQlServerQueryTransform<
+                        Option<ValidateQueryGraphQlTransform<'static, String>>,
+                        TTransformWs,
+                    >,
+                    TConnectionMetricLabels,
+                > as Actor<TAction, TTask>>::events(inner, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        ServerActorEvents::WebSocketGraphQlServer(events),
+                        dispose.map(ServerActorDispose::WebSocketGraphQlServer),
+                    )
+                })
             }
         }
     }

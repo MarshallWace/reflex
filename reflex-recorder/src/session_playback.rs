@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use reflex_dispatcher::{
-    Action, ActorInitContext, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
+    Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
     TaskFactory, TaskInbox,
 };
@@ -128,12 +128,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = TInbox;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (Default::default(), inbox, Default::default())
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Sync(inbox)
         }
 
         fn accept(&self, _action: &SessionPlaybackBeginAction) -> bool {

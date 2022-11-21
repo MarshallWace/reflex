@@ -6,7 +6,7 @@ use std::pin::Pin;
 use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 
@@ -167,54 +167,71 @@ where
     type Events<TInbox: TaskInbox<TAction>> =
         DefaultHandlersTaskEvents<TConnect, TInbox, TAction, TTask>;
     type Dispose = DefaultHandlersTaskDispose<TConnect, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
-            Self::Fetch(inner) => {
-                let (state, events, dispose) = <FetchHandlerTaskActor<TConnect> as Actor<
-                    TAction,
-                    TTask,
-                >>::init(inner, inbox, context);
-                (
-                    DefaultHandlersTaskActorState::Fetch(state),
-                    DefaultHandlersTaskEvents::Fetch(events),
-                    DefaultHandlersTaskDispose::Fetch(dispose),
-                )
-            }
-            Self::GraphQl(inner) => {
-                let (state, events, dispose) = <GraphQlHandlerTaskActor<TConnect> as Actor<
-                    TAction,
-                    TTask,
-                >>::init(inner, inbox, context);
-                (
-                    DefaultHandlersTaskActorState::GraphQl(state),
-                    DefaultHandlersTaskEvents::GraphQl(events),
-                    DefaultHandlersTaskDispose::GraphQl(dispose),
-                )
-            }
+            Self::Fetch(inner) => DefaultHandlersTaskActorState::Fetch(<FetchHandlerTaskActor<
+                TConnect,
+            > as Actor<TAction, TTask>>::init(
+                inner
+            )),
+            Self::GraphQl(inner) => DefaultHandlersTaskActorState::GraphQl(
+                <GraphQlHandlerTaskActor<TConnect> as Actor<TAction, TTask>>::init(inner),
+            ),
             Self::Timeout(inner) => {
-                let (state, events, dispose) =
-                    <TimeoutHandlerTaskActor as Actor<TAction, TTask>>::init(inner, inbox, context);
-                (
-                    DefaultHandlersTaskActorState::Timeout(state),
-                    DefaultHandlersTaskEvents::Timeout(events),
-                    DefaultHandlersTaskDispose::Timeout(dispose),
-                )
+                DefaultHandlersTaskActorState::Timeout(<TimeoutHandlerTaskActor as Actor<
+                    TAction,
+                    TTask,
+                >>::init(inner))
             }
             Self::Timestamp(inner) => {
-                let (state, events, dispose) = <TimestampHandlerTaskActor as Actor<
+                DefaultHandlersTaskActorState::Timestamp(<TimestampHandlerTaskActor as Actor<
                     TAction,
                     TTask,
-                >>::init(inner, inbox, context);
-                (
-                    DefaultHandlersTaskActorState::Timestamp(state),
-                    DefaultHandlersTaskEvents::Timestamp(events),
-                    DefaultHandlersTaskDispose::Timestamp(dispose),
-                )
+                >>::init(inner))
             }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::Fetch(inner) => {
+                <FetchHandlerTaskActor<TConnect> as Actor<TAction, TTask>>::events(inner, inbox)
+                    .map(|(events, dispose)| {
+                        (
+                            DefaultHandlersTaskEvents::Fetch(events),
+                            dispose.map(DefaultHandlersTaskDispose::Fetch),
+                        )
+                    })
+            }
+            Self::GraphQl(inner) => {
+                <GraphQlHandlerTaskActor<TConnect> as Actor<TAction, TTask>>::events(inner, inbox)
+                    .map(|(events, dispose)| {
+                        (
+                            DefaultHandlersTaskEvents::GraphQl(events),
+                            dispose.map(DefaultHandlersTaskDispose::GraphQl),
+                        )
+                    })
+            }
+            Self::Timeout(inner) => <TimeoutHandlerTaskActor as Actor<TAction, TTask>>::events(
+                inner, inbox,
+            )
+            .map(|(events, dispose)| {
+                (
+                    DefaultHandlersTaskEvents::Timeout(events),
+                    dispose.map(DefaultHandlersTaskDispose::Timeout),
+                )
+            }),
+            Self::Timestamp(inner) => <TimestampHandlerTaskActor as Actor<TAction, TTask>>::events(
+                inner, inbox,
+            )
+            .map(|(events, dispose)| {
+                (
+                    DefaultHandlersTaskEvents::Timestamp(events),
+                    dispose.map(DefaultHandlersTaskDispose::Timestamp),
+                )
+            }),
         }
     }
 }

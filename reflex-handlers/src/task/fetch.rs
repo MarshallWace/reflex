@@ -6,7 +6,7 @@ use futures::{future, FutureExt, Stream};
 use hyper::Body;
 use reflex::core::Uuid;
 use reflex_dispatcher::{
-    Action, ActorInitContext, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
+    Action, ActorEvents, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_macros::{blanket_trait, dispatcher, Named};
@@ -92,16 +92,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = BoxedActionStream<TInbox::Message>;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (
-                Default::default(),
-                Box::pin(self.events(inbox, context)),
-                NoopDisposeCallback,
-            )
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Async(Box::pin(self.events(inbox)), None)
         }
 
         fn accept(&self, _action: &FetchHandlerFetchCompleteAction) -> bool {
@@ -150,11 +148,7 @@ impl<TConnect> FetchHandlerTaskActor<TConnect>
 where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
 {
-    fn events<TInbox, TAction>(
-        &self,
-        _inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, _inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action

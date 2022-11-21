@@ -69,15 +69,30 @@ pub trait Actor<TAction: Action, TTask: TaskFactory<TAction, TTask>>:
 {
     type Events<TInbox: TaskInbox<TAction>>: Stream<Item = TInbox::Message> + Unpin + Send;
     type Dispose: Future<Output = ()> + Unpin;
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State;
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose);
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose>;
 }
 
-pub trait ActorInitContext: 'static {
-    fn pid(&self) -> ProcessId;
+pub enum ActorEvents<TSync, TAsync, TDispose> {
+    Sync(TSync),
+    Async(TAsync, Option<TDispose>),
+}
+impl<TSync, TAsync, TDispose> ActorEvents<TSync, TAsync, TDispose> {
+    pub fn map<TAsync2, TDispose2>(
+        self,
+        f: impl FnOnce((TAsync, Option<TDispose>)) -> (TAsync2, Option<TDispose2>),
+    ) -> ActorEvents<TSync, TAsync2, TDispose2> {
+        match self {
+            Self::Sync(inner) => ActorEvents::Sync(inner),
+            Self::Async(inner, dispose) => {
+                let (inner, dispose) = f((inner, dispose));
+                ActorEvents::Async(inner, dispose)
+            }
+        }
+    }
 }
 
 pub trait Handler<I, O> {

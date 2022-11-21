@@ -4,9 +4,10 @@
 use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
+use reflex_dispatcher::ActorEvents;
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
-    SchedulerTransition, TaskFactory, TaskInbox, Worker,
+    Action, Actor, Handler, HandlerContext, MessageData, Named, SchedulerMode, SchedulerTransition,
+    TaskFactory, TaskInbox, Worker,
 };
 
 pub mod bytecode_interpreter;
@@ -65,34 +66,48 @@ where
     type Events<TInbox: TaskInbox<TAction>> =
         RuntimeActorEvents<T, TFactory, TAllocator, TInbox, TAction, TTask>;
     type Dispose = RuntimeActorDispose<T, TFactory, TAllocator, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
             Self::QueryManager(actor) => {
-                let (state, events, dispose) = <QueryManager<T, TFactory, TAllocator> as Actor<
+                RuntimeActorState::QueryManager(<QueryManager<T, TFactory, TAllocator> as Actor<
                     TAction,
                     TTask,
-                >>::init(actor, inbox, context);
-                (
-                    RuntimeActorState::QueryManager(state),
-                    RuntimeActorEvents::QueryManager(events),
-                    RuntimeActorDispose::QueryManager(dispose),
-                )
+                >>::init(actor))
             }
             Self::EvaluateHandler(actor) => {
-                let (state, events, dispose) =
+                RuntimeActorState::EvaluateHandler(
                     <EvaluateHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
-                (
-                    RuntimeActorState::EvaluateHandler(state),
-                    RuntimeActorEvents::EvaluateHandler(events),
-                    RuntimeActorDispose::EvaluateHandler(dispose),
+                        actor,
+                    ),
                 )
             }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::QueryManager(actor) => <QueryManager<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (
+                    RuntimeActorEvents::QueryManager(events),
+                    dispose.map(RuntimeActorDispose::QueryManager),
+                )
+            }),
+            Self::EvaluateHandler(actor) => <EvaluateHandler<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (
+                    RuntimeActorEvents::EvaluateHandler(events),
+                    dispose.map(RuntimeActorDispose::EvaluateHandler),
+                )
+            }),
         }
     }
 }

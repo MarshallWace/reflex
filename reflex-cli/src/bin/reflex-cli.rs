@@ -28,9 +28,9 @@ use reflex::{
 };
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData, Named,
-    Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction,
-    SerializedAction, TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorEvents, Handler, HandlerContext, Matcher, MessageData, Named, Redispatcher,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
+    TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::{
     action::{
@@ -585,71 +585,83 @@ where
     >;
     type Dispose =
         CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
             Self::Runtime(actor) => {
-                let (state, events, dispose) = {
-                    <RuntimeActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    )
-                };
-                (
-                    CliActorState::Runtime(state),
-                    CliEvents::Runtime(events),
-                    CliDispose::Runtime(dispose),
-                )
+                CliActorState::Runtime(<RuntimeActor<T, TFactory, TAllocator> as Actor<
+                    TAction,
+                    TTask,
+                >>::init(actor))
             }
             Self::Handler(actor) => {
-                let (state, events, dispose) = {
+                CliActorState::Handler(
                     <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
                         TAction,
                         TTask,
-                    >>::init(actor, inbox, context)
-                };
-                (
-                    CliActorState::Handler(state),
-                    CliEvents::Handler(events),
-                    CliDispose::Handler(dispose),
+                    >>::init(actor),
                 )
             }
             Self::BytecodeInterpreter(actor) => {
-                let (state, events, dispose) = {
-                    <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Actor<
-                        TAction,
-                        TTask,
-                    >>::init(actor, inbox, context)
-                };
-                (
-                    CliActorState::BytecodeInterpreter(state),
-                    CliEvents::BytecodeInterpreter(events),
-                    CliDispose::BytecodeInterpreter(dispose),
-                )
+                CliActorState::BytecodeInterpreter(<BytecodeInterpreter<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TMetricLabels,
+                > as Actor<TAction, TTask>>::init(
+                    actor
+                ))
             }
             Self::Main(actor) => {
-                let (state, events, dispose) =
-                    { <Redispatcher as Actor<TAction, TTask>>::init(actor, inbox, context) };
-                (
-                    CliActorState::Main(state),
-                    CliEvents::Main(events),
-                    CliDispose::Main(dispose),
-                )
+                CliActorState::Main(<Redispatcher as Actor<TAction, TTask>>::init(actor))
             }
             Self::Task(actor) => {
-                let (state, events, dispose) = {
-                    <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    )
-                };
-                (
-                    CliActorState::Task(state),
-                    CliEvents::Task(events),
-                    CliDispose::Task(dispose),
-                )
+                CliActorState::Task(<CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<
+                    TAction,
+                    TTask,
+                >>::init(actor))
             }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::Runtime(actor) => <RuntimeActor<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (CliEvents::Runtime(events), dispose.map(CliDispose::Runtime))
+            }),
+            Self::Handler(actor) => {
+                <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                    TAction,
+                    TTask,
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| {
+                    (CliEvents::Handler(events), dispose.map(CliDispose::Handler))
+                })
+            }
+            Self::BytecodeInterpreter(actor) => {
+                <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Actor<
+                    TAction,
+                    TTask,
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        CliEvents::BytecodeInterpreter(events),
+                        dispose.map(CliDispose::BytecodeInterpreter),
+                    )
+                })
+            }
+            Self::Main(actor) => <Redispatcher as Actor<TAction, TTask>>::events(actor, inbox)
+                .map(|(events, dispose)| (CliEvents::Main(events), dispose.map(CliDispose::Main))),
+            Self::Task(actor) => <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| (CliEvents::Task(events), dispose.map(CliDispose::Task))),
         }
     }
 }
@@ -1103,35 +1115,43 @@ where
     type Events<TInbox: TaskInbox<TAction>> =
         CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>;
     type Dispose = CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
             Self::RuntimeTask(actor) => {
-                let (state, events, dispose) = {
+                CliTaskActorState::RuntimeTask(
                     <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    )
-                };
-                (
-                    CliTaskActorState::RuntimeTask(state),
-                    CliTaskEvents::RuntimeTask(events),
-                    CliTaskDispose::RuntimeTask(dispose),
+                        actor,
+                    ),
                 )
             }
-            Self::DefaultHandlersTask(actor) => {
-                let (state, events, dispose) = {
-                    <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    )
-                };
+            Self::DefaultHandlersTask(actor) => CliTaskActorState::DefaultHandlersTask(
+                <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::init(actor),
+            ),
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::RuntimeTask(actor) => <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
                 (
-                    CliTaskActorState::DefaultHandlersTask(state),
-                    CliTaskEvents::DefaultHandlersTask(events),
-                    CliTaskDispose::DefaultHandlersTask(dispose),
+                    CliTaskEvents::RuntimeTask(events),
+                    dispose.map(CliTaskDispose::RuntimeTask),
                 )
+            }),
+            Self::DefaultHandlersTask(actor) => {
+                <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::events(actor, inbox)
+                    .map(|(events, dispose)| {
+                        (
+                            CliTaskEvents::DefaultHandlersTask(events),
+                            dispose.map(CliTaskDispose::DefaultHandlersTask),
+                        )
+                    })
             }
         }
     }

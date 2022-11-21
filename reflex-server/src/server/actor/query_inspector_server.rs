@@ -10,9 +10,9 @@ use std::{
 use http::StatusCode;
 use reflex::core::{Expression, ExpressionFactory};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, Matcher, MessageData,
-    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
-    TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorEvents, Handler, HandlerContext, Matcher, MessageData, NoopDisposeCallback,
+    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
+    Worker,
 };
 use reflex_macros::{blanket_trait, Named};
 use reflex_runtime::actor::query_inspector::{
@@ -77,12 +77,14 @@ where
     type Events<TInbox: TaskInbox<TAction>> = TInbox;
     type Dispose = NoopDisposeCallback;
 
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-        (Default::default(), inbox, Default::default())
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        ActorEvents::Sync(inbox)
     }
 }
 

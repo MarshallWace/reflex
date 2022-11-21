@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use crate::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named,
-    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
-    TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, NoopDisposeCallback,
+    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
+    Worker,
 };
 
 #[derive(Clone)]
@@ -30,12 +30,14 @@ pub struct RedispatcherState;
 impl<TAction: Action, TTask: TaskFactory<TAction, TTask>> Actor<TAction, TTask> for Redispatcher {
     type Events<TInbox: TaskInbox<TAction>> = TInbox;
     type Dispose = NoopDisposeCallback;
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State {
+        Default::default()
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-        (Default::default(), inbox, Default::default())
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        ActorEvents::Sync(inbox)
     }
 }
 

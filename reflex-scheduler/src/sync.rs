@@ -15,7 +15,7 @@ use futures::{
 
 use pin_project::pin_project;
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, HandlerTransition, MessageData,
+    Action, Actor, ActorEvents, Handler, HandlerContext, HandlerTransition, MessageData,
     MessageOffset, ProcessId, SchedulerCommand, SchedulerTransition, TaskFactory, TaskInbox,
     TaskMessage,
 };
@@ -34,10 +34,10 @@ where
             _action: PhantomData,
         }
     }
-    fn run(
+    fn spawn(
         &mut self,
         _events: <TTask::Actor as Actor<TAction, TTask>>::Events<Self::Inbox>,
-        _dispose: <TTask::Actor as Actor<TAction, TTask>>::Dispose,
+        _dispose: Option<<TTask::Actor as Actor<TAction, TTask>>::Dispose>,
     ) -> TaskHandle {
         TaskHandle::new(|| {})
     }
@@ -85,10 +85,10 @@ where
 {
     type Inbox: TaskInbox<TAction>;
     fn inbox(&mut self, pid: ProcessId) -> Self::Inbox;
-    fn run(
+    fn spawn(
         &mut self,
         events: <TTask::Actor as Actor<TAction, TTask>>::Events<Self::Inbox>,
-        dispose: <TTask::Actor as Actor<TAction, TTask>>::Dispose,
+        dispose: Option<<TTask::Actor as Actor<TAction, TTask>>::Dispose>,
     ) -> TaskHandle;
 }
 
@@ -107,9 +107,9 @@ impl TaskHandle {
 }
 
 struct SyncWorkerInstance<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
-    handle: TaskHandle,
     actor: TTask::Actor,
     state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
+    handle: Option<TaskHandle>,
 }
 
 pub struct SyncScheduler<TAction, TTask, TRunner>
@@ -144,13 +144,18 @@ where
     }
     pub fn spawn(&mut self, pid: ProcessId, factory: TTask) {
         if let Entry::Vacant(entry) = self.processes.entry(pid) {
-            // Create an inbox for the worker
-            let inbox = self.task_runner.inbox(pid);
             // Create the worker instance
             let actor = factory.create();
-            let (state, events, dispose) = actor.init(inbox, &SyncActorInitContext { pid });
+            let state = actor.init();
+            // Create an inbox for the worker
+            let inbox = self.task_runner.inbox(pid);
             // Initiate the worker event stream
-            let handle = self.task_runner.run(events, dispose);
+            let handle = match actor.events(inbox) {
+                ActorEvents::Sync(_inbox) => None,
+                ActorEvents::Async(events, dispose) => {
+                    Some(self.task_runner.spawn(events, dispose))
+                }
+            };
             // Keep hold of the worker instance
             entry.insert(SyncWorkerInstance {
                 state,
@@ -160,8 +165,10 @@ where
         }
     }
     pub fn kill(&mut self, pid: ProcessId) {
-        if let Some(worker) = self.processes.remove(&pid) {
-            worker.handle.abort();
+        if let Some(mut worker) = self.processes.remove(&pid) {
+            if let Some(handle) = worker.handle.take() {
+                handle.abort()
+            }
         }
     }
     pub fn dispatch(&mut self, pid: ProcessId, action: TAction) {
@@ -382,15 +389,5 @@ impl HandlerContext for SyncContext {
     fn generate_pid(&mut self) -> ProcessId {
         let next_pid = self.next_pid.next();
         std::mem::replace(&mut self.next_pid, next_pid)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct SyncActorInitContext {
-    pid: ProcessId,
-}
-impl ActorInitContext for SyncActorInitContext {
-    fn pid(&self) -> ProcessId {
-        self.pid
     }
 }

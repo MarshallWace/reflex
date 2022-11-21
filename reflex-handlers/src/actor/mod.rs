@@ -6,7 +6,7 @@ use futures::{Future, Stream};
 use pin_project::pin_project;
 use reflex::core::{Applicable, Expression};
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_macros::blanket_trait;
@@ -133,91 +133,133 @@ where
         HandlerActorEvents<T, TFactory, TAllocator, TConnect, TReconnect, TInbox, TAction, TTask>;
     type Dispose =
         HandlerActorDispose<T, TFactory, TAllocator, TConnect, TReconnect, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
-            Self::FetchHandler(actor) => {
-                let (state, events, dispose) =
-                    <FetchHandler<T, TFactory, TAllocator, TConnect> as Actor<
-                        TAction,
-                        TTask,
-                    >>::init(actor, inbox, context);
-                (
-                    HandlerActorState::FetchHandler(state),
-                    HandlerActorEvents::FetchHandler(events),
-                    HandlerActorDispose::FetchHandler(dispose),
-                )
-            }
+            Self::FetchHandler(actor) => HandlerActorState::FetchHandler(<FetchHandler<
+                T,
+                TFactory,
+                TAllocator,
+                TConnect,
+            > as Actor<TAction, TTask>>::init(
+                actor
+            )),
             Self::GraphQlHandler(actor) => {
-                let (state, events, dispose) =
-                    <GraphQlHandler<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
-                        TAction,
-                        TTask,
-                    >>::init(actor, inbox, context);
-                (
-                    HandlerActorState::GraphQlHandler(state),
-                    HandlerActorEvents::GraphQlHandler(events),
-                    HandlerActorDispose::GraphQlHandler(dispose),
-                )
+                HandlerActorState::GraphQlHandler(<GraphQlHandler<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TConnect,
+                    TReconnect,
+                > as Actor<TAction, TTask>>::init(
+                    actor
+                ))
             }
             Self::LoaderHandler(actor) => {
-                let (state, events, dispose) = <LoaderHandler<T, TFactory, TAllocator> as Actor<
-                    TAction,
-                    TTask,
-                >>::init(actor, inbox, context);
-                (
-                    HandlerActorState::LoaderHandler(state),
-                    HandlerActorEvents::LoaderHandler(events),
-                    HandlerActorDispose::LoaderHandler(dispose),
+                HandlerActorState::LoaderHandler(
+                    <LoaderHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(actor),
                 )
             }
             Self::ScanHandler(actor) => {
-                let (state, events, dispose) = <ScanHandler<T, TFactory, TAllocator> as Actor<
+                HandlerActorState::ScanHandler(<ScanHandler<T, TFactory, TAllocator> as Actor<
                     TAction,
                     TTask,
-                >>::init(actor, inbox, context);
-                (
-                    HandlerActorState::ScanHandler(state),
-                    HandlerActorEvents::ScanHandler(events),
-                    HandlerActorDispose::ScanHandler(dispose),
-                )
+                >>::init(actor))
             }
             Self::TimeoutHandler(actor) => {
-                let (state, events, dispose) = <TimeoutHandler<T, TFactory, TAllocator> as Actor<
+                HandlerActorState::TimeoutHandler(
+                    <TimeoutHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(actor),
+                )
+            }
+            Self::TimestampHandler(actor) => HandlerActorState::TimestampHandler(
+                <TimestampHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(actor),
+            ),
+            Self::VariableHandler(actor) => {
+                HandlerActorState::VariableHandler(
+                    <VariableHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
+                        actor,
+                    ),
+                )
+            }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::FetchHandler(actor) => {
+                <FetchHandler<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::events(
+                    actor, inbox,
+                )
+                .map(|(events, dispose)| {
+                    (
+                        HandlerActorEvents::FetchHandler(events),
+                        dispose.map(HandlerActorDispose::FetchHandler),
+                    )
+                })
+            }
+            Self::GraphQlHandler(actor) => {
+                <GraphQlHandler<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
                     TAction,
                     TTask,
-                >>::init(actor, inbox, context);
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        HandlerActorEvents::GraphQlHandler(events),
+                        dispose.map(HandlerActorDispose::GraphQlHandler),
+                    )
+                })
+            }
+            Self::LoaderHandler(actor) => <LoaderHandler<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
                 (
-                    HandlerActorState::TimeoutHandler(state),
+                    HandlerActorEvents::LoaderHandler(events),
+                    dispose.map(HandlerActorDispose::LoaderHandler),
+                )
+            }),
+            Self::ScanHandler(actor) => <ScanHandler<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (
+                    HandlerActorEvents::ScanHandler(events),
+                    dispose.map(HandlerActorDispose::ScanHandler),
+                )
+            }),
+            Self::TimeoutHandler(actor) => <TimeoutHandler<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (
                     HandlerActorEvents::TimeoutHandler(events),
-                    HandlerActorDispose::TimeoutHandler(dispose),
+                    dispose.map(HandlerActorDispose::TimeoutHandler),
                 )
-            }
-            Self::TimestampHandler(actor) => {
-                let (state, events, dispose) =
-                    <TimestampHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
+            }),
+            Self::TimestampHandler(actor) => <TimestampHandler<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
                 (
-                    HandlerActorState::TimestampHandler(state),
                     HandlerActorEvents::TimestampHandler(events),
-                    HandlerActorDispose::TimestampHandler(dispose),
+                    dispose.map(HandlerActorDispose::TimestampHandler),
                 )
-            }
-            Self::VariableHandler(actor) => {
-                let (state, events, dispose) =
-                    <VariableHandler<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
+            }),
+            Self::VariableHandler(actor) => <VariableHandler<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
                 (
-                    HandlerActorState::VariableHandler(state),
                     HandlerActorEvents::VariableHandler(events),
-                    HandlerActorDispose::VariableHandler(dispose),
+                    dispose.map(HandlerActorDispose::VariableHandler),
                 )
-            }
+            }),
         }
     }
 }

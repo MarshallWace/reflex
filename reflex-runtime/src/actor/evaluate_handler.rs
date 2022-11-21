@@ -23,7 +23,7 @@ use reflex::{
     hash::HashId,
 };
 use reflex_dispatcher::{
-    Action, ActorInitContext, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
+    Action, ActorEvents, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_macros::{dispatcher, Named};
@@ -547,12 +547,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = TInbox;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (Default::default(), inbox, Default::default())
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Sync(inbox)
         }
 
         fn accept(&self, _action: &EffectSubscribeAction<T>) -> bool {

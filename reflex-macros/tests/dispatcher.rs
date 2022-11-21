@@ -64,12 +64,14 @@ fn dispatcher() {
             type Events<TInbox: TaskInbox<TAction>> = TInbox;
             type Dispose = NoopDisposeCallback;
 
-            fn init<TInbox: TaskInbox<TAction>>(
+            fn init(&self) -> Self::State {
+                Default::default()
+            }
+            fn events<TInbox: TaskInbox<TAction>>(
                 &self,
                 inbox: TInbox,
-                context: &impl ActorInitContext,
-            ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-                (Default::default(), inbox, Default::default())
+            ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+                ActorEvents::Sync(inbox)
             }
 
             fn accept(&self, _message: &BarMessage) -> bool {

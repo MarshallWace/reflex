@@ -9,7 +9,7 @@ use reflex::core::{
     Applicable, Expression, ExpressionFactory, HeapAllocator, Reducible, Rewritable,
 };
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, Handler, HandlerContext, MessageData, Named, SchedulerMode,
+    Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
 use reflex_interpreter::compiler::Compile;
@@ -122,23 +122,30 @@ where
     type Events<TInbox: TaskInbox<TAction>> =
         RuntimeTaskEvents<T, TFactory, TAllocator, TInbox, TAction, TTask>;
     type Dispose = RuntimeTaskDispose<T, TFactory, TAllocator, TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    fn init(&self) -> Self::State {
         match self {
             Self::BytecodeWorker(actor) => {
-                let (state, events, dispose) = <BytecodeWorker<T, TFactory, TAllocator> as Actor<
-                    TAction,
-                    TTask,
-                >>::init(actor, inbox, context);
-                (
-                    RuntimeTaskActorState::BytecodeWorker(state),
-                    RuntimeTaskEvents::BytecodeWorker(events),
-                    RuntimeTaskDispose::BytecodeWorker(dispose),
+                RuntimeTaskActorState::BytecodeWorker(
+                    <BytecodeWorker<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(actor),
                 )
             }
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
+        &self,
+        inbox: TInbox,
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+        match self {
+            Self::BytecodeWorker(actor) => <BytecodeWorker<T, TFactory, TAllocator> as Actor<
+                TAction,
+                TTask,
+            >>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (
+                    RuntimeTaskEvents::BytecodeWorker(events),
+                    dispose.map(RuntimeTaskDispose::BytecodeWorker),
+                )
+            }),
         }
     }
 }

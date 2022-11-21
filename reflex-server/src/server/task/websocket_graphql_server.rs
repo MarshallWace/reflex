@@ -6,8 +6,8 @@ use std::{iter::once, pin::Pin, time::Duration};
 use futures::{Future, FutureExt, Stream};
 use pin_project::pin_project;
 use reflex_dispatcher::{
-    Action, Actor, ActorInitContext, BoxedActionStream, Handler, HandlerContext, MessageData,
-    Named, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    Action, Actor, ActorEvents, BoxedActionStream, Handler, HandlerContext, MessageData, Named,
+    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
     TaskFactory, TaskInbox, Worker,
 };
 use reflex_macros::{dispatcher, Named};
@@ -85,22 +85,30 @@ where
     type Events<TInbox: TaskInbox<TAction>> =
         WebSocketGraphQlServerTaskEvents<TInbox, TAction, TTask>;
     type Dispose = WebSocketGraphQlServerTaskDispose<TAction, TTask>;
-    fn init<TInbox: TaskInbox<TAction>>(
+    fn init(&self) -> Self::State {
+        match self {
+            Self::ThrottleTimeout(actor) => WebSocketGraphQlServerTaskActorState::ThrottleTimeout(
+                <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::init(
+                    actor,
+                ),
+            ),
+        }
+    }
+    fn events<TInbox: TaskInbox<TAction>>(
         &self,
         inbox: TInbox,
-        context: &impl ActorInitContext,
-    ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
+    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
         match self {
             Self::ThrottleTimeout(actor) => {
-                let (state, events, dispose) =
-                    <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::init(
-                        actor, inbox, context,
-                    );
-                (
-                    WebSocketGraphQlServerTaskActorState::ThrottleTimeout(state),
-                    WebSocketGraphQlServerTaskEvents::ThrottleTimeout(events),
-                    WebSocketGraphQlServerTaskDispose::ThrottleTimeout(dispose),
+                <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::events(
+                    actor, inbox,
                 )
+                .map(|(events, dispose)| {
+                    (
+                        WebSocketGraphQlServerTaskEvents::ThrottleTimeout(events),
+                        dispose.map(WebSocketGraphQlServerTaskDispose::ThrottleTimeout),
+                    )
+                })
             }
         }
     }
@@ -300,16 +308,14 @@ dispatcher!({
         type Events<TInbox: TaskInbox<TAction>> = BoxedActionStream<TInbox::Message>;
         type Dispose = NoopDisposeCallback;
 
-        fn init<TInbox: TaskInbox<TAction>>(
+        fn init(&self) -> Self::State {
+            Default::default()
+        }
+        fn events<TInbox: TaskInbox<TAction>>(
             &self,
             inbox: TInbox,
-            context: &impl ActorInitContext,
-        ) -> (Self::State, Self::Events<TInbox>, Self::Dispose) {
-            (
-                Default::default(),
-                Box::pin(self.events(inbox, context)),
-                Default::default(),
-            )
+        ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+            ActorEvents::Async(Box::pin(self.events(inbox)), None)
         }
 
         fn accept(&self, _action: &WebSocketServerThrottleTimeoutAction) -> bool {
@@ -335,11 +341,7 @@ dispatcher!({
 });
 
 impl WebSocketGraphQlServerThrottleTimeoutTaskActor {
-    fn events<TInbox, TAction>(
-        &self,
-        _inbox: TInbox,
-        _context: &impl ActorInitContext,
-    ) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, _inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action + From<WebSocketServerThrottleTimeoutAction>,
