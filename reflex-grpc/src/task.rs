@@ -778,6 +778,12 @@ fn execute_streaming_grpc_request(
 ) -> impl Future<Output = Result<tonic::Response<tonic::codec::Streaming<Bytes>>, Status>> {
     let mut client = client;
     async move {
+        // See https://github.com/tower-rs/tower/issues/547
+        // Cloned tonic clients must await the ready status before invoking requests to avoid panicking
+        let _ = client
+            .ready()
+            .await
+            .map_err(|err| Status::unavailable(err.to_string()))?;
         client
             .server_streaming(request.into_request(), path, BytesCodec)
             .await
@@ -790,7 +796,15 @@ fn execute_unary_grpc_request(
     request: impl tonic::IntoRequest<Bytes>,
 ) -> impl Future<Output = Result<tonic::Response<Bytes>, Status>> {
     let mut client = client;
-    async move { client.unary(request.into_request(), path, BytesCodec).await }
+    async move {
+        // See https://github.com/tower-rs/tower/issues/547
+        // Cloned tonic clients must await the ready status before invoking requests to avoid panicking
+        let _ = client
+            .ready()
+            .await
+            .map_err(|err| Status::unavailable(err.to_string()))?;
+        client.unary(request.into_request(), path, BytesCodec).await
+    }
 }
 
 fn parse_grpc_operation_error<TAction>(
