@@ -240,7 +240,7 @@ dispatcher!({
             _action: &BytecodeInterpreterEvaluateAction<T>,
             _state: &Self::State,
         ) -> Option<SchedulerMode> {
-            Some(SchedulerMode::Async)
+            Some(SchedulerMode::Blocking)
         }
         fn handle(
             &self,
@@ -260,7 +260,7 @@ dispatcher!({
             _action: &BytecodeInterpreterGcAction,
             _state: &Self::State,
         ) -> Option<SchedulerMode> {
-            Some(SchedulerMode::Async)
+            Some(SchedulerMode::Blocking)
         }
         fn handle(
             &self,

@@ -371,7 +371,7 @@ dispatcher!({
             _action: &GraphQlServerEmitAction<T>,
             _state: &Self::State,
         ) -> Option<SchedulerMode> {
-            Some(SchedulerMode::Async)
+            Some(SchedulerMode::Blocking)
         }
         fn handle(
             &self,
