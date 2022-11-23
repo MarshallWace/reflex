@@ -1306,6 +1306,7 @@ fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
         } => {
             // If after all commands have been processed we're left with a single forwarding target for the message,
             // enqueue the forwarded command at the FRONT of the queue, for immediate redispatch
+            let redispatched_from = Some(redispatched_from.unwrap_or(offset));
             results.push_front({
                 let offset = MessageOffset::from(increment_atomic_counter(next_offset));
                 TokioCommand::Send {
