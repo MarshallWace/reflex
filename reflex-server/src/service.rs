@@ -487,8 +487,8 @@ where
     })
 }
 
-pub fn query_inspector_service<TAction, TTask>(
-    scheduler: Arc<TokioScheduler<TAction, TTask>>,
+pub fn query_inspector_service<TInstrumentation, TAction, TTask>(
+    server: Arc<GraphQlWebServer<TInstrumentation, TAction, TTask>>,
     main_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
@@ -497,6 +497,7 @@ pub fn query_inspector_service<TAction, TTask>(
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
 >
 where
+    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action
         + Matcher<QueryInspectorServerHttpResponseAction>
         + From<QueryInspectorServerHttpRequestAction>
@@ -508,12 +509,12 @@ where
 {
     service_fn({
         move |req: Request<Body>| {
-            let scheduler = scheduler.clone();
+            let server = server.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
                     &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => handle_query_inspector_http_request(&scheduler, req, main_pid).await,
+                    _ => handle_query_inspector_http_request(&server.runtime, req, main_pid).await,
                 };
                 response.headers_mut().extend(cors_headers);
                 Ok(response)
@@ -522,8 +523,8 @@ where
     })
 }
 
-pub fn session_playback_service<T, TAction, TTask>(
-    scheduler: Arc<TokioScheduler<TAction, TTask>>,
+pub fn session_playback_service<T, TInstrumentation, TAction, TTask>(
+    server: Arc<GraphQlWebServer<TInstrumentation, TAction, TTask>>,
     main_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
@@ -533,17 +534,18 @@ pub fn session_playback_service<T, TAction, TTask>(
 >
 where
     T: Expression,
+    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action + SessionPlaybackServerAction<T> + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     service_fn({
         move |req: Request<Body>| {
-            let scheduler = scheduler.clone();
+            let server = server.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
                     &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => handle_session_playback_http_request(&scheduler, req, main_pid).await,
+                    _ => handle_session_playback_http_request(&server.runtime, req, main_pid).await,
                 };
                 response.headers_mut().extend(cors_headers);
                 Ok(response)
