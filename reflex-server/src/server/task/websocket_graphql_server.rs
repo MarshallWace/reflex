@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{iter::once, pin::Pin, time::Duration};
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::{iter::once, time::Duration};
 
-use futures::{Future, FutureExt, Stream};
-use pin_project::pin_project;
+use futures::{FutureExt, Stream};
 use reflex_dispatcher::{
-    Action, Actor, ActorEvents, BoxedActionStream, Handler, HandlerContext, MessageData, Named,
-    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
-    TaskFactory, TaskInbox, Worker,
+    Action, ActorEvents, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
+    ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::{dispatcher, Named};
+use reflex_macros::{dispatcher, task_factory_enum, Named};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -34,205 +33,18 @@ impl<_Self> WebSocketGraphQlServerTask for _Self where
 {
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub enum WebSocketGraphQlServerTaskFactory {
-    ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskFactory),
-}
-impl Named for WebSocketGraphQlServerTaskFactory {
-    fn name(&self) -> &'static str {
-        match self {
-            Self::ThrottleTimeout(inner) => inner.name(),
-        }
+task_factory_enum!({
+    #[derive(Clone, Serialize, Deserialize)]
+    pub enum WebSocketGraphQlServerTaskFactory {
+        ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskFactory),
     }
-}
-impl<TAction, TTask> TaskFactory<TAction, TTask> for WebSocketGraphQlServerTaskFactory
-where
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Actor = WebSocketGraphQlServerTaskActor;
-    fn create(self) -> Self::Actor {
-        match self {
-            Self::ThrottleTimeout(actor) => {
-                Self::Actor::ThrottleTimeout(
-                    <WebSocketGraphQlServerThrottleTimeoutTaskFactory as TaskFactory<
-                        TAction,
-                        TTask,
-                    >>::create(actor),
-                )
-            }
-        }
+    impl<TAction, TTask> TaskFactory<TAction, TTask> for WebSocketGraphQlServerTaskFactory
+    where
+        TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
+        TTask: TaskFactory<TAction, TTask>,
+    {
     }
-}
-
-#[derive(Clone)]
-pub enum WebSocketGraphQlServerTaskActor {
-    ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskActor),
-}
-impl Named for WebSocketGraphQlServerTaskActor {
-    fn name(&self) -> &'static str {
-        match self {
-            Self::ThrottleTimeout(inner) => inner.name(),
-        }
-    }
-}
-
-impl<TAction, TTask> Actor<TAction, TTask> for WebSocketGraphQlServerTaskActor
-where
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Events<TInbox: TaskInbox<TAction>> =
-        WebSocketGraphQlServerTaskEvents<TInbox, TAction, TTask>;
-    type Dispose = WebSocketGraphQlServerTaskDispose<TAction, TTask>;
-    fn init(&self) -> Self::State {
-        match self {
-            Self::ThrottleTimeout(actor) => WebSocketGraphQlServerTaskActorState::ThrottleTimeout(
-                <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::init(
-                    actor,
-                ),
-            ),
-        }
-    }
-    fn events<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
-        match self {
-            Self::ThrottleTimeout(actor) => {
-                <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::events(
-                    actor, inbox,
-                )
-                .map(|(events, dispose)| {
-                    (
-                        WebSocketGraphQlServerTaskEvents::ThrottleTimeout(events),
-                        dispose.map(WebSocketGraphQlServerTaskDispose::ThrottleTimeout),
-                    )
-                })
-            }
-        }
-    }
-}
-
-impl<TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for WebSocketGraphQlServerTaskActor
-where
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    fn accept(&self, message: &TAction) -> bool {
-        match self {
-            Self::ThrottleTimeout(actor) => {
-                <WebSocketGraphQlServerThrottleTimeoutTaskActor as Worker<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::accept(actor, message)
-            }
-        }
-    }
-    fn schedule(&self, message: &TAction, state: &Self::State) -> Option<SchedulerMode> {
-        match (self, state) {
-            (
-                Self::ThrottleTimeout(actor),
-                WebSocketGraphQlServerTaskActorState::ThrottleTimeout(state),
-            ) => <WebSocketGraphQlServerThrottleTimeoutTaskActor as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::schedule(actor, message, state),
-        }
-    }
-}
-
-impl<TAction, TTask> Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for WebSocketGraphQlServerTaskActor
-where
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = WebSocketGraphQlServerTaskActorState;
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        match (self, state) {
-            (
-                Self::ThrottleTimeout(actor),
-                WebSocketGraphQlServerTaskActorState::ThrottleTimeout(state),
-            ) => <WebSocketGraphQlServerThrottleTimeoutTaskActor as Handler<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::handle(actor, state, action, metadata, context),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum WebSocketGraphQlServerTaskActorState {
-    ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskActorState),
-}
-
-#[pin_project(project = WebSocketGraphQlServerTaskEventsVariant)]
-pub enum WebSocketGraphQlServerTaskEvents<TInbox, TAction, TTask>
-where
-    TInbox: TaskInbox<TAction>,
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    ThrottleTimeout(
-        #[pin]
-        <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::Events<TInbox>,
-    ),
-}
-impl<TInbox, TAction, TTask> Stream for WebSocketGraphQlServerTaskEvents<TInbox, TAction, TTask>
-where
-    TInbox: TaskInbox<TAction>,
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Item = TInbox::Message;
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.project() {
-            WebSocketGraphQlServerTaskEventsVariant::ThrottleTimeout(inner) => inner.poll_next(cx),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::ThrottleTimeout(inner) => inner.size_hint(),
-        }
-    }
-}
-
-#[pin_project(project = WebSocketGraphQlServerTaskDisposeVariant)]
-pub enum WebSocketGraphQlServerTaskDispose<TAction, TTask>
-where
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    ThrottleTimeout(
-        #[pin] <WebSocketGraphQlServerThrottleTimeoutTaskActor as Actor<TAction, TTask>>::Dispose,
-    ),
-}
-impl<TAction, TTask> Future for WebSocketGraphQlServerTaskDispose<TAction, TTask>
-where
-    TAction: Action + WebSocketGraphQlServerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Output = ();
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        match self.project() {
-            WebSocketGraphQlServerTaskDisposeVariant::ThrottleTimeout(inner) => inner.poll(cx),
-        }
-    }
-}
+});
 
 pub trait WebSocketGraphQlServerThrottleTimeoutTaskAction:
     Action
@@ -368,11 +180,5 @@ impl WebSocketGraphQlServerThrottleTimeoutTaskActor {
         Some(SchedulerTransition::new(once(SchedulerCommand::Forward(
             self.caller_pid,
         ))))
-    }
-}
-
-impl From<WebSocketGraphQlServerThrottleTimeoutTaskFactory> for WebSocketGraphQlServerTaskFactory {
-    fn from(value: WebSocketGraphQlServerThrottleTimeoutTaskFactory) -> Self {
-        Self::ThrottleTimeout(value)
     }
 }

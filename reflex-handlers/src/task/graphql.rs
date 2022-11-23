@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::VecDeque,
     iter::once,
     ops::Deref,
-    pin::Pin,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -18,19 +18,18 @@ use futures::{
 };
 use http::{header, Uri};
 use hyper::Body;
-use pin_project::pin_project;
 use reflex::core::Uuid;
 use reflex_dispatcher::{
-    Action, Actor, ActorEvents, BoxedActionStream, Handler, HandlerContext, Matcher, MessageData,
-    Named, NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
-    TaskFactory, TaskInbox, Worker,
+    Action, ActorEvents, BoxedActionStream, HandlerContext, Matcher, MessageData,
+    NoopDisposeCallback, ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition,
+    TaskFactory, TaskInbox,
 };
 use reflex_graphql::subscriptions::{
     deserialize_graphql_server_message, GraphQlSubscriptionClientMessage,
     GraphQlSubscriptionServerMessage,
 };
 use reflex_json::JsonValue;
-use reflex_macros::{dispatcher, Named};
+use reflex_macros::{dispatcher, task_factory_enum, Named};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
@@ -97,286 +96,24 @@ where
 }
 
 // TODO: Implement Serialize/Deserialize traits for GraphQlHandlerTaskFactory
-#[derive(Clone)]
-pub enum GraphQlHandlerTaskFactory<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    HttpFetch(GraphQlHandlerHttpFetchTaskFactory<TConnect>),
-    WebSocketConnection(GraphQlHandlerWebSocketConnectionTaskFactory),
-}
-impl<TConnect> Named for GraphQlHandlerTaskFactory<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    fn name(&self) -> &'static str {
-        match self {
-            Self::HttpFetch(inner) => inner.name(),
-            Self::WebSocketConnection(inner) => inner.name(),
-        }
+task_factory_enum!({
+    #[derive(Clone)]
+    pub enum GraphQlHandlerTaskFactory<TConnect>
+    where
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+        HttpFetch(GraphQlHandlerHttpFetchTaskFactory<TConnect>),
+        WebSocketConnection(GraphQlHandlerWebSocketConnectionTaskFactory),
     }
-}
 
-impl<TConnect, TAction, TTask> TaskFactory<TAction, TTask> for GraphQlHandlerTaskFactory<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Actor = GraphQlHandlerTaskActor<TConnect>;
-    fn create(self) -> Self::Actor {
-        match self {
-            Self::HttpFetch(inner) => GraphQlHandlerTaskActor::HttpFetch(
-                <GraphQlHandlerHttpFetchTaskFactory<TConnect> as TaskFactory<TAction, TTask>>::create(inner)
-            ),
-            Self::WebSocketConnection(inner) => {
-                GraphQlHandlerTaskActor::WebSocketConnection(<GraphQlHandlerWebSocketConnectionTaskFactory as TaskFactory<TAction, TTask>>::create(inner))
-            }
-        }
+    impl<TConnect, TAction, TTask> TaskFactory<TAction, TTask> for GraphQlHandlerTaskFactory<TConnect>
+    where
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+        TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
+        TTask: TaskFactory<TAction, TTask>,
+    {
     }
-}
-
-#[derive(Clone)]
-pub enum GraphQlHandlerTaskActor<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    HttpFetch(GraphQlHandlerHttpFetchTaskActor<TConnect>),
-    WebSocketConnection(GraphQlHandlerWebSocketConnectionTaskActor),
-}
-impl<TConnect> Named for GraphQlHandlerTaskActor<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    fn name(&self) -> &'static str {
-        match self {
-            Self::HttpFetch(inner) => inner.name(),
-            Self::WebSocketConnection(inner) => inner.name(),
-        }
-    }
-}
-impl<TConnect, TAction, TTask> Actor<TAction, TTask> for GraphQlHandlerTaskActor<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Events<TInbox: TaskInbox<TAction>> =
-        GraphQlHandlerTaskEvents<TConnect, TInbox, TAction, TTask>;
-    type Dispose = GraphQlHandlerTaskDispose<TConnect, TAction, TTask>;
-
-    fn init(&self) -> Self::State {
-        match self {
-            Self::HttpFetch(actor) => GraphQlHandlerTaskActorState::HttpFetch(
-                <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<TAction, TTask>>::init(actor),
-            ),
-            Self::WebSocketConnection(actor) => GraphQlHandlerTaskActorState::WebSocketConnection(
-                <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::init(actor),
-            ),
-        }
-    }
-    fn events<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
-        match self {
-            Self::HttpFetch(actor) => <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<
-                TAction,
-                TTask,
-            >>::events(actor, inbox)
-            .map(|(events, dispose)| {
-                (
-                    GraphQlHandlerTaskEvents::HttpFetch(events),
-                    dispose.map(GraphQlHandlerTaskDispose::HttpFetch),
-                )
-            }),
-            Self::WebSocketConnection(actor) => {
-                <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::events(
-                    actor, inbox,
-                )
-                .map(|(events, dispose)| {
-                    (
-                        GraphQlHandlerTaskEvents::WebSocketConnection(events),
-                        dispose.map(GraphQlHandlerTaskDispose::WebSocketConnection),
-                    )
-                })
-            }
-        }
-    }
-}
-impl<TConnect, TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for GraphQlHandlerTaskActor<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    fn accept(&self, message: &TAction) -> bool {
-        match self {
-            Self::HttpFetch(inner) => <GraphQlHandlerHttpFetchTaskActor<TConnect> as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::accept(inner, message),
-            Self::WebSocketConnection(inner) => {
-                <GraphQlHandlerWebSocketConnectionTaskActor as Worker<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::accept(inner, message)
-            }
-        }
-    }
-    fn schedule(&self, message: &TAction, state: &Self::State) -> Option<SchedulerMode> {
-        match (self, state) {
-            (Self::HttpFetch(actor), GraphQlHandlerTaskActorState::HttpFetch(state)) => {
-                <GraphQlHandlerHttpFetchTaskActor<TConnect> as Worker<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::schedule(actor, message, state)
-            }
-            (
-                Self::WebSocketConnection(actor),
-                GraphQlHandlerTaskActorState::WebSocketConnection(state),
-            ) => <GraphQlHandlerWebSocketConnectionTaskActor as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::schedule(actor, message, state),
-            _ => unreachable!(),
-        }
-    }
-}
-impl<TConnect, TAction, TTask> Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for GraphQlHandlerTaskActor<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = GraphQlHandlerTaskActorState;
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        match (self, state) {
-            (Self::HttpFetch(actor), GraphQlHandlerTaskActorState::HttpFetch(state)) => {
-                <GraphQlHandlerHttpFetchTaskActor<TConnect> as Handler<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::handle(actor, state, action, metadata, context)
-            }
-            (
-                Self::WebSocketConnection(actor),
-                GraphQlHandlerTaskActorState::WebSocketConnection(state),
-            ) => <GraphQlHandlerWebSocketConnectionTaskActor as Handler<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::handle(actor, state, action, metadata, context),
-            _ => unreachable!(),
-        }
-    }
-}
-
-pub enum GraphQlHandlerTaskActorState {
-    HttpFetch(GraphQlHandlerHttpFetchTaskActorState),
-    WebSocketConnection(GraphQlHandlerWebSocketConnectionTaskActorState),
-}
-
-#[pin_project(project = GraphQlHandlerTaskEventsVariant)]
-pub enum GraphQlHandlerTaskEvents<TConnect, TInbox, TAction, TTask>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TInbox: TaskInbox<TAction>,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    HttpFetch(
-        #[pin]
-        <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<TAction, TTask>>::Events<TInbox>,
-    ),
-    WebSocketConnection(
-        #[pin]
-        <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::Events<TInbox>,
-    ),
-}
-impl<TConnect, TInbox, TAction, TTask> Stream
-    for GraphQlHandlerTaskEvents<TConnect, TInbox, TAction, TTask>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TInbox: TaskInbox<TAction>,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Item = TInbox::Message;
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.project() {
-            GraphQlHandlerTaskEventsVariant::HttpFetch(inner) => inner.poll_next(cx),
-            GraphQlHandlerTaskEventsVariant::WebSocketConnection(inner) => inner.poll_next(cx),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::HttpFetch(inner) => inner.size_hint(),
-            Self::WebSocketConnection(inner) => inner.size_hint(),
-        }
-    }
-}
-
-#[pin_project(project = GraphQlHandlerTaskDisposeVariant)]
-pub enum GraphQlHandlerTaskDispose<TConnect, TAction, TTask>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    HttpFetch(
-        #[pin] <GraphQlHandlerHttpFetchTaskActor<TConnect> as Actor<TAction, TTask>>::Dispose,
-    ),
-    WebSocketConnection(
-        #[pin] <GraphQlHandlerWebSocketConnectionTaskActor as Actor<TAction, TTask>>::Dispose,
-    ),
-}
-impl<TConnect, TAction, TTask> Future for GraphQlHandlerTaskDispose<TConnect, TAction, TTask>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + GraphQlHandlerTaskAction + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Output = ();
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        match self.project() {
-            GraphQlHandlerTaskDisposeVariant::HttpFetch(inner) => inner.poll(cx),
-            GraphQlHandlerTaskDisposeVariant::WebSocketConnection(inner) => inner.poll(cx),
-        }
-    }
-}
-
-impl<TConnect> From<GraphQlHandlerHttpFetchTaskFactory<TConnect>>
-    for GraphQlHandlerTaskFactory<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    fn from(value: GraphQlHandlerHttpFetchTaskFactory<TConnect>) -> Self {
-        Self::HttpFetch(value)
-    }
-}
-
-impl<TConnect> From<GraphQlHandlerWebSocketConnectionTaskFactory>
-    for GraphQlHandlerTaskFactory<TConnect>
-where
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    fn from(value: GraphQlHandlerWebSocketConnectionTaskFactory) -> Self {
-        Self::WebSocketConnection(value)
-    }
-}
+});
 
 // TODO: Implement Serialize/Deserialize traits for GraphQlHandlerHttpFetchTaskFactory
 #[derive(Named, Clone)]

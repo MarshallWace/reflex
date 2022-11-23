@@ -3,14 +3,20 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use proc_macro::TokenStream;
 
-use crate::utils::{create_generic_arguments_for_params, parse_item_enum, parse_item_impl};
+use crate::utils::{
+    create_generic_argument_for_ident, create_generic_arguments_for_params, parse_item_enum,
+    parse_item_impl,
+};
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::Comma;
-use syn::{Attribute, Block, Field, GenericParam, ItemImpl, PathArguments, Type, WhereClause};
+use syn::{
+    parse_quote, Attribute, Block, Field, GenericParam, ItemImpl, ItemStruct, PathArguments, Type,
+    WhereClause,
+};
 use syn::{Fields, GenericArgument, Generics, Ident, ItemEnum, Variant, Visibility};
 
 const TASK_FACTORY_TRAIT_NAME: &'static str = "TaskFactory";
@@ -42,6 +48,7 @@ pub fn execute(input: TokenStream) -> TokenStream {
         .unwrap_or_else(|err| err.to_compile_error().into())
 }
 
+#[derive(Clone)]
 struct GenericsComponents {
     params: Punctuated<GenericParam, Comma>,
     args: Punctuated<GenericArgument, Comma>,
@@ -209,7 +216,6 @@ fn produce_task_factory(input: TaskFactoryConfiguration) -> syn::Result<TokenStr
         #actor_named_impl
         #task_factory_impl
     };
-    println!("{}", ret.to_string());
     Ok(ret.into())
 }
 
@@ -226,22 +232,22 @@ fn named_impl_for_task_factory(input: &TaskFactoryConfiguration) -> TokenStream2
         where_clause,
         args,
     } = factory_generics;
-    let mut named_delegates = TokenStream2::new();
-    factory_variants
+    let named_variants: Vec<TokenStream2> = factory_variants
         .parsed_variants
         .iter()
-        .for_each(|(span, ident, _)| {
-            named_delegates.extend(quote_spanned! {
+        .map(|(span, ident, _)| {
+            quote_spanned! {
                 *span =>
                 Self::#ident(inner) => inner.name()
-            });
-        });
+            }
+        })
+        .collect();
 
     quote_spanned! {span =>
         impl<#params> ::reflex_dispatcher::Named for #factory_ident<#args> #where_clause {
                 fn name(&self) -> &'static str {
                     match self {
-                        #named_delegates
+                        #(#named_variants),*
                     }
                 }
             }
@@ -321,7 +327,6 @@ fn actor_for_factory(input: &TaskFactoryConfiguration) -> TokenStream2 {
     let ttask = &input.ttask;
     let actor_name = &input.actor_ident;
     let visibility = &input.factory_vis;
-    let factory_attrs = &input.factory_attrs;
     let actor_variants: Vec<TokenStream2> = input
         .factory_variants
         .parsed_variants
@@ -334,7 +339,7 @@ fn actor_for_factory(input: &TaskFactoryConfiguration) -> TokenStream2 {
         .collect();
     quote_spanned! {
         span =>
-        #(#factory_attrs)*
+        #[derive(Clone)]
         #visibility enum #actor_name<#params> #where_clause {
             #(#actor_variants),*
         }
@@ -386,10 +391,12 @@ fn impl_actor_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
                 }
         })
         .collect();
-
+    let tinbox = format_ident!("__TInbox");
+    let mut args_with_tinbox = args.clone();
+    args_with_tinbox.push(create_generic_argument_for_ident(&tinbox));
     quote_spanned! { span =>
         impl<#params> ::reflex_dispatcher::Actor<#taction,  #ttask> for #actor_ident<#args> #where_clause {
-            type Events<TInbox: ::reflex_dispatcher::TaskInbox<#taction>> = #events_ident<#args, TInbox>;
+            type Events<#tinbox: ::reflex_dispatcher::TaskInbox<#taction>> = #events_ident<#args_with_tinbox>;
             type Dispose = #dispose_ident<#args>;
 
             fn init(
@@ -400,10 +407,10 @@ fn impl_actor_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
                 }
             }
 
-            fn events<TInbox: ::reflex_dispatcher::TaskInbox<#taction>>(
+            fn events<#tinbox: ::reflex_dispatcher::TaskInbox<#taction>>(
                 &self,
-                inbox: TInbox,
-            ) -> ::reflex_dispatcher::ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
+                inbox: #tinbox,
+            ) -> ::reflex_dispatcher::ActorEvents<#tinbox, Self::Events<#tinbox>, Self::Dispose> {
                match self {
                     #(#events_variants),*
                 }
@@ -460,6 +467,8 @@ fn impl_worker_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
             fn schedule(&self, message: &#taction, state: &Self::State) -> Option<::reflex_dispatcher::SchedulerMode> {
                 match (self, state) {
                     #(#schedule_variants),*
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!()
                 }
             }
         }
@@ -503,6 +512,8 @@ fn impl_handler_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
             ) -> Option<::reflex_dispatcher::SchedulerTransition<#taction, #ttask>> {
                 match (self, state) {
                     #(#handle_variants),*
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!(),
                 }
             }
         }
@@ -546,12 +557,13 @@ fn events_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
     let events_ident = &input.events_ident;
     let project_ident = format_ident!("{}Variant", events_ident);
     let GenericsComponents {
-        params,
+        mut params,
         where_clause,
         ..
-    } = &input.ttask_taction_generics;
+    } = input.ttask_taction_generics.clone();
     let taction = &input.taction;
     let ttask = &input.ttask;
+    let tinbox = format_ident!("__TInbox");
     let events_variants: Vec<TokenStream2> = input
         .factory_variants
         .parsed_variants
@@ -559,7 +571,7 @@ fn events_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
         .map(|(span, variant_name, field)| {
             quote_spanned! {*span =>
                 #variant_name(
-                    #[pin] < < #field as ::reflex_dispatcher::TaskFactory<#taction, #ttask> >::Actor as ::reflex_dispatcher::Actor<#taction, #ttask> >::Events<TInbox>
+                    #[pin] < < #field as ::reflex_dispatcher::TaskFactory<#taction, #ttask> >::Actor as ::reflex_dispatcher::Actor<#taction, #ttask> >::Events<#tinbox>
                 )
             }
         })
@@ -584,15 +596,28 @@ fn events_for_actor(input: &TaskFactoryConfiguration) -> TokenStream2 {
             }
         })
         .collect();
+    let dummy_impl: ItemStruct = parse_quote! {
+        struct Foo<#tinbox> where #tinbox: ::reflex_dispatcher::TaskInbox<#taction>{}
+    };
+
+    let inbox_generics = dummy_impl.generics;
+    params.extend(inbox_generics.params);
+    let mut inbox_where_clause = inbox_generics
+        .where_clause
+        .expect("Hardcoded parse cannot fail. If failure, programmer error in reflex-macros");
+    if let Some(where_clause) = where_clause {
+        inbox_where_clause
+            .predicates
+            .extend(where_clause.predicates)
+    }
+
     quote_spanned! { span =>
         #[::pin_project::pin_project(project = #project_ident)]
-        #vis enum #events_ident<#params, TInbox> #where_clause
-              TInbox: ::reflex_dispatcher::TaskInbox<#taction>, {
+        #vis enum #events_ident<#params> #inbox_where_clause {
             #(#events_variants),*
         }
-        impl<#params, TInbox> ::futures::Stream for #events_ident<#params, TInbox> #where_clause
-         TInbox: ::reflex_dispatcher::TaskInbox<#taction>, {
-            type Item = TInbox::Message;
+        impl<#params> ::futures::Stream for #events_ident<#params> #inbox_where_clause {
+            type Item = #tinbox::Message;
             fn poll_next(
                 self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context<'_>,

@@ -256,6 +256,8 @@ where
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        Self,
     >;
     fn create(self) -> Self::Actor {
         match self {
@@ -287,6 +289,8 @@ pub enum ServerCliTaskActor<
     TWorkerMetricLabels,
     TOperationMetricLabels,
     TTracer,
+    TAction,
+    TTask,
 > where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -308,6 +312,8 @@ pub enum ServerCliTaskActor<
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerCliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + ServerCliTask<T, TFactory, TAllocator, TConnect>,
 {
     Server(
         ServerActor<
@@ -324,7 +330,7 @@ pub enum ServerCliTaskActor<
         >,
     ),
     BytecodeInterpreter(BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>),
-    ServerTask(ServerTaskActor<T, TFactory, TAllocator, TConnect>),
+    ServerTask(ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask>),
     Handler(HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>),
     Main(Redispatcher),
 }
@@ -342,6 +348,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     > Named
     for ServerCliTaskActor<
         T,
@@ -357,6 +365,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -379,6 +389,8 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerCliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + ServerCliTask<T, TFactory, TAllocator, TConnect>,
 {
     fn name(&self) -> &'static str {
         match self {
@@ -421,6 +433,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -513,6 +527,8 @@ where
                     TFactory,
                     TAllocator,
                     TConnect,
+                    TAction,
+                    TTask,
                 > as Actor<TAction, TTask>>::init(
                     actor
                 ))
@@ -536,64 +552,68 @@ where
         inbox: TInbox,
     ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
         match self {
-            Self::Server(actor) => {
-                <ServerActor<
-                        T,
-                        TFactory,
-                        TAllocator,
-                        TTransformHttp,
-                        TTransformWs,
-                        TGraphQlQueryLabel,
-                        THttpMetricLabels,
-                        TConnectionMetricLabels,
-                        TOperationMetricLabels,
-                        TTracer,
-                    > as Actor<TAction, TTask>>::events(actor, inbox).map(|(events, dispose)| {(
-
+            Self::Server(actor) => <ServerActor<
+                T,
+                TFactory,
+                TAllocator,
+                TTransformHttp,
+                TTransformWs,
+                TGraphQlQueryLabel,
+                THttpMetricLabels,
+                TConnectionMetricLabels,
+                TOperationMetricLabels,
+                TTracer,
+            > as Actor<TAction, TTask>>::events(actor, inbox)
+            .map(|(events, dispose)| {
+                (
                     ServerCliTaskEvents::Server(events),
                     dispose.map(ServerCliTaskDispose::Server),
-                )})
-
-            }
+                )
+            }),
             Self::BytecodeInterpreter(actor) => {
                 <BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels> as Actor<
-                        TAction,
-                        TTask,
-                    >>::events(actor, inbox).map(|(events, dispose)| {(
-
-                    ServerCliTaskEvents::BytecodeInterpreter(events),
-                    dispose.map(ServerCliTaskDispose::BytecodeInterpreter),
-                )})
-
+                    TAction,
+                    TTask,
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        ServerCliTaskEvents::BytecodeInterpreter(events),
+                        dispose.map(ServerCliTaskDispose::BytecodeInterpreter),
+                    )
+                })
             }
             Self::ServerTask(actor) => {
-                <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::events(
-                        actor, inbox,
-                    ).map(|(events, dispose)| {(
-
-                    ServerCliTaskEvents::ServerTask(events),
-                    dispose.map(ServerCliTaskDispose::ServerTask),
-                )})
-
+                <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Actor<
+                    TAction,
+                    TTask,
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        ServerCliTaskEvents::ServerTask(events),
+                        dispose.map(ServerCliTaskDispose::ServerTask),
+                    )
+                })
             }
             Self::Handler(actor) => {
                 <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
-                        TAction,
-                        TTask,
-                    >>::events(actor, inbox).map(|(events, dispose)| {(
-
-                    ServerCliTaskEvents::Handler(events),
-                    dispose.map(ServerCliTaskDispose::Handler),
-                )})
-
+                    TAction,
+                    TTask,
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| {
+                    (
+                        ServerCliTaskEvents::Handler(events),
+                        dispose.map(ServerCliTaskDispose::Handler),
+                    )
+                })
             }
-            Self::Main(actor) => {
-                <Redispatcher as Actor<TAction, TTask>>::events(actor, inbox).map(|(events, dispose)| (
-                    ServerCliTaskEvents::Main(events),
-                    dispose.map(ServerCliTaskDispose::Main),
-                ))
-
-            }
+            Self::Main(actor) => <Redispatcher as Actor<TAction, TTask>>::events(actor, inbox).map(
+                |(events, dispose)| {
+                    (
+                        ServerCliTaskEvents::Main(events),
+                        dispose.map(ServerCliTaskDispose::Main),
+                    )
+                },
+            ),
         }
     }
 }
@@ -628,6 +648,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -676,7 +698,7 @@ where
                 >>::accept(actor, message)
             }
             Self::ServerTask(actor) => {
-                <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Worker<
+                <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Worker<
                     TAction,
                     SchedulerTransition<TAction, TTask>,
                 >>::accept(actor, message)
@@ -723,7 +745,7 @@ where
                 SchedulerTransition<TAction, TTask>,
             >>::schedule(actor, message, state),
             (Self::ServerTask(actor), ServerCliTaskActorState::ServerTask(state)) => {
-                <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Worker<
+                <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Worker<
                     TAction,
                     SchedulerTransition<TAction, TTask>,
                 >>::schedule(actor, message, state)
@@ -774,6 +796,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -848,7 +872,7 @@ where
                 SchedulerTransition<TAction, TTask>,
             >>::handle(actor, state, action, metadata, context),
             (Self::ServerTask(actor), ServerCliTaskActorState::ServerTask(state)) => {
-                <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
+                <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Handler<
                     TAction,
                     SchedulerTransition<TAction, TTask>,
                 >>::handle(actor, state, action, metadata, context)
@@ -930,7 +954,7 @@ pub enum ServerCliTaskActorState<
         >>::State,
     ),
     ServerTask(
-        <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
+        <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Handler<
             TAction,
             SchedulerTransition<TAction, TTask>,
         >>::State,
@@ -1011,9 +1035,10 @@ pub enum ServerCliTaskEvents<
     ),
     ServerTask(
         #[pin]
-        <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Events<
-            TInbox,
-        >,
+        <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Actor<
+            TAction,
+            TTask,
+        >>::Events<TInbox>,
     ),
     Handler(
         #[pin]
@@ -1174,7 +1199,10 @@ pub enum ServerCliTaskDispose<
     ),
     ServerTask(
         #[pin]
-        <ServerTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Dispose,
+        <ServerTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Actor<
+            TAction,
+            TTask,
+        >>::Dispose,
     ),
     Handler(
         #[pin]
@@ -1272,6 +1300,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
     From<
         ServerActor<
@@ -1301,6 +1331,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1323,6 +1355,8 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerCliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + ServerCliTask<T, TFactory, TAllocator, TConnect>,
 {
     fn from(
         value: ServerActor<
@@ -1356,6 +1390,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     > From<BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>>
     for ServerCliTaskActor<
         T,
@@ -1371,6 +1407,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1393,6 +1431,8 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerCliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + ServerCliTask<T, TFactory, TAllocator, TConnect>,
 {
     fn from(value: BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>) -> Self {
         Self::BytecodeInterpreter(value)
@@ -1413,6 +1453,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     > From<HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>>
     for ServerCliTaskActor<
         T,
@@ -1428,6 +1470,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1450,6 +1494,8 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerCliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + ServerCliTask<T, TFactory, TAllocator, TConnect>,
 {
     fn from(value: HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>) -> Self {
         Self::Handler(value)
@@ -1470,6 +1516,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     > From<Redispatcher>
     for ServerCliTaskActor<
         T,
@@ -1485,6 +1533,8 @@ impl<
         TWorkerMetricLabels,
         TOperationMetricLabels,
         TTracer,
+        TAction,
+        TTask,
     >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -1507,6 +1557,8 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels,
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerCliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + ServerCliTask<T, TFactory, TAllocator, TConnect>,
 {
     fn from(value: Redispatcher) -> Self {
         Self::Main(value)

@@ -50,7 +50,7 @@ use reflex_handlers::{
         },
         timeout::TimeoutHandlerTaskFactory,
         timestamp::TimestampHandlerTaskFactory,
-        DefaultHandlersTaskAction, DefaultHandlersTaskActor, DefaultHandlersTaskFactory,
+        DefaultHandlersTaskAction, DefaultHandlersTaskFactory,
     },
     utils::tls::{create_https_client, hyper_tls, tokio_native_tls::native_tls::Certificate},
     DefaultHandlerMetricNames,
@@ -65,7 +65,7 @@ use reflex_json::{JsonMap, JsonValue};
 use reflex_lang::{
     allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
 };
-use reflex_macros::{blanket_trait, Named};
+use reflex_macros::{blanket_trait, task_factory_enum, Named};
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
@@ -81,7 +81,7 @@ use reflex_runtime::{
     runtime_actors,
     task::{
         bytecode_worker::BytecodeWorkerTaskFactory, RuntimeTask, RuntimeTaskAction,
-        RuntimeTaskActor, RuntimeTaskFactory,
+        RuntimeTaskFactory,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
@@ -512,7 +512,7 @@ blanket_trait!(
 );
 
 #[derive(Clone)]
-enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -526,15 +526,17 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
 {
     Runtime(RuntimeActor<T, TFactory, TAllocator>),
     Handler(HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>),
     BytecodeInterpreter(BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>),
     Main(Redispatcher),
-    Task(CliTaskActor<T, TFactory, TAllocator, TConnect>),
+    Task(CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask>),
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> Named
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask> Named
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -548,6 +550,8 @@ where
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+    TAction: Action + CliTaskAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask>,
 {
     fn name(&self) -> &'static str {
         match self {
@@ -561,7 +565,8 @@ where
 }
 
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
-    Actor<TAction, TTask> for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    Actor<TAction, TTask>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -622,10 +627,14 @@ where
                 CliActorState::Main(<Redispatcher as Actor<TAction, TTask>>::init(actor))
             }
             Self::Task(actor) => {
-                CliActorState::Task(<CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<
+                CliActorState::Task(<CliTaskActor<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TConnect,
                     TAction,
                     TTask,
-                >>::init(actor))
+                > as Actor<TAction, TTask>>::init(actor))
             }
         }
     }
@@ -664,18 +673,20 @@ where
             }
             Self::Main(actor) => <Redispatcher as Actor<TAction, TTask>>::events(actor, inbox)
                 .map(|(events, dispose)| (CliEvents::Main(events), dispose.map(CliDispose::Main))),
-            Self::Task(actor) => <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<
-                TAction,
-                TTask,
-            >>::events(actor, inbox)
-            .map(|(events, dispose)| (CliEvents::Task(events), dispose.map(CliDispose::Task))),
+            Self::Task(actor) => {
+                <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Actor<
+                    TAction,
+                    TTask,
+                >>::events(actor, inbox)
+                .map(|(events, dispose)| (CliEvents::Task(events), dispose.map(CliDispose::Task)))
+            }
         }
     }
 }
 
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
     Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -715,10 +726,12 @@ where
                 TAction,
                 SchedulerTransition<TAction, TTask>,
             >>::accept(actor, message),
-            Self::Task(actor) => <CliTaskActor<T, TFactory, TAllocator, TConnect> as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::accept(actor, message),
+            Self::Task(actor) => {
+                <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Worker<
+                    TAction,
+                    SchedulerTransition<TAction, TTask>,
+                >>::accept(actor, message)
+            }
         }
     }
     fn schedule(&self, message: &TAction, state: &Self::State) -> Option<SchedulerMode> {
@@ -747,7 +760,7 @@ where
                 )
             }
             (Self::Task(actor), CliActorState::Task(state)) => {
-                <CliTaskActor<T, TFactory, TAllocator, TConnect> as Worker<
+                <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Worker<
                     TAction,
                     SchedulerTransition<TAction, TTask>,
                 >>::schedule(actor, message, state)
@@ -759,7 +772,7 @@ where
 
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
     Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -811,7 +824,7 @@ where
                 )
             }
             (Self::Task(actor), CliActorState::Task(state)) => {
-                <CliTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
+                <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Handler<
                     TAction,
                     SchedulerTransition<TAction, TTask>,
                 >>::handle(actor, state, action, metadata, context)
@@ -859,7 +872,7 @@ where
     ),
     Main(<Redispatcher as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State),
     Task(
-        <CliTaskActor<T, TFactory, TAllocator, TConnect> as Handler<
+        <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Handler<
             TAction,
             SchedulerTransition<TAction, TTask>,
         >>::State,
@@ -906,7 +919,10 @@ where
     Main(#[pin] <Redispatcher as Actor<TAction, TTask>>::Events<TInbox>),
     Task(
         #[pin]
-        <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Events<TInbox>,
+        <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Actor<
+            TAction,
+            TTask,
+        >>::Events<TInbox>,
     ),
 }
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TInbox, TAction, TTask> Stream
@@ -999,7 +1015,11 @@ where
     ),
     Main(#[pin] <Redispatcher as Actor<TAction, TTask>>::Dispose),
     Task(
-        #[pin] <CliTaskActor<T, TFactory, TAllocator, TConnect> as Actor<TAction, TTask>>::Dispose,
+        #[pin]
+        <CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask> as Actor<
+            TAction,
+            TTask,
+        >>::Dispose,
     ),
 }
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask> Future
@@ -1042,315 +1062,31 @@ impl<_Self, T: Expression> CliTaskAction<T> for _Self where
 {
 }
 
-#[derive(Named, Clone)]
-enum CliTaskFactory<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    Runtime(RuntimeTaskFactory<T, TFactory, TAllocator>),
-    DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
-}
+task_factory_enum!({
+    #[derive(Clone)]
+    enum CliTaskFactory<T, TFactory, TAllocator, TConnect>
+    where
+        T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+        TFactory: AsyncExpressionFactory<T> + Default,
+        TAllocator: AsyncHeapAllocator<T> + Default,
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    {
+        Runtime(RuntimeTaskFactory<T, TFactory, TAllocator>),
+        DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
+    }
 
-impl<T, TFactory, TAllocator, TConnect, TAction, TTask> TaskFactory<TAction, TTask>
-    for CliTaskFactory<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Actor = CliTaskActor<T, TFactory, TAllocator, TConnect>;
-    fn create(self) -> Self::Actor {
-        match self {
-            Self::Runtime(inner) => CliTaskActor::RuntimeTask(<RuntimeTaskFactory<
-                T,
-                TFactory,
-                TAllocator,
-            > as TaskFactory<TAction, TTask>>::create(
-                inner
-            )),
-            Self::DefaultHandlers(inner) => CliTaskActor::DefaultHandlersTask(
-                <DefaultHandlersTaskFactory<TConnect> as TaskFactory<TAction, TTask>>::create(
-                    inner,
-                ),
-            ),
-        }
+    impl<T, TFactory, TAllocator, TConnect, TAction, TTask> TaskFactory<TAction, TTask>
+        for CliTaskFactory<T, TFactory, TAllocator, TConnect>
+    where
+        T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+        TFactory: AsyncExpressionFactory<T> + Default,
+        TAllocator: AsyncHeapAllocator<T> + Default,
+        TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+        TAction: Action + CliTaskAction<T> + Send + 'static,
+        TTask: TaskFactory<TAction, TTask>,
+    {
     }
-}
-
-#[derive(Clone)]
-enum CliTaskActor<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    RuntimeTask(RuntimeTaskActor<T, TFactory, TAllocator>),
-    DefaultHandlersTask(DefaultHandlersTaskActor<TConnect>),
-}
-impl<T, TFactory, TAllocator, TConnect> Named for CliTaskActor<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-{
-    fn name(&self) -> &'static str {
-        match self {
-            Self::RuntimeTask(inner) => inner.name(),
-            Self::DefaultHandlersTask(inner) => inner.name(),
-        }
-    }
-}
-
-impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Actor<TAction, TTask>
-    for CliTaskActor<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Events<TInbox: TaskInbox<TAction>> =
-        CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>;
-    type Dispose = CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>;
-    fn init(&self) -> Self::State {
-        match self {
-            Self::RuntimeTask(actor) => {
-                CliTaskActorState::RuntimeTask(
-                    <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::init(
-                        actor,
-                    ),
-                )
-            }
-            Self::DefaultHandlersTask(actor) => CliTaskActorState::DefaultHandlersTask(
-                <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::init(actor),
-            ),
-        }
-    }
-    fn events<TInbox: TaskInbox<TAction>>(
-        &self,
-        inbox: TInbox,
-    ) -> ActorEvents<TInbox, Self::Events<TInbox>, Self::Dispose> {
-        match self {
-            Self::RuntimeTask(actor) => <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<
-                TAction,
-                TTask,
-            >>::events(actor, inbox)
-            .map(|(events, dispose)| {
-                (
-                    CliTaskEvents::RuntimeTask(events),
-                    dispose.map(CliTaskDispose::RuntimeTask),
-                )
-            }),
-            Self::DefaultHandlersTask(actor) => {
-                <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::events(actor, inbox)
-                    .map(|(events, dispose)| {
-                        (
-                            CliTaskEvents::DefaultHandlersTask(events),
-                            dispose.map(CliTaskDispose::DefaultHandlersTask),
-                        )
-                    })
-            }
-        }
-    }
-}
-
-impl<T, TFactory, TAllocator, TConnect, TAction, TTask>
-    Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for CliTaskActor<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    fn accept(&self, message: &TAction) -> bool {
-        match self {
-            Self::RuntimeTask(actor) => <RuntimeTaskActor<T, TFactory, TAllocator> as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::accept(actor, message),
-            Self::DefaultHandlersTask(actor) => <DefaultHandlersTaskActor<TConnect> as Worker<
-                TAction,
-                SchedulerTransition<TAction, TTask>,
-            >>::accept(actor, message),
-        }
-    }
-    fn schedule(&self, message: &TAction, state: &Self::State) -> Option<SchedulerMode> {
-        match (self, state) {
-            (Self::RuntimeTask(actor), CliTaskActorState::RuntimeTask(state)) => {
-                <RuntimeTaskActor<T, TFactory, TAllocator> as Worker<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::schedule(actor, message, state)
-            }
-            (Self::DefaultHandlersTask(actor), CliTaskActorState::DefaultHandlersTask(state)) => {
-                <DefaultHandlersTaskActor<TConnect> as Worker<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::schedule(actor, message, state)
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<T, TFactory, TAllocator, TConnect, TAction, TTask>
-    Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for CliTaskActor<T, TFactory, TAllocator, TConnect>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type State = CliTaskActorState<T, TFactory, TAllocator, TConnect, TAction, TTask>;
-    fn handle(
-        &self,
-        state: &mut Self::State,
-        action: &TAction,
-        metadata: &MessageData,
-        context: &mut impl HandlerContext,
-    ) -> Option<SchedulerTransition<TAction, TTask>> {
-        match (self, state) {
-            (Self::RuntimeTask(actor), CliTaskActorState::RuntimeTask(state)) => {
-                <RuntimeTaskActor<T, TFactory, TAllocator> as Handler<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::handle(actor, state, action, metadata, context)
-            }
-            (Self::DefaultHandlersTask(actor), CliTaskActorState::DefaultHandlersTask(state)) => {
-                <DefaultHandlersTaskActor<TConnect> as Handler<
-                    TAction,
-                    SchedulerTransition<TAction, TTask>,
-                >>::handle(actor, state, action, metadata, context)
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-enum CliTaskActorState<T, TFactory, TAllocator, TConnect, TAction, TTask>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    RuntimeTask(
-        <RuntimeTaskActor<T, TFactory, TAllocator> as Handler<
-            TAction,
-            SchedulerTransition<TAction, TTask>,
-        >>::State,
-    ),
-    DefaultHandlersTask(
-        <DefaultHandlersTaskActor<TConnect> as Handler<
-            TAction,
-            SchedulerTransition<TAction, TTask>,
-        >>::State,
-    ),
-}
-
-#[pin_project(project = CliTaskEventsVariant)]
-enum CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TInbox: TaskInbox<TAction>,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    RuntimeTask(
-        #[pin] <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Events<TInbox>,
-    ),
-    DefaultHandlersTask(
-        #[pin] <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::Events<TInbox>,
-    ),
-}
-impl<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask> Stream
-    for CliTaskEvents<T, TFactory, TAllocator, TConnect, TInbox, TAction, TTask>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TInbox: TaskInbox<TAction>,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Item = TInbox::Message;
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.project() {
-            CliTaskEventsVariant::RuntimeTask(inner) => inner.poll_next(cx),
-            CliTaskEventsVariant::DefaultHandlersTask(inner) => inner.poll_next(cx),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::RuntimeTask(inner) => inner.size_hint(),
-            Self::DefaultHandlersTask(inner) => inner.size_hint(),
-        }
-    }
-}
-
-#[pin_project(project = CliTaskDisposeVariant)]
-enum CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    RuntimeTask(
-        #[pin] <RuntimeTaskActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Dispose,
-    ),
-    DefaultHandlersTask(
-        #[pin] <DefaultHandlersTaskActor<TConnect> as Actor<TAction, TTask>>::Dispose,
-    ),
-}
-impl<T, TFactory, TAllocator, TConnect, TAction, TTask> Future
-    for CliTaskDispose<T, TFactory, TAllocator, TConnect, TAction, TTask>
-where
-    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    TFactory: AsyncExpressionFactory<T> + Default,
-    TAllocator: AsyncHeapAllocator<T> + Default,
-    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
-    TAction: Action + CliTaskAction<T> + Send + 'static,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Output = ();
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        match self.project() {
-            CliTaskDisposeVariant::RuntimeTask(inner) => inner.poll(cx),
-            CliTaskDisposeVariant::DefaultHandlersTask(inner) => inner.poll(cx),
-        }
-    }
-}
+});
 
 #[derive(Named, Clone)]
 struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
@@ -1416,7 +1152,8 @@ where
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
 {
-    type Actor = CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>;
+    type Actor =
+        CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, Self>;
     fn create(self) -> Self::Actor {
         CliActor::Task(<CliTaskFactory<T, TFactory, TAllocator, TConnect> as TaskFactory<TAction, Self>>::create(self.inner))
     }
