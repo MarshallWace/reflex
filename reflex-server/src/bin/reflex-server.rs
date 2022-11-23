@@ -36,7 +36,10 @@ use reflex_server::{
     },
     imports::server_imports,
     logger::{
-        formatted::FormattedLogger, json::JsonActionLogger, prometheus::PrometheusLogger,
+        formatted::{FormattedActionLogger, PrefixedLogFormatter},
+        json::JsonActionLogger,
+        messages::DefaultActionFormatter,
+        prometheus::PrometheusLogger,
         ActionLogger, ChainLogger, EitherLogger,
     },
     scheduler_metrics::{
@@ -138,8 +141,12 @@ pub async fn main() -> Result<()> {
 
     let args = Args::parse();
     let mut logger = match args.log {
-        Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
-        _ => EitherLogger::Right(FormattedLogger::stderr("server")),
+        Some(LogFormat::Json) => {
+            EitherLogger::Left(JsonActionLogger::<_, TAction, TTask>::stderr())
+        }
+        _ => EitherLogger::Right(FormattedActionLogger::<_, _, TAction, TTask>::stderr(
+            PrefixedLogFormatter::new("server", DefaultActionFormatter::default()),
+        )),
     };
     if let Some(port) = args.metrics_port {
         let address = SocketAddr::from(([0, 0, 0, 0], port));
@@ -166,7 +173,7 @@ pub async fn main() -> Result<()> {
     let mut logger = {
         let prometheus_logger = args
             .metrics_port
-            .map(|_| PrometheusLogger::new(Default::default()));
+            .map(|_| PrometheusLogger::<TAction, TTask>::new(Default::default()));
         let stdout_logger = args.log.map(|_| logger.clone());
         ChainLogger::new(stdout_logger, prometheus_logger)
     };

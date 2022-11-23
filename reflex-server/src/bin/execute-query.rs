@@ -31,7 +31,12 @@ use reflex_server::{
         task::{ServerCliTaskActor, ServerCliTaskFactory},
     },
     imports::server_imports,
-    logger::{formatted::FormattedLogger, json::JsonActionLogger, EitherLogger},
+    logger::{
+        formatted::{FormattedActionLogger, PrefixedLogFormatter},
+        json::JsonActionLogger,
+        messages::DefaultActionFormatter,
+        EitherLogger,
+    },
     scheduler_metrics::ServerMetricsInstrumentation,
     server::{utils::EitherTracer, NoopWebSocketGraphQlServerQueryTransform},
     GraphQlWebServerMetricNames,
@@ -111,6 +116,10 @@ async fn main() -> Result<()> {
     type TAllocator = DefaultAllocator<T>;
     type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = NoopReconnectTimeout;
+    type TTransformHttp = NoopGraphQlQueryTransform;
+    type TTransformWs = NoopWebSocketGraphQlServerQueryTransform;
+    type TMetricLabels = GraphQlWebServerMetricLabels;
+    type TTracer = EitherTracer<NoopTracer, opentelemetry::sdk::trace::Tracer>;
     type TAction = ServerCliAction<T>;
     type TTask = ServerCliTaskFactory<
         T,
@@ -118,14 +127,14 @@ async fn main() -> Result<()> {
         TAllocator,
         TConnect,
         TReconnect,
-        NoopGraphQlQueryTransform,
-        NoopWebSocketGraphQlServerQueryTransform,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        EitherTracer<NoopTracer, opentelemetry::sdk::trace::Tracer>,
+        TTransformHttp,
+        TTransformWs,
+        TMetricLabels,
+        TMetricLabels,
+        TMetricLabels,
+        TMetricLabels,
+        TMetricLabels,
+        TTracer,
     >;
 
     let args = Args::parse();
@@ -151,8 +160,12 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
     let logger = args.log.map(|format| match format {
-        Some(LogFormat::Json) => EitherLogger::Left(JsonActionLogger::stderr()),
-        None => EitherLogger::Right(FormattedLogger::stderr("server")),
+        Some(LogFormat::Json) => {
+            EitherLogger::Left(JsonActionLogger::<_, TAction, TTask>::stderr())
+        }
+        None => EitherLogger::Right(FormattedActionLogger::<_, _, TAction, TTask>::stderr(
+            PrefixedLogFormatter::new("server", DefaultActionFormatter::default()),
+        )),
     });
     let module_loader = Some(default_js_loaders(
         server_imports(&factory, &allocator),
@@ -169,7 +182,7 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     )?;
-    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _>(
+    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _>(
         args.into(),
         graph_root,
         schema,
@@ -189,9 +202,13 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
         NoopGraphQlQueryTransform,
+        NoopWebSocketGraphQlServerQueryTransform,
         NoopHttpMiddleware,
-        GraphQlWebServerMetricNames::default(),
-        TokioRuntimeMonitorMetricNames::default(),
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
+        GraphQlWebServerMetricLabels,
         match tracer {
             None => EitherTracer::Left(NoopTracer::default()),
             Some(tracer) => EitherTracer::Right(tracer),
@@ -199,6 +216,8 @@ async fn main() -> Result<()> {
         logger,
         NoopTokioSchedulerHandlerTimer::default(),
         ServerMetricsInstrumentation::new(Default::default()),
+        GraphQlWebServerMetricNames::default(),
+        TokioRuntimeMonitorMetricNames::default(),
     )
     .await
     .map(|response| println!("{}", response))

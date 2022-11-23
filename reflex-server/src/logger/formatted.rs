@@ -4,284 +4,180 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{marker::PhantomData, ops::Deref};
 
-use reflex::core::Expression;
-use reflex_dispatcher::{Action, Matcher, TaskFactory};
-use reflex_grpc::action::{
-    GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction, GrpcHandlerTransportErrorAction,
-};
-use reflex_handlers::action::graphql::{
-    GraphQlHandlerWebSocketConnectSuccessAction, GraphQlHandlerWebSocketConnectionErrorAction,
-};
-use reflex_macros::blanket_trait;
-use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
-    actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
-};
+use reflex_dispatcher::{Action, TaskFactory};
 use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
 
-use crate::{
-    cli::reflex_server::OpenTelemetryConfig,
-    logger::ActionLogger,
-    server::action::{
-        graphql_server::GraphQlServerSubscribeAction,
-        init::{
-            InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
-            InitPrometheusMetricsAction,
-        },
-        opentelemetry::OpenTelemetryMiddlewareErrorAction,
-    },
+use crate::logger::{
+    formatter::{LogFormatter, LogWriter},
+    ActionLogger,
 };
 
-blanket_trait!(
-    pub trait FormattedLoggerAction<T: Expression>:
-        Action
-        + Matcher<InitGraphRootAction>
-        + Matcher<InitHttpServerAction>
-        + Matcher<InitOpenTelemetryAction>
-        + Matcher<InitPrometheusMetricsAction>
-        + Matcher<OpenTelemetryMiddlewareErrorAction>
-        + Matcher<GraphQlServerSubscribeAction<T>>
-        + Matcher<EffectSubscribeAction<T>>
-        + Matcher<EffectUnsubscribeAction<T>>
-        + Matcher<EffectEmitAction<T>>
-        + Matcher<GraphQlHandlerWebSocketConnectSuccessAction>
-        + Matcher<GraphQlHandlerWebSocketConnectionErrorAction>
-        + Matcher<GrpcHandlerConnectSuccessAction>
-        + Matcher<GrpcHandlerConnectErrorAction>
-        + Matcher<GrpcHandlerTransportErrorAction>
-    {
+#[derive(Debug)]
+pub struct PrefixedLogFormatter<T: LogFormatter> {
+    prefix: &'static str,
+    formatter: T,
+}
+impl<T: LogFormatter> PrefixedLogFormatter<T> {
+    pub fn new(prefix: &'static str, formatter: T) -> Self {
+        Self { prefix, formatter }
     }
-);
-
-pub struct FormattedLogger<T: Expression, TOut, TAction, TTask>
+}
+impl<T: LogFormatter> Clone for PrefixedLogFormatter<T>
 where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            prefix: self.prefix,
+            formatter: self.formatter.clone(),
+        }
+    }
+}
+impl<T: LogFormatter> Copy for PrefixedLogFormatter<T> where T: Copy {}
+impl<T: LogFormatter> LogFormatter for PrefixedLogFormatter<T> {
+    type Message = T::Message;
+    type Writer<'a> = PrefixedLogWriter<T::Writer<'a>>
+    where
+        Self: 'a,
+        Self::Message: 'a;
+    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+        self.formatter
+            .format(message)
+            .map(|inner| PrefixedLogWriter {
+                prefix: self.prefix,
+                inner,
+            })
+    }
+}
+pub struct PrefixedLogWriter<T: LogWriter> {
+    prefix: &'static str,
+    inner: T,
+}
+impl<T: LogWriter> LogWriter for PrefixedLogWriter<T> {
+    fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
+        write!(f, "[{}] ", self.prefix)?;
+        self.inner.write(f)
+    }
+}
+
+pub struct FormattedActionLogger<TOut, TFormatter, TAction, TTask>
+where
+    TFormatter: LogFormatter,
     TOut: std::io::Write,
-    TAction: FormattedLoggerAction<T>,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    prefix: String,
+    formatter: TFormatter,
     output: TOut,
-    _expression: PhantomData<T>,
     _action: PhantomData<TAction>,
     _task: PhantomData<TTask>,
 }
-impl<T: Expression, TOut, TAction, TTask> FormattedLogger<T, TOut, TAction, TTask>
+impl<TOut, TFormatter, TAction, TTask> FormattedActionLogger<TOut, TFormatter, TAction, TTask>
 where
     TOut: std::io::Write,
-    TAction: FormattedLoggerAction<T>,
+    TFormatter: LogFormatter,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    pub fn new(output: TOut, prefix: impl Into<String>) -> Self {
+    pub fn new(output: TOut, formatter: TFormatter) -> Self {
         Self {
-            prefix: prefix.into(),
+            formatter,
             output,
-            _expression: PhantomData,
             _action: PhantomData,
             _task: PhantomData,
         }
     }
-    fn log(&mut self, action: &TAction) {
-        if let Some(message) = format_action_message(action) {
-            let _ = writeln!(self.output, "[{}] {}", self.prefix, message);
-        }
+    fn write<'a>(
+        &'a mut self,
+        writer: <TFormatter as LogFormatter>::Writer<'a>,
+    ) -> std::io::Result<()> {
+        writer.write(&mut self.output)?;
+        self.flush()
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        write!(&mut self.output, "\n")
     }
 }
-impl<T: Expression, TAction, TTask> FormattedLogger<T, std::io::Stdout, TAction, TTask>
+impl<TFormatter, TAction, TTask> FormattedActionLogger<std::io::Stdout, TFormatter, TAction, TTask>
 where
-    TAction: FormattedLoggerAction<T>,
+    TFormatter: LogFormatter,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    pub fn stdout(prefix: impl Into<String>) -> Self {
-        Self::new(std::io::stdout(), prefix)
+    pub fn stdout(formatter: TFormatter) -> Self {
+        Self::new(std::io::stdout(), formatter)
     }
 }
-impl<T: Expression, TAction, TTask> Clone for FormattedLogger<T, std::io::Stdout, TAction, TTask>
+impl<TFormatter, TAction, TTask> Clone
+    for FormattedActionLogger<std::io::Stdout, TFormatter, TAction, TTask>
 where
-    TAction: FormattedLoggerAction<T>,
+    TFormatter: LogFormatter + Clone,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
     fn clone(&self) -> Self {
-        Self {
-            prefix: self.prefix.clone(),
-            output: std::io::stdout(),
-            _expression: PhantomData,
-            _action: PhantomData,
-            _task: PhantomData,
-        }
+        Self::stdout(self.formatter.clone())
     }
 }
-impl<T: Expression, TAction, TTask> FormattedLogger<T, std::io::Stderr, TAction, TTask>
+impl<TFormatter, TAction, TTask> FormattedActionLogger<std::io::Stderr, TFormatter, TAction, TTask>
 where
-    TAction: FormattedLoggerAction<T>,
+    TFormatter: LogFormatter,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    pub fn stderr(prefix: impl Into<String>) -> Self {
-        Self::new(std::io::stderr(), prefix)
+    pub fn stderr(formatter: TFormatter) -> Self {
+        Self::new(std::io::stderr(), formatter)
     }
 }
-impl<T: Expression, TAction, TTask> Clone for FormattedLogger<T, std::io::Stderr, TAction, TTask>
+
+impl<TFormatter, TAction, TTask> Clone
+    for FormattedActionLogger<std::io::Stderr, TFormatter, TAction, TTask>
 where
-    TAction: FormattedLoggerAction<T>,
+    TFormatter: LogFormatter + Clone,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
     fn clone(&self) -> Self {
-        Self {
-            prefix: self.prefix.clone(),
-            output: std::io::stderr(),
-            _expression: PhantomData,
-            _action: PhantomData,
-            _task: PhantomData,
-        }
+        Self::stderr(self.formatter.clone())
     }
 }
-impl<T: Expression, TOut, TAction, TTask> ActionLogger for FormattedLogger<T, TOut, TAction, TTask>
+
+impl<TOut, TFormatter, TAction, TTask> ActionLogger
+    for FormattedActionLogger<TOut, TFormatter, TAction, TTask>
 where
     TOut: std::io::Write,
-    TAction: FormattedLoggerAction<T>,
+    TFormatter: LogFormatter<Message = TAction>,
+    TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
     type Action = TAction;
     fn log(&mut self, action: &Self::Action) {
-        FormattedLogger::log(self, action);
-    }
-}
-impl<T: Expression, TOut, TAction, TTask> TokioSchedulerLogger
-    for FormattedLogger<T, TOut, TAction, TTask>
-where
-    TOut: std::io::Write,
-    TAction: Action + FormattedLoggerAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    type Action = TAction;
-    type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
-        match command {
-            TokioCommand::Send { pid: _, message } => {
-                let action = message.deref();
-                FormattedLogger::log(self, action);
-            }
-            _ => {}
+        if let Some(writer) = self.formatter.format(action) {
+            let _ = self.write(writer);
         }
     }
 }
 
-fn format_action_message<T: Expression, TAction: FormattedLoggerAction<T>>(
-    action: &TAction,
-) -> Option<String> {
-    if let Option::<&InitPrometheusMetricsAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "Publishing to Prometheus metrics endpoint http://{}/",
-            action.address,
-        ))
-    } else if let Option::<&InitOpenTelemetryAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "Publishing to OpenTelemetry {} collector {}",
-            match &action.config {
-                OpenTelemetryConfig::Http(_) => "HTTP",
-                OpenTelemetryConfig::Grpc(_) => "gRPC",
-            },
-            match &action.config {
-                OpenTelemetryConfig::Http(config) => &config.endpoint,
-                OpenTelemetryConfig::Grpc(config) => &config.endpoint,
-            },
-        ))
-    } else if let Option::<&InitGraphRootAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "Graph root compiled in {:?}",
-            action.compiler_duration,
-        ))
-    } else if let Option::<&InitHttpServerAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "Listening for incoming GraphQL HTTP requests on http://{}/",
-            action.address,
-        ))
-    } else if let Option::<&OpenTelemetryMiddlewareErrorAction>::Some(action) = action.match_type()
-    {
-        Some(format!("OpenTelemetry error: {}", action.error))
-    } else if let Option::<&GraphQlServerSubscribeAction<T>>::Some(action) = action.match_type() {
-        Some(format!(
-            "Handling GraphQL operation: {}",
-            action.operation.operation_name().unwrap_or("<anonymous>"),
-        ))
-    } else if let Option::<&GraphQlHandlerWebSocketConnectSuccessAction>::Some(action) =
-        action.match_type()
-    {
-        Some(format!(
-            "Connected to GraphQL WebSocket server {}",
-            action.url,
-        ))
-    } else if let Option::<&GraphQlHandlerWebSocketConnectionErrorAction>::Some(action) =
-        action.match_type()
-    {
-        Some(format!(
-            "GraphQL WebSocket connection error {}: {}",
-            action.url, action.message,
-        ))
-    } else if let Option::<&GrpcHandlerConnectSuccessAction>::Some(action) = action.match_type() {
-        Some(format!("Connected to gRPC server {}", action.url,))
-    } else if let Option::<&GrpcHandlerConnectErrorAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "Failed to connect to gRPC server {}: {}",
-            action.url, action.message,
-        ))
-    } else if let Option::<&GrpcHandlerTransportErrorAction>::Some(action) = action.match_type() {
-        Some(format!(
-            "gRPC server transport error: {}.{} Error {}: {}: {}",
-            action.service_name,
-            action.method_name,
-            action.status.code as i32,
-            action.status.code,
-            action.status.message,
-        ))
-    } else if let Option::<&EffectSubscribeAction<T>>::Some(action) = action.match_type() {
-        if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {
-            Some(format!(
-                "Effect subscribed: {}{}",
-                action.effect_type,
-                if action.effects.len() > 1 {
-                    format!(" x {}", action.effects.len())
-                } else {
-                    String::new()
-                },
-            ))
-        } else {
-            None
+impl<TOut, TFormatter, TAction, TTask> TokioSchedulerLogger
+    for FormattedActionLogger<TOut, TFormatter, TAction, TTask>
+where
+    TOut: std::io::Write,
+    TFormatter: LogFormatter<Message = TAction>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Action = TAction;
+    type Task = TTask;
+
+    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
+        match command {
+            TokioCommand::Send { pid: _, message } => {
+                let action = message.deref();
+                if let Some(writer) = self.formatter.format(action) {
+                    let _ = self.write(writer);
+                }
+            }
+            _ => {}
         }
-    } else if let Option::<&EffectUnsubscribeAction<T>>::Some(action) = action.match_type() {
-        if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {
-            Some(format!(
-                "Effect unsubscribed: {}{}",
-                action.effect_type,
-                if action.effects.len() > 1 {
-                    format!(" x {}", action.effects.len())
-                } else {
-                    String::new()
-                },
-            ))
-        } else {
-            None
-        }
-    } else if let Option::<&EffectEmitAction<T>>::Some(action) = action.match_type() {
-        if action.effect_types.len() > 1 {
-            Some(format!(
-                "Effect emitted:\n{}",
-                action
-                    .effect_types
-                    .iter()
-                    .map(|batch| format!(" {} x {}", batch.effect_type, batch.updates.len()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ))
-        } else if let Some(batch) = action.effect_types.iter().next() {
-            Some(format!(
-                "Effect emitted: {} x {}",
-                batch.effect_type,
-                batch.updates.len()
-            ))
-        } else {
-            None
-        }
-    } else {
-        None
     }
 }

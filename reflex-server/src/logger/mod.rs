@@ -7,7 +7,9 @@ use reflex_dispatcher::{Action, TaskFactory};
 use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
 
 pub mod formatted;
+pub mod formatter;
 pub mod json;
+pub mod messages;
 pub mod prometheus;
 
 pub trait ActionLogger {
@@ -79,6 +81,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub enum EitherLogger<T1, T2> {
     Left(T1),
     Right(T2),
@@ -126,6 +129,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct ChainLogger<T1, T2> {
     left: T1,
     right: T2,
