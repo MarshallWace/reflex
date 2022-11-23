@@ -263,6 +263,29 @@ where
         }
     }
 }
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TAction, TTask> TaskFactory<TAction, TTask>
+    for HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>
+where
+    T: AsyncExpression + Applicable<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TAction: Action + HandlerAction<T> + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + HandlerTask<TConnect>,
+{
+    type Actor = Self;
+
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 pub enum HandlerActorState<T: Expression> {
     FetchHandler(FetchHandlerState),

@@ -183,6 +183,21 @@ impl<T: Expression> Default for BytecodeInterpreterState<T> {
         }
     }
 }
+impl<T, TFactory, TAllocator, TMetricLabels, TAction, TTask> TaskFactory<TAction, TTask>
+    for BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TMetricLabels: BytecodeInterpreterMetricLabels,
+    TAction: Action + BytecodeInterpreterAction<T>,
+    TTask: TaskFactory<TAction, TTask> + BytecodeWorkerTask<T, TFactory, TAllocator>,
+{
+    type Actor = Self;
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 struct WorkerMetricsState {
     active_workers: IntSet<HashId>,

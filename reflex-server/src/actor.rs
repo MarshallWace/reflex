@@ -142,6 +142,54 @@ where
         }
     }
 }
+impl<
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+        TAction,
+        TTask,
+    > TaskFactory<TAction, TTask>
+    for ServerActor<
+        T,
+        TFactory,
+        TAllocator,
+        TTransformHttp,
+        TTransformWs,
+        TGraphQlQueryLabel,
+        THttpMetricLabels,
+        TConnectionMetricLabels,
+        TOperationMetricLabels,
+        TTracer,
+    >
+where
+    T: AsyncExpression,
+    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    TFactory: ExpressionFactory<T> + Clone,
+    TAllocator: HeapAllocator<T> + Clone,
+    TTransformHttp: HttpGraphQlServerQueryTransform,
+    TTransformWs: WebSocketGraphQlServerQueryTransform,
+    TGraphQlQueryLabel: GraphQlServerQueryLabel,
+    THttpMetricLabels: HttpGraphQlServerQueryMetricLabels,
+    TConnectionMetricLabels: WebSocketGraphQlServerConnectionMetricLabels,
+    TOperationMetricLabels: GraphQlServerOperationMetricLabels,
+    TTracer: Tracer,
+    TTracer::Span: Send + Sync + 'static,
+    TAction: Action + ServerAction<T>,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+{
+    type Actor = Self;
+
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 pub enum ServerActorState<T, TSpan>
 where
