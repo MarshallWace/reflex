@@ -9,7 +9,9 @@ use std::{
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex_handlers::actor::HandlerActor;
-use reflex_scheduler::tokio::NoopTokioSchedulerHandlerTimer;
+use reflex_scheduler::{
+    threadpool::AsyncTokioThreadPoolFactory, tokio::NoopTokioSchedulerHandlerTimer,
+};
 use reflex_server::{
     cli::{
         execute_query::GraphQlWebServerMetricLabels,
@@ -138,6 +140,8 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         NoopLogger::default(),
         NoopTokioSchedulerHandlerTimer::default(),
         ServerMetricsInstrumentation::new(Default::default()),
+        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
+        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
     )
     .unwrap();
     let socket_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();

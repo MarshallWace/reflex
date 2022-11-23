@@ -25,6 +25,7 @@ use reflex_handlers::{
 };
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+use reflex_scheduler::threadpool::AsyncTokioThreadPoolFactory;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -285,6 +286,8 @@ pub async fn main() -> Result<()> {
             logger,
             ServerMetricsHandlerTimer::new(metric_names),
             ServerMetricsInstrumentation::new(metric_names),
+            AsyncTokioThreadPoolFactory::new(ServerMetricsHandlerTimer::new(metric_names)),
+            AsyncTokioThreadPoolFactory::new(ServerMetricsHandlerTimer::new(metric_names)),
         )
         .with_context(|| anyhow!("Server startup failed"))?;
     server.await.with_context(|| anyhow!("Server error"))

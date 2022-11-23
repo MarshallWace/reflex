@@ -139,6 +139,7 @@ where
 pub struct ServerMetricsInstrumentation {
     metric_names: ServerSchedulerMetricNames,
     scheduler_task_monitor: TaskMonitor,
+    async_task_monitor: TaskMonitor,
     blocking_task_monitor: TaskMonitor,
     worker_task_monitor: TaskMonitor,
     task_inbox_task_monitor: TaskMonitor,
@@ -146,7 +147,7 @@ pub struct ServerMetricsInstrumentation {
     subscribe_task_monitor: TaskMonitor,
     unsubscribe_task_monitor: TaskMonitor,
     graphql_connection_task_monitor: TaskMonitor,
-    task_monitor_poll_handles: Arc<[JoinHandle<()>; 8]>,
+    task_monitor_poll_handles: Arc<[JoinHandle<()>; 9]>,
 }
 impl Drop for ServerMetricsInstrumentation {
     fn drop(&mut self) {
@@ -159,6 +160,8 @@ impl ServerMetricsInstrumentation {
     pub fn new(metric_names: ServerSchedulerMetricNames) -> Self {
         let (scheduler_task_monitor, scheduler_task_monitor_poll_task) =
             create_named_task_monitor("scheduler", &metric_names.tokio_task_metric_names);
+        let (async_task_monitor, async_task_monitor_poll_task) =
+            create_named_task_monitor("async", &metric_names.tokio_task_metric_names);
         let (blocking_task_monitor, blocking_task_monitor_poll_task) =
             create_named_task_monitor("blocking", &metric_names.tokio_task_metric_names);
         let (worker_task_monitor, worker_task_monitor_poll_task) =
@@ -176,6 +179,7 @@ impl ServerMetricsInstrumentation {
         Self {
             metric_names: metric_names.init(),
             scheduler_task_monitor,
+            async_task_monitor,
             blocking_task_monitor,
             worker_task_monitor,
             task_inbox_task_monitor,
@@ -185,6 +189,7 @@ impl ServerMetricsInstrumentation {
             graphql_connection_task_monitor,
             task_monitor_poll_handles: Arc::new([
                 tokio::spawn(scheduler_task_monitor_poll_task),
+                tokio::spawn(async_task_monitor_poll_task),
                 tokio::spawn(blocking_task_monitor_poll_task),
                 tokio::spawn(worker_task_monitor_poll_task),
                 tokio::spawn(task_inbox_task_monitor_poll_task),
@@ -205,6 +210,12 @@ impl TokioSchedulerInstrumentation for ServerMetricsInstrumentation {
         task: T,
     ) -> Self::InstrumentedTask<T> {
         self.scheduler_task_monitor.instrument(task)
+    }
+    fn instrument_async_task_pool<T: Future + Send + 'static>(
+        &self,
+        task: T,
+    ) -> Self::InstrumentedTask<T> {
+        self.async_task_monitor.instrument(task)
     }
     fn instrument_blocking_task_pool<T: Future + Send + 'static>(
         &self,

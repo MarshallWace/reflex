@@ -20,7 +20,9 @@ use reflex_handlers::{
 };
 use reflex_interpreter::compiler::CompilerOptions;
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
-use reflex_scheduler::tokio::NoopTokioSchedulerHandlerTimer;
+use reflex_scheduler::{
+    threadpool::AsyncTokioThreadPoolFactory, tokio::NoopTokioSchedulerHandlerTimer,
+};
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -218,6 +220,8 @@ async fn main() -> Result<()> {
         ServerMetricsInstrumentation::new(Default::default()),
         GraphQlWebServerMetricNames::default(),
         TokioRuntimeMonitorMetricNames::default(),
+        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
+        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
     )
     .await
     .map(|response| println!("{}", response))

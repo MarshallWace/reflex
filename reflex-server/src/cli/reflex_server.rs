@@ -50,6 +50,7 @@ use reflex_runtime::{
 };
 use reflex_scheduler::tokio::{
     TokioInbox, TokioInitContext, TokioSchedulerHandlerTimer, TokioSchedulerLogger,
+    TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
@@ -415,6 +416,8 @@ pub fn cli<
     logger: TLogger,
     timer: TTimer,
     instrumentation: TInstrumentation,
+    async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
+    blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
 where
     T: AsyncExpression
@@ -497,6 +500,8 @@ where
         logger,
         timer,
         instrumentation,
+        async_tasks,
+        blocking_tasks,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

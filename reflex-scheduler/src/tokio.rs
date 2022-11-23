@@ -36,6 +36,10 @@ pub trait TokioSchedulerInstrumentation {
         &self,
         task: T,
     ) -> Self::InstrumentedTask<T>;
+    fn instrument_async_task_pool<T: Future + Send + 'static>(
+        &self,
+        task: T,
+    ) -> Self::InstrumentedTask<T>;
     fn instrument_blocking_task_pool<T: Future + Send + 'static>(
         &self,
         task: T,
@@ -208,6 +212,7 @@ where
 {
     commands: mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
     task: JoinHandle<()>,
+    async_task_pool: JoinHandle<()>,
     blocking_task_pool: JoinHandle<()>,
     next_subscriber_id: AtomicUsize,
     next_offset: Arc<AtomicUsize>,
@@ -219,6 +224,7 @@ where
 {
     fn drop(&mut self) {
         self.task.abort();
+        self.async_task_pool.abort();
         self.blocking_task_pool.abort();
     }
 }
@@ -347,13 +353,21 @@ impl<TAction> TokioSubscriber<TAction> {
     }
 }
 
-struct BlockingTaskRequest<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
-    actor: Arc<TTask::Actor>,
-    state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
-    message: AsyncMessage<TAction>,
-    metadata: MessageData,
-    context: TokioHandlerContext,
-    response: oneshot::Sender<(
+pub trait TokioThreadPoolFactory<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
+    type Task: Future<Output = ()> + Unpin + Send + 'static;
+    fn create(
+        self,
+        requests: impl Stream<Item = TokioThreadPoolRequest<TAction, TTask>> + Unpin + Send + 'static,
+    ) -> Self::Task;
+}
+
+pub struct TokioThreadPoolRequest<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
+    pub actor: Arc<TTask::Actor>,
+    pub state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
+    pub message: AsyncMessage<TAction>,
+    pub metadata: MessageData,
+    pub context: TokioHandlerContext,
+    pub response: oneshot::Sender<(
         AsyncMessage<TAction>,
         <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
         Option<SchedulerTransition<TAction, TTask>>,
@@ -379,6 +393,8 @@ where
             + Send
             + 'static,
         instrumentation: impl TokioSchedulerInstrumentation + Clone + Send + 'static,
+        async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
+        blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
     ) -> (Self, V)
     where
         TAction: Send + Sync + 'static,
@@ -396,22 +412,28 @@ where
         let (init_processes, commands, result) = (init_commands)(&mut context);
         let TokioInitContext { next_pid } = context;
         let next_offset = Arc::new(AtomicUsize::new(Default::default()));
-        let (main_event_loop, blocking_task_pool, commands) = create_scheduler_thread(
-            scheduler_pid,
-            init_processes,
-            commands,
-            next_pid,
-            next_offset.clone(),
-            1024,
-            logger,
-            timer,
-            instrumentation.clone(),
-        );
+        let (main_event_loop, async_task_pool, blocking_task_pool, commands) =
+            create_scheduler_thread(
+                async_tasks,
+                blocking_tasks,
+                scheduler_pid,
+                init_processes,
+                commands,
+                next_pid,
+                next_offset.clone(),
+                1024,
+                logger,
+                timer,
+                instrumentation.clone(),
+            );
         (
             Self {
                 commands,
                 // TODO: Panic main thread when scheduler task threads panic
                 task: tokio::spawn(instrumentation.instrument_main_thread(main_event_loop)),
+                async_task_pool: tokio::spawn(
+                    instrumentation.instrument_async_task_pool(async_task_pool),
+                ),
                 blocking_task_pool: tokio::spawn(
                     instrumentation.instrument_blocking_task_pool(blocking_task_pool),
                 ),
@@ -518,6 +540,8 @@ where
 }
 
 fn create_scheduler_thread<TAction, TTask>(
+    async_tasks: impl TokioThreadPoolFactory<TAction, TTask>,
+    blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask>,
     scheduler_pid: ProcessId,
     init_processes: impl IntoIterator<Item = (ProcessId, TTask::Actor)>,
     init_commands: SchedulerTransition<TAction, TTask>,
@@ -531,6 +555,7 @@ fn create_scheduler_thread<TAction, TTask>(
         + 'static,
     instrumentation: impl TokioSchedulerInstrumentation + Clone + Send + 'static,
 ) -> (
+    impl Future<Output = ()> + Send,
     impl Future<Output = ()> + Send,
     impl Future<Output = ()> + Send,
     mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
@@ -547,28 +572,17 @@ where
         mpsc::channel::<(TokioCommand<TAction, TTask>, Instant)>(async_buffer_capacity);
     instrumentation.set_queue_capacity(scheduler_pid, async_buffer_capacity);
     instrumentation.set_current_queue_size(scheduler_pid, 0);
-    // FIXME: replace with separate thread pool
-    let (blocking_tasks_tx, mut blocking_tasks_rx) =
-        mpsc::channel::<BlockingTaskRequest<TAction, TTask>>(1024);
-    let blocking_task_pool = {
-        let timer = timer.clone();
-        async move {
-            while let Some(request) = blocking_tasks_rx.recv().await {
-                let BlockingTaskRequest {
-                    actor,
-                    mut state,
-                    message,
-                    metadata,
-                    mut context,
-                    response,
-                } = request;
-                let pid = context.pid;
-                let span = timer.start_span(&actor, &message, pid, &metadata);
-                let result = actor.handle(&mut state, &message, &metadata, &mut context);
-                timer.end_span(span, &actor, &message, pid, &metadata);
-                let _ = response.send((message, state, result));
-            }
-        }
+    let (async_task_pool, async_tasks_tx) = {
+        let (requests_tx, requests_rx) =
+            mpsc::channel::<TokioThreadPoolRequest<TAction, TTask>>(1024);
+        let task_pool = async_tasks.create(ReceiverStream::new(requests_rx));
+        (task_pool, requests_tx)
+    };
+    let (blocking_task_pool, blocking_tasks_tx) = {
+        let (requests_tx, requests_rx) =
+            mpsc::channel::<TokioThreadPoolRequest<TAction, TTask>>(1024);
+        let task_pool = blocking_tasks.create(ReceiverStream::new(requests_rx));
+        (task_pool, requests_tx)
     };
     let event_loop_task = {
         let next_pid = Arc::new(AtomicUsize::new(next_pid.into()));
@@ -581,6 +595,7 @@ where
                     &next_pid,
                     &next_offset,
                     &commands_tx,
+                    &async_tasks_tx,
                     &blocking_tasks_tx,
                     timer.clone(),
                     instrumentation.clone(),
@@ -650,6 +665,7 @@ where
                                 &next_pid,
                                 &next_offset,
                                 &async_commands,
+                                &async_tasks_tx,
                                 &blocking_tasks_tx,
                                 timer.clone(),
                                 instrumentation.clone(),
@@ -752,7 +768,12 @@ where
             }
         }
     };
-    (event_loop_task, blocking_task_pool, commands_tx)
+    (
+        event_loop_task,
+        async_task_pool,
+        blocking_task_pool,
+        commands_tx,
+    )
 }
 
 fn spawn_worker_process<TAction, TTask>(
@@ -761,7 +782,8 @@ fn spawn_worker_process<TAction, TTask>(
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
-    blocking_tasks: &mpsc::Sender<BlockingTaskRequest<TAction, TTask>>,
+    async_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
+    blocking_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
     timer: impl TokioSchedulerHandlerTimer<Action = TAction, Task = TTask, Span = impl Send + 'static>
         + Send
         + 'static,
@@ -792,6 +814,7 @@ where
                 next_pid,
                 next_offset,
                 results,
+                async_tasks,
                 blocking_tasks,
                 timer,
                 instrumentation,
@@ -813,6 +836,7 @@ where
                 next_pid,
                 next_offset,
                 results,
+                async_tasks,
                 blocking_tasks,
                 timer,
                 instrumentation,
@@ -841,7 +865,8 @@ fn spawn_async_worker<TAction, TTask>(
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
-    blocking_tasks: &mpsc::Sender<BlockingTaskRequest<TAction, TTask>>,
+    async_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
+    blocking_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
     timer: impl TokioSchedulerHandlerTimer<Action = TAction, Task = TTask, Span = impl Send + 'static>
         + Send
         + 'static,
@@ -870,6 +895,7 @@ where
         next_pid,
         next_offset,
         results,
+        async_tasks,
         blocking_tasks,
         timer,
         instrumentation.clone(),
@@ -976,7 +1002,8 @@ fn spawn_worker_actor_process<TAction, TTask>(
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
-    blocking_tasks: &mpsc::Sender<BlockingTaskRequest<TAction, TTask>>,
+    async_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
+    blocking_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
     timer: impl TokioSchedulerHandlerTimer<Action = TAction, Task = TTask, Span = impl Send + 'static>
         + Send
         + 'static,
@@ -996,6 +1023,7 @@ where
         next_pid,
         next_offset,
         results,
+        async_tasks,
         blocking_tasks,
         timer,
         instrumentation.clone(),
@@ -1017,7 +1045,8 @@ fn create_worker_actor_task<TAction, TTask>(
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
-    blocking_tasks: &mpsc::Sender<BlockingTaskRequest<TAction, TTask>>,
+    async_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
+    blocking_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
     timer: impl TokioSchedulerHandlerTimer<Action = TAction, Task = TTask, Span = impl Send + 'static>
         + Send
         + 'static,
@@ -1034,6 +1063,7 @@ where
     let context = get_handler_context(pid, next_pid);
     let next_offset = next_offset.clone();
     let results = results.clone();
+    let async_tasks = async_tasks.clone();
     let blocking_tasks = blocking_tasks.clone();
     async move {
         while let Some(message) = inbox.next().await {
@@ -1057,49 +1087,36 @@ where
                             (message, state, actions)
                         }
                         Some(SchedulerMode::Async) => {
-                            // TODO: Move async handler into separate threadpool
-                            let metadata = get_message_metadata(offset, parent_offset);
-                            let span = timer.start_span(&actor, &message, pid, &metadata);
-                            match tokio::spawn({
-                                let actor = actor.clone();
-                                let mut context = context.clone();
-                                async move {
-                                    let actions =
-                                        actor.handle(&mut state, &message, &metadata, &mut context);
-                                    (message, state, actions)
+                            let (response_tx, response_rx) = oneshot::channel();
+                            let request = TokioThreadPoolRequest {
+                                actor: actor.clone(),
+                                state,
+                                message,
+                                metadata: get_message_metadata(offset, parent_offset),
+                                context: context.clone(),
+                                response: response_tx,
+                            };
+                            match async_tasks.send(request).await {
+                                Err(_err) => {
+                                    break;
                                 }
-                            })
-                            .await
-                            {
-                                Err(err) => {
-                                    if err.is_panic() {
-                                        std::panic::resume_unwind(err.into_panic())
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                Ok((message, state, actions)) => {
-                                    timer.end_span(span, &actor, &message, pid, &metadata);
-                                    (message, state, actions)
-                                }
+                                Ok(_) => match response_rx.await {
+                                    Err(_err) => break,
+                                    Ok((message, state, actions)) => (message, state, actions),
+                                },
                             }
                         }
                         Some(SchedulerMode::Blocking) => {
                             let (response_tx, response_rx) = oneshot::channel();
-                            let actor = actor.clone();
-                            let metadata = get_message_metadata(offset, parent_offset);
-                            let context = context.clone();
-                            match blocking_tasks
-                                .send(BlockingTaskRequest {
-                                    actor,
-                                    state,
-                                    message,
-                                    metadata,
-                                    context,
-                                    response: response_tx,
-                                })
-                                .await
-                            {
+                            let request = TokioThreadPoolRequest {
+                                actor: actor.clone(),
+                                state,
+                                message,
+                                metadata: get_message_metadata(offset, parent_offset),
+                                context: context.clone(),
+                                response: response_tx,
+                            };
+                            match blocking_tasks.send(request).await {
                                 Err(_err) => {
                                     break;
                                 }
@@ -1335,7 +1352,7 @@ fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
 }
 
 #[derive(Debug, Clone)]
-struct TokioHandlerContext {
+pub struct TokioHandlerContext {
     pid: ProcessId,
     next_pid: Arc<AtomicUsize>,
 }
@@ -1425,6 +1442,12 @@ pub struct NoopTokioSchedulerInstrumentation;
 impl TokioSchedulerInstrumentation for NoopTokioSchedulerInstrumentation {
     type InstrumentedTask<T: Future + Send + 'static> = T;
     fn instrument_main_thread<T: Future + Send + 'static>(
+        &self,
+        task: T,
+    ) -> Self::InstrumentedTask<T> {
+        task
+    }
+    fn instrument_async_task_pool<T: Future + Send + 'static>(
         &self,
         task: T,
     ) -> Self::InstrumentedTask<T> {

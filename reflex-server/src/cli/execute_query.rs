@@ -24,6 +24,7 @@ use reflex_runtime::{
 };
 use reflex_scheduler::tokio::{
     TokioInbox, TokioInitContext, TokioSchedulerHandlerTimer, TokioSchedulerLogger,
+    TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
@@ -34,13 +35,10 @@ use crate::{
         HttpGraphQlServerQueryMetricLabels, HttpGraphQlServerQueryTransform,
         WebSocketGraphQlServerConnectionMetricLabels, WebSocketGraphQlServerQueryTransform,
     },
+    tokio_runtime_metrics_export::{start_runtime_monitoring, TokioRuntimeMonitorMetricNames},
     utils::operation::format_graphql_operation_label,
     GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor,
     GraphQlWebServerInstrumentation, GraphQlWebServerMetricNames, GraphQlWebServerTask,
-};
-
-use crate::tokio_runtime_metrics_export::{
-    start_runtime_monitoring, TokioRuntimeMonitorMetricNames,
 };
 pub use hyper::Body;
 
@@ -96,6 +94,8 @@ pub async fn cli<
     instrumentation: TInstrumentation,
     metric_names: GraphQlWebServerMetricNames,
     tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
+    async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
+    blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -218,6 +218,8 @@ where
         logger,
         timer,
         instrumentation,
+        async_tasks,
+        blocking_tasks,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

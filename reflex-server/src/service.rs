@@ -51,7 +51,7 @@ use reflex_runtime::{
 };
 use reflex_scheduler::tokio::{
     TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerHandlerTimer,
-    TokioSchedulerInstrumentation, TokioSchedulerLogger,
+    TokioSchedulerInstrumentation, TokioSchedulerLogger, TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
 use uuid::Uuid;
@@ -298,6 +298,8 @@ where
         logger: TLogger,
         timer: TTimer,
         instrumentation: TInstrumentation,
+        async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
+        blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -395,6 +397,8 @@ where
             logger,
             timer,
             instrumentation.clone(),
+            async_tasks,
+            blocking_tasks,
         );
         Ok(Self {
             instrumentation,
