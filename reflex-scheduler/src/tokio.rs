@@ -260,6 +260,7 @@ where
     TTask: TaskFactory<TAction, TTask>,
 {
     inbox: mpsc::Sender<AsyncMessage<TAction>>,
+    actor_pid: ProcessId,
     handle: JoinHandle<()>,
     dispose: Option<<TTask::Actor as Actor<TAction, TTask>>::Dispose>,
 }
@@ -707,6 +708,7 @@ where
                     }
                     TokioCommand::Kill { pid, caller: _ } => {
                         if let Some(TokioProcess::Task(mut task)) = processes.remove(&pid) {
+                            processes.remove(&task.actor_pid);
                             tokio::spawn(
                                 instrumentation
                                     .instrument_dispose_task(async move { task.abort().await }),
@@ -874,6 +876,7 @@ where
     );
     let task_process = TokioTask {
         inbox: inbox_tx,
+        actor_pid,
         // TODO: Panic main scheduler thread when worker task panics
         handle: tokio::spawn(instrumentation.instrument_task_thread(inbox_task)),
         dispose,
