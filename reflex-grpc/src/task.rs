@@ -125,6 +125,7 @@ where
     }
 }
 
+#[derive(Clone, Debug)]
 enum GrpcClientMessage {
     RequestStart(GrpcOperationId, GrpcClientRequestStartMessage),
     RequestStop(GrpcOperationId),
@@ -132,6 +133,7 @@ enum GrpcClientMessage {
     ConnectionTerminate,
 }
 
+#[derive(Clone, Debug)]
 struct GrpcClientRequestStartMessage {
     service_name: GrpcServiceName,
     method_name: GrpcMethodName,
@@ -143,6 +145,7 @@ struct GrpcClientRequestStartMessage {
     metadata: GrpcMetadata,
 }
 
+#[derive(Clone, Debug)]
 struct GrpcClientInvalidRequestMessage {
     service_name: GrpcServiceName,
     method_name: GrpcMethodName,
@@ -230,7 +233,7 @@ fn create_grpc_connection_results_stream<TAction>(
     uri: Uri,
     client: tonic::client::Grpc<Channel>,
     connection_commands: impl Stream<Item = GrpcClientMessage> + Unpin,
-) -> impl Stream<Item = TAction>
+) -> (impl Future<Output = ()>, impl Stream<Item = TAction>)
 where
     TAction: Action
         + From<GrpcHandlerSuccessResponseAction>
@@ -324,18 +327,16 @@ where
                                 let actions_tx = actions_tx.clone();
                                 async move {
                                     let mut results = Box::pin(results);
-                                    loop {
-                                        if let Some(action) = results.next().await {
-                                            match action {
-                                                Ok(action) => {
-                                                    let _ = actions_tx.send(action).await;
-                                                }
-                                                Err(action) => {
-                                                    let _ = actions_tx.send(action).await;
-                                                    // End the task after relaying the error
-                                                    break;
-                                                }
-                                            }
+                                    while let Some(result) = results.next().await {
+                                        let is_err = result.is_err();
+                                        let message = match result {
+                                            Ok(action) => action,
+                                            Err(action) => action,
+                                        };
+                                        let _ = actions_tx.send(message).await;
+                                        if is_err {
+                                            // End the task after relaying the error
+                                            break;
                                         }
                                     }
                                 }
@@ -365,10 +366,7 @@ where
             }
         }
     };
-    stream::select(
-        send_task.into_stream().flat_map(|_| stream::empty()),
-        ReceiverStream::new(actions_rx),
-    )
+    (send_task, ReceiverStream::new(actions_rx))
 }
 
 #[derive(Named, Clone)]
@@ -563,42 +561,45 @@ impl GrpcHandlerConnectionTaskActor {
             let connection_id = self.connection_id;
             let endpoint = self.endpoint.clone();
             let delay = self.delay;
-            async move {
-                let uri = endpoint.uri().clone();
-                let connect_task = create_grpc_connection(endpoint, delay);
-                let listen_task = {
-                    async move {
-                        match connect_task.await {
-                            Err(err) => {
-                                stream::iter(once(TAction::from(GrpcHandlerConnectErrorAction {
-                                    connection_id,
-                                    url: uri.to_string(),
-                                    message: format!("Connection error: {}", err),
-                                })))
-                                .left_stream()
-                            }
-                            Ok(client) => {
-                                stream::iter(once(TAction::from(GrpcHandlerConnectSuccessAction {
-                                    connection_id,
-                                    url: uri.to_string(),
-                                })))
-                                .chain(create_grpc_connection_results_stream(
-                                    connection_id,
-                                    uri,
-                                    client,
-                                    connection_commands,
-                                ))
-                                .right_stream()
-                            }
-                        }
-                        .map(|action| TInbox::Message::from(action))
+            let uri = endpoint.uri().clone();
+            let connect_task = create_grpc_connection(endpoint, delay);
+            let listen_task = async move {
+                match connect_task.await {
+                    Err(err) => {
+                        let connection_status_action =
+                            TAction::from(GrpcHandlerConnectErrorAction {
+                                connection_id,
+                                url: uri.to_string(),
+                                message: format!("Connection error: {}", err),
+                            });
+                        stream::iter(once(connection_status_action)).left_stream()
                     }
-                };
-                listen_task.into_stream().flatten()
-            }
+                    Ok(client) => {
+                        let connection_status_action =
+                            TAction::from(GrpcHandlerConnectSuccessAction {
+                                connection_id,
+                                url: uri.to_string(),
+                            });
+                        let (send_task, results) = create_grpc_connection_results_stream(
+                            connection_id,
+                            uri,
+                            client,
+                            connection_commands,
+                        );
+                        // Merge the send task and results stream into a single combined stream
+                        let combined_results_stream = stream::select(
+                            send_task.into_stream().flat_map(|_| stream::empty()),
+                            results,
+                        );
+                        stream::iter(once(connection_status_action))
+                            .chain(combined_results_stream)
+                            .right_stream()
+                    }
+                }
+                .map(TInbox::Message::from)
+            };
+            listen_task.into_stream().flatten()
         }
-        .into_stream()
-        .flatten()
     }
     fn handle_grpc_handler_connect_success<TAction, TTask>(
         &self,
