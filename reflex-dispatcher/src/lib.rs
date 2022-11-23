@@ -126,7 +126,7 @@ pub trait TaskFactory<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
 pub trait TaskInbox<TAction: Action>:
     Stream<Item = Self::Message> + Unpin + Send + 'static
 {
-    type Message: TaskMessage<TAction>;
+    type Message: TaskMessage<TAction> + Send;
 }
 
 pub trait TaskMessage<TAction: Action>: From<TAction> + Deref<Target = TAction> {}
