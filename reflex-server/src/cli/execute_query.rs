@@ -26,6 +26,7 @@ use reflex_scheduler::tokio::{
     TokioInbox, TokioInitContext, TokioSchedulerHandlerTimer, TokioSchedulerLogger,
 };
 use reflex_stdlib::Stdlib;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     server::{
@@ -54,7 +55,6 @@ pub struct ExecuteQueryCliOptions {
 }
 
 pub async fn cli<
-    'de,
     TAction,
     TTask,
     T,
@@ -103,8 +103,8 @@ where
         + Reducible<T>
         + Applicable<T>
         + Compile<T>
-        + serde::Serialize
-        + serde::Deserialize<'de>,
+        + Serialize
+        + for<'de> Deserialize<'de>,
     T::String: Send,
     T::Builtin: Send,
     T::Signal<T>: Send,
