@@ -128,12 +128,10 @@ impl<T, TFactory, TRecordedAction, TRecordedTask, TAction, TTask> Actor<TAction,
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TRecordedAction: Action + SerializableAction + Matcher<EvaluateResultAction<T>>,
-    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-    TAction: Action + SessionPlaybackServerAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
-    for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
-        Into<SchedulerCommand<TAction, TTask>>,
+    TRecordedAction: Action + SerializableAction + Clone + Matcher<EvaluateResultAction<T>>,
+    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
+    TAction: Action + SessionPlaybackServerAction<T> + From<TRecordedAction>,
+    TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
 {
     type Events<TInbox: TaskInbox<TAction>> = TInbox;
     type Dispose = NoopDisposeCallback;
@@ -155,12 +153,10 @@ impl<T, TFactory, TRecordedAction, TRecordedTask, TAction, TTask>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TRecordedAction: Action + SerializableAction + Matcher<EvaluateResultAction<T>>,
-    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-    TAction: Action + SessionPlaybackServerAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
-    for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
-        Into<SchedulerCommand<TAction, TTask>>,
+    TRecordedAction: Action + SerializableAction + Clone + Matcher<EvaluateResultAction<T>>,
+    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
+    TAction: Action + SessionPlaybackServerAction<T> + From<TRecordedAction>,
+    TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
 {
     fn accept(&self, _message: &TAction) -> bool {
         true
@@ -176,12 +172,10 @@ impl<T, TFactory, TRecordedAction, TRecordedTask, TAction, TTask>
 where
     T: Expression,
     TFactory: ExpressionFactory<T>,
-    TRecordedAction: Action + SerializableAction + Matcher<EvaluateResultAction<T>>,
-    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-    TAction: Action + SessionPlaybackServerAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
-    for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
-        Into<SchedulerCommand<TAction, TTask>>,
+    TRecordedAction: Action + SerializableAction + Clone + Matcher<EvaluateResultAction<T>>,
+    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
+    TAction: Action + SessionPlaybackServerAction<T> + From<TRecordedAction>,
+    TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
 {
     type State = SessionPlaybackServerState<T>;
     fn handle(

@@ -119,10 +119,10 @@ dispatcher!({
     where
         TAction: Action,
         TTask: TaskFactory<TAction, TTask>,
-        TRecordedAction: Action,
-        TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
-        for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
-            Into<SchedulerCommand<TAction, TTask>>,
+        TRecordedAction: Action + Clone,
+        TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
+        TAction: Action + From<TRecordedAction>,
+        TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
     {
         type State = SessionPlaybackState;
         type Events<TInbox: TaskInbox<TAction>> = TInbox;
@@ -162,8 +162,8 @@ dispatcher!({
 
 impl<TRecordedAction, TRecordedTask> SessionPlayback<TRecordedAction, TRecordedTask>
 where
-    TRecordedAction: Action,
-    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask>,
+    TRecordedAction: Action + Clone,
+    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
 {
     fn handle_session_playback_begin<TAction, TTask>(
         &self,
@@ -173,10 +173,8 @@ where
         _context: &mut impl HandlerContext,
     ) -> Option<SchedulerTransition<TAction, TTask>>
     where
-        TAction: Action + From<SessionPlaybackEndAction>,
-        TTask: TaskFactory<TAction, TTask>,
-        for<'a> &'a SchedulerCommand<TRecordedAction, TRecordedTask>:
-            Into<SchedulerCommand<TAction, TTask>>,
+        TAction: Action + From<TRecordedAction> + From<SessionPlaybackEndAction>,
+        TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
     {
         let SessionPlaybackBeginAction { num_frames } = action;
         let start_index = state.program_counter;
@@ -186,7 +184,16 @@ where
             .get(start_index..until_index)
             .into_iter()
             .flatten()
-            .map(|frame| Into::<SchedulerCommand<TAction, TTask>>::into(frame))
+            .map(|frame| match frame {
+                SchedulerCommand::Forward(pid) => SchedulerCommand::Forward(*pid),
+                SchedulerCommand::Send(pid, action) => {
+                    SchedulerCommand::Send(*pid, TAction::from(action.clone()))
+                }
+                SchedulerCommand::Task(pid, factory) => {
+                    SchedulerCommand::Task(*pid, TTask::from(factory.clone()))
+                }
+                SchedulerCommand::Kill(pid) => SchedulerCommand::Kill(*pid),
+            })
             .collect::<Vec<_>>();
         state.program_counter = until_index;
         Some(SchedulerTransition::new(
