@@ -2161,6 +2161,8 @@ dependencies = [
 name = "reflex-macros"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "pin-project",
  "proc-macro2",
  "quote",
  "reflex-dispatcher",
