@@ -14,7 +14,7 @@ use reflex_handlers::task::{
     DefaultHandlersTask, DefaultHandlersTaskAction, DefaultHandlersTaskFactory,
 };
 use reflex_interpreter::compiler::Compile;
-use reflex_macros::{blanket_trait, task_factory_enum};
+use reflex_macros::{blanket_trait, task_factory_enum, Matcher};
 use reflex_runtime::task::bytecode_worker::BytecodeWorkerTaskFactory;
 use reflex_runtime::{
     task::{RuntimeTask, RuntimeTaskAction, RuntimeTaskFactory},
@@ -48,7 +48,7 @@ blanket_trait!(
 );
 
 task_factory_enum!({
-    #[derive(Clone)]
+    #[derive(Matcher, Clone)]
     pub enum ServerTaskFactory<T, TFactory, TAllocator, TConnect>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,

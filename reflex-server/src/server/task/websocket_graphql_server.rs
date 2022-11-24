@@ -9,7 +9,7 @@ use reflex_dispatcher::{
     Action, ActorEvents, BoxedActionStream, HandlerContext, MessageData, NoopDisposeCallback,
     ProcessId, SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_macros::{dispatcher, task_factory_enum, Named};
+use reflex_macros::{dispatcher, task_factory_enum, Matcher, Named};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ impl<_Self> WebSocketGraphQlServerTask for _Self where
 }
 
 task_factory_enum!({
-    #[derive(Clone, Serialize, Deserialize)]
+    #[derive(Matcher, Clone, Serialize, Deserialize)]
     pub enum WebSocketGraphQlServerTaskFactory {
         ThrottleTimeout(WebSocketGraphQlServerThrottleTimeoutTaskFactory),
     }

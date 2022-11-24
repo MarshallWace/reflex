@@ -65,7 +65,7 @@ use reflex_json::{JsonMap, JsonValue};
 use reflex_lang::{
     allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
 };
-use reflex_macros::{blanket_trait, task_factory_enum, Named};
+use reflex_macros::{blanket_trait, task_factory_enum, Matcher, Named};
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
@@ -1062,7 +1062,7 @@ impl<_Self, T: Expression> CliTaskAction<T> for _Self where
 }
 
 task_factory_enum!({
-    #[derive(Clone)]
+    #[derive(Matcher, Clone)]
     enum CliTaskFactory<T, TFactory, TAllocator, TConnect>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,

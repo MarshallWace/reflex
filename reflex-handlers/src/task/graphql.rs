@@ -29,7 +29,7 @@ use reflex_graphql::subscriptions::{
     GraphQlSubscriptionServerMessage,
 };
 use reflex_json::JsonValue;
-use reflex_macros::{dispatcher, task_factory_enum, Named};
+use reflex_macros::{dispatcher, task_factory_enum, Matcher, Named};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
@@ -97,7 +97,7 @@ where
 
 // TODO: Implement Serialize/Deserialize traits for GraphQlHandlerTaskFactory
 task_factory_enum!({
-    #[derive(Clone)]
+    #[derive(Matcher, Clone)]
     pub enum GraphQlHandlerTaskFactory<TConnect>
     where
         TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,

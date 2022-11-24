@@ -7,7 +7,7 @@ use reflex::core::{
 };
 use reflex_dispatcher::{Action, TaskFactory};
 use reflex_interpreter::compiler::Compile;
-use reflex_macros::{blanket_trait, task_factory_enum};
+use reflex_macros::{blanket_trait, task_factory_enum, Matcher};
 
 use crate::{
     task::bytecode_worker::{BytecodeWorkerAction, BytecodeWorkerTask, BytecodeWorkerTaskFactory},
@@ -32,7 +32,7 @@ blanket_trait!(
 
 // TODO: Implement Serialize/Deserialize traits for RuntimeTaskFactory
 task_factory_enum!({
-    #[derive(Clone)]
+    #[derive(Matcher, Clone)]
     pub enum RuntimeTaskFactory<T, TFactory, TAllocator>
     where
         T: Expression,

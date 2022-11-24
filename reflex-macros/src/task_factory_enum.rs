@@ -173,7 +173,6 @@ impl Parse for TaskFactoryConfiguration {
 
 fn produce_task_factory(input: TaskFactoryConfiguration) -> syn::Result<TokenStream> {
     let task_factory_named_impl = named_impl_for_task_factory(&input);
-    let from_impls = impl_of_from_for_task_factory_variants(&input);
     let actor = actor_for_factory(&input);
     let actor_named_impl = named_for_actor(&input);
     let handle = impl_handler_for_actor(&input);
@@ -205,7 +204,6 @@ fn produce_task_factory(input: TaskFactoryConfiguration) -> syn::Result<TokenStr
         }
 
         #task_factory_named_impl
-        #from_impls
         #actor
         #dispose
         #events
@@ -252,31 +250,6 @@ fn named_impl_for_task_factory(input: &TaskFactoryConfiguration) -> TokenStream2
                 }
             }
     }
-}
-
-fn impl_of_from_for_task_factory_variants(input: &TaskFactoryConfiguration) -> TokenStream2 {
-    let GenericsComponents {
-        params,
-        where_clause,
-        args,
-    } = &input.factory_generics;
-    let factory_ident = &input.factory_ident;
-    let mut ret = TokenStream2::new();
-    input
-        .factory_variants
-        .parsed_variants
-        .iter()
-        .for_each(|(span, variant_name, field)| {
-            ret.extend(quote_spanned! {*span =>
-                impl<#params> ::std::convert::From<#field> for #factory_ident<#args> #where_clause {
-                   fn from(value: #field)  -> Self {
-                        Self::#variant_name(value)
-                    }
-                }
-            })
-        });
-
-    ret
 }
 
 fn impl_of_task_factory_for_task_factory(input: &TaskFactoryConfiguration) -> TokenStream2 {

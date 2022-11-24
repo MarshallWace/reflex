@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex_dispatcher::{Action, TaskFactory};
-use reflex_macros::{blanket_trait, task_factory_enum};
+use reflex_macros::{blanket_trait, task_factory_enum, Matcher};
 
 pub mod fetch;
 pub mod graphql;
@@ -44,7 +44,7 @@ blanket_trait!(
 );
 
 task_factory_enum!({
-    #[derive(Clone)]
+    #[derive(Matcher, Clone)]
     pub enum DefaultHandlersTaskFactory<TConnect>
     where
         TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,

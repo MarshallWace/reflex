@@ -19,7 +19,7 @@ use reflex_handlers::{
     },
 };
 use reflex_interpreter::compiler::Compile;
-use reflex_macros::{blanket_trait, task_factory_enum};
+use reflex_macros::{blanket_trait, task_factory_enum, Matcher};
 use reflex_runtime::{
     actor::bytecode_interpreter::{
         BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricLabels,
@@ -71,7 +71,7 @@ blanket_trait!(
 );
 
 task_factory_enum!({
-    #[derive(Clone)]
+    #[derive(Matcher, Clone)]
     pub enum ServerCliTaskFactory<
         T,
         TFactory,

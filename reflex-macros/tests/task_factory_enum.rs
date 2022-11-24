@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::Named;
-use reflex_macros::{blanket_trait, task_factory_enum};
+use reflex_macros::{blanket_trait, task_factory_enum, Matcher};
 
 mod fixtures {
     use reflex_dispatcher::*;
@@ -202,6 +202,7 @@ fn basic_usage() {
         pub trait MyAction<T: From<usize>>: MyActorAction<T> {}
     );
     task_factory_enum!({
+        #[derive(Matcher)]
         pub enum MyFactory<'a, T>
         where
             T: From<usize> + Default + 'a,
