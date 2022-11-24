@@ -5,10 +5,14 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, token, Attribute, Data, DataEnum, DeriveInput, Error,
-    Field, Fields, FieldsUnnamed, Ident, Lifetime, Meta, MetaList, MetaNameValue, NestedMeta,
-    Result, Type, TypeReference, Variant, Visibility,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::{self, Comma},
+    Attribute, Data, DataEnum, DeriveInput, Error, Field, Fields, FieldsUnnamed, Ident, Lifetime,
+    Meta, MetaList, MetaNameValue, NestedMeta, Result, Type, TypeReference, Variant, Visibility,
 };
+
+use crate::utils::create_generic_arguments_for_params;
 
 const MATCHER_ATTRIBUTE_NAME: &'static str = "matcher";
 const MATCHER_TRAIT_ATTRIBUTE_NAME: &'static str = "as_trait";
@@ -99,18 +103,18 @@ fn create_enum_matcher_impl(
     let variant_fields = parse_enum_variant_fields(variants.variants.iter())?;
     let matcher_traits = matcher_trait_options
         .into_iter()
-        .map(|options| create_matcher_trait(options, &variant_fields))
+        .map(|options| create_matcher_trait(matcher, options, &variant_fields))
         .collect::<Result<Vec<_>>>()?;
     let ref_matchers = ref_matcher_options
         .into_iter()
-        .map(|options| create_ref_matcher(options, &variant_fields))
+        .map(|options| create_ref_matcher(matcher, options, &variant_fields))
         .collect::<Result<Vec<_>>>()?;
     let matcher_impls = {
-        let convert_impl = create_matcher_convert_impl(&matcher.ident, &variant_fields);
+        let convert_impl = create_matcher_convert_impl(matcher, &variant_fields);
         let enum_variant_impls = variant_fields
             .into_iter()
             .map(|(variant, field)| {
-                create_enum_variant_matcher_impl(&matcher.ident, &variant.ident, &field.ty)
+                create_enum_variant_matcher_impl(matcher, &variant.ident, &field.ty)
             })
             .collect::<Result<Vec<_>>>()?;
         [convert_impl].into_iter().chain(enum_variant_impls)
@@ -275,7 +279,15 @@ pub fn parse_enum_variant_field(variant: &Variant) -> Result<&Field> {
     }
 }
 
-fn create_matcher_convert_impl(name: &Ident, variant_fields: &[(&Variant, &Field)]) -> TokenStream {
+fn create_matcher_convert_impl(
+    matcher: &DeriveInput,
+    variant_fields: &[(&Variant, &Field)],
+) -> TokenStream {
+    let matcher_name = &matcher.ident;
+    let generic_params = &matcher.generics.params;
+    let generic_args =
+        create_generic_arguments_for_params(generic_params).collect::<Punctuated<_, Comma>>();
+    let where_clause = &matcher.generics.where_clause;
     let variant_names = variant_fields
         .iter()
         .copied()
@@ -285,13 +297,15 @@ fn create_matcher_convert_impl(name: &Ident, variant_fields: &[(&Variant, &Field
         .copied()
         .map(|(_, variant_field)| variant_field.ty.clone());
     let output = quote! {
-        impl #name {
-            fn convert_into<T>(self) -> T
+        #[automatically_derived]
+        impl<#generic_params> #matcher_name<#generic_args> #where_clause {
+            #[allow(dead_code)]
+            fn convert_into<_T>(self) -> _T
             where
-                T: #(From<#variant_types>)+*,
+                _T: #(From<#variant_types>)+*,
             {
                 match self {
-                    #(#name::#variant_names(inner) => inner.into(),)*
+                    #(Self::#variant_names(inner) => inner.into(),)*
                 }
             }
         }
@@ -301,20 +315,25 @@ fn create_matcher_convert_impl(name: &Ident, variant_fields: &[(&Variant, &Field
 }
 
 fn create_enum_variant_matcher_impl(
-    matcher_name: &Ident,
+    matcher: &DeriveInput,
     variant_name: &Ident,
     field_type: &Type,
 ) -> Result<TokenStream> {
+    let matcher_name = &matcher.ident;
+    let generic_params = &matcher.generics.params;
+    let generic_args =
+        create_generic_arguments_for_params(generic_params).collect::<Punctuated<_, Comma>>();
+    let where_clause = &matcher.generics.where_clause;
     let output = quote! {
         #[automatically_derived]
-        impl From<#field_type> for #matcher_name {
+        impl<#generic_params> From<#field_type> for #matcher_name<#generic_args> #where_clause {
             fn from(value: #field_type) -> Self {
                 Self::#variant_name(value)
             }
         }
         #[automatically_derived]
-        impl From<#matcher_name> for Option<#field_type> {
-            fn from(value: #matcher_name) -> Self {
+        impl<#generic_params> From<#matcher_name<#generic_args>> for Option<#field_type> #where_clause {
+            fn from(value: #matcher_name<#generic_args>) -> Self {
                 match value {
                     #matcher_name::#variant_name(inner) => Some(inner),
                     _ => None,
@@ -322,8 +341,8 @@ fn create_enum_variant_matcher_impl(
             }
         }
         #[automatically_derived]
-        impl<'a> From<&'a #matcher_name> for Option<&'a #field_type> {
-            fn from(value: &'a #matcher_name) -> Self {
+        impl<'_a, #generic_params> From<&'_a #matcher_name<#generic_args>> for Option<&'_a #field_type> #where_clause {
+            fn from(value: &'_a #matcher_name<#generic_args>) -> Self {
                 match value {
                     #matcher_name::#variant_name(inner) => Some(inner),
                     _ => None,
@@ -331,8 +350,8 @@ fn create_enum_variant_matcher_impl(
             }
         }
         #[automatically_derived]
-        impl From<#matcher_name> for Result<#field_type, #matcher_name> {
-            fn from(value: #matcher_name) -> Self {
+        impl<#generic_params> From<#matcher_name<#generic_args>> for Result<#field_type, #matcher_name<#generic_args>> #where_clause {
+            fn from(value: #matcher_name<#generic_args>) -> Self {
                 match value {
                     #matcher_name::#variant_name(inner) => Ok(inner),
                     unmatched => Err(unmatched),
@@ -345,37 +364,40 @@ fn create_enum_variant_matcher_impl(
 }
 
 fn create_matcher_trait(
+    matcher: &DeriveInput,
     options: MatcherTraitOptions,
     variant_fields: &[(&Variant, &Field)],
 ) -> Result<TokenStream> {
-    let MatcherTraitOptions { name } = options;
+    let MatcherTraitOptions { name: trait_name } = options;
+    let generic_params = &matcher.generics.params;
+    let generic_args =
+        create_generic_arguments_for_params(generic_params).collect::<Punctuated<_, Comma>>();
+    let where_clause = &matcher.generics.where_clause;
+    let where_bounds = where_clause
+        .into_iter()
+        .flat_map(|where_clause| where_clause.predicates.iter().cloned())
+        .collect::<Punctuated<_, Comma>>();
     let variant_types = variant_fields
         .iter()
         .copied()
         .map(|(_, variant_field)| variant_field.ty.clone());
-    let span = name.span();
+    let span = trait_name.span();
     let output = {
         let variant_types = variant_types.collect::<Vec<_>>();
-        let variant_types_1 = variant_types.iter();
-        let variant_types_2 = variant_types.iter();
-        let variant_types_3 = variant_types.iter();
-        let variant_types_4 = variant_types.iter();
-        let variant_types_5 = variant_types.iter();
-        let variant_types_6 = variant_types.iter();
-        let variant_types_7 = variant_types.iter();
-        let variant_types_8 = variant_types.iter();
         quote_spanned! {span=>
-            trait #name where
-                #(Self: From<#variant_types_1>,)*
-                #(Option<#variant_types_2>: From<Self>,)*
-                #(for<'a> Option<&'a #variant_types_3>: From<&'a Self>,)*
-                #(Result<#variant_types_4, Self>: From<Self>,)*
+            trait #trait_name<#generic_params> where
+                #where_bounds
+                #(Self: From<#variant_types>,)*
+                #(Option<#variant_types>: From<Self>,)*
+                #(for<'_a> Option<&'_a #variant_types>: From<&'_a Self>,)*
+                #(Result<#variant_types, Self>: From<Self>,)*
                 {}
-            impl<T> #name for T where
-                #(Self: From<#variant_types_5>,)*
-                #(Option<#variant_types_6>: From<Self>,)*
-                #(for<'a> Option<&'a #variant_types_7>: From<&'a Self>,)*
-                #(Result<#variant_types_8, Self>: From<Self>,)*
+            impl<_Self, #generic_params> #trait_name<#generic_args> for _Self where
+                #where_bounds
+                #(Self: From<#variant_types>,)*
+                #(Option<#variant_types>: From<Self>,)*
+                #(for<'_a> Option<&'_a #variant_types>: From<&'_a Self>,)*
+                #(Result<#variant_types, Self>: From<Self>,)*
                 {}
         }
     }
@@ -384,6 +406,7 @@ fn create_matcher_trait(
 }
 
 fn create_ref_matcher(
+    matcher: &DeriveInput,
     options: RefMatcherOptions,
     variant_fields: &[(&Variant, &Field)],
 ) -> Result<Vec<TokenStream>> {
@@ -391,6 +414,10 @@ fn create_ref_matcher(
         name,
         derive_annotations,
     } = options;
+    let generic_params = &matcher.generics.params;
+    let generic_args =
+        create_generic_arguments_for_params(generic_params).collect::<Punctuated<_, Comma>>();
+    let where_clause = &matcher.generics.where_clause;
     let variant_definitions = variant_fields
         .iter()
         .copied()
@@ -408,7 +435,7 @@ fn create_ref_matcher(
                         colon_token: None,
                         ty: Type::Reference(TypeReference {
                             and_token: token::And::default(),
-                            lifetime: Some(Lifetime::new("'a", variant_type.span())),
+                            lifetime: Some(Lifetime::new("'_a", variant_type.span())),
                             mutability: None,
                             elem: Box::new(variant_field.ty.clone()),
                         }),
@@ -429,20 +456,21 @@ fn create_ref_matcher(
         .iter()
         .copied()
         .map(|(variant, field)| {
-            create_enum_variant_ref_matcher_impl(&name, &variant.ident, &field.ty)
+            create_enum_variant_ref_matcher_impl(matcher, &name, &variant.ident, &field.ty)
         })
         .collect::<Result<Vec<_>>>()?;
     let span = name.span();
     let output = quote_spanned! {span=>
         #[derive(Clone, Copy #(,#derive_annotations)*)]
-        enum #name<'a> {
+        enum #name<'_a, #generic_params> #where_clause {
             #(#variant_definitions),*
         }
         #[automatically_derived]
-        impl<'a> #name<'a> {
-            fn match_from<T>(value: &'a T) -> Option<Self>
+        impl<'_a, #generic_params> #name<'_a, #generic_args> #where_clause {
+            #[allow(dead_code)]
+            fn match_from<_T>(value: &'_a _T) -> Option<Self>
             where
-                #(for<'b> Option<&'b #variant_types>: From<&'b T>,)*
+                #(for<'_b> Option<&'_b #variant_types>: From<&'_b _T>,)*
             {
                 None
                     #(.or_else(|| Option::<&_>::from(value).map(Self::#variant_names)))*
@@ -454,20 +482,25 @@ fn create_ref_matcher(
 }
 
 fn create_enum_variant_ref_matcher_impl(
+    matcher: &DeriveInput,
     matcher_name: &Ident,
     variant_name: &Ident,
     field_type: &Type,
 ) -> Result<TokenStream> {
+    let generic_params = &matcher.generics.params;
+    let generic_args =
+        create_generic_arguments_for_params(generic_params).collect::<Punctuated<_, Comma>>();
+    let where_clause = &matcher.generics.where_clause;
     let output = quote! {
         #[automatically_derived]
-        impl<'a> From<&'a #field_type> for #matcher_name<'a> {
-            fn from(value: &'a #field_type) -> Self {
+        impl<'_a, #generic_params> From<&'_a #field_type> for #matcher_name<'_a, #generic_args> #where_clause {
+            fn from(value: &'_a #field_type) -> Self {
                 Self::#variant_name(value)
             }
         }
         #[automatically_derived]
-        impl<'a> From<#matcher_name<'a>> for Option<&'a #field_type> {
-            fn from(value: #matcher_name<'a>) -> Self {
+        impl<'_a, #generic_params> From<#matcher_name<'_a, #generic_args>> for Option<&'_a #field_type> #where_clause {
+            fn from(value: #matcher_name<'_a, #generic_args>) -> Self {
                 match value {
                     #matcher_name::#variant_name(inner) => Some(inner),
                     _ => None,
