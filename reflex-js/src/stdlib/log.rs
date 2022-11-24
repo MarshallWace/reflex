@@ -92,7 +92,7 @@ impl<T: Expression> Applicable<T> for LogArgs {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let expression = args.next().unwrap();
-        eprintln!(
+        println!(
             "{}",
             once(stringify_value(&expression))
                 .chain(args.map(|value| stringify_value(&value)))

@@ -84,14 +84,14 @@ fn load_messages_rmp<T: for<'de> Deserialize<'de>>(
     let mut results = Vec::new();
     let mut input_file = input_file;
     loop {
-        println!("Deserializing message {}..", results.len() + 1);
+        eprintln!("Deserializing message {}..", results.len() + 1);
         match rmp_serde::from_read(&mut input_file) {
             Ok(result) => {
                 results.push(result);
             }
             Err(rmp_serde::decode::Error::InvalidMarkerRead(err)) => {
                 if has_reached_eof(&mut input_file) {
-                    println!("Loaded {} messages", results.len());
+                    eprintln!("Loaded {} messages", results.len());
                     break;
                 } else {
                     return Err(Box::new(rmp_serde::decode::Error::InvalidMarkerRead(err)));
