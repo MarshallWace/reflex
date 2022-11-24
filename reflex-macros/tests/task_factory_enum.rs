@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex_dispatcher::Named;
 use reflex_macros::{blanket_trait, task_factory_enum};
 
@@ -207,7 +208,7 @@ fn basic_usage() {
         {
             MyActor(MyActorFactory<'a, T>),
         }
-        impl<'a, T, TAction, TTask> TaskFactory<TAction, TTask> for MyFactory<'a, T, TAction, TTask>
+        impl<'a, T, TAction, TTask> TaskFactory<TAction, TTask> for MyFactory<'a, T>
         where
             T: From<usize> + Default + 'a,
             TAction: MyAction<T> + Action,
