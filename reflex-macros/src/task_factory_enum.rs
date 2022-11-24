@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use proc_macro::TokenStream;
 
 use crate::utils::{
@@ -198,7 +199,6 @@ fn produce_task_factory(input: TaskFactoryConfiguration) -> syn::Result<TokenStr
     let ret = quote_spanned! {
         span =>
 
-        #[allow(dead_code)]
         #(#factory_attrs)*
         #factory_vis enum #factory_ident<#generic_parameters> #where_clause {
             #factory_variants
