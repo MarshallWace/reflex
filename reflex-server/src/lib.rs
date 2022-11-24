@@ -8,7 +8,6 @@ use std::{
 };
 
 use actor::ServerActor;
-use chrono::{DateTime, Utc};
 use http::StatusCode;
 use logger::ActionLogger;
 use opentelemetry::trace::Tracer;
@@ -20,6 +19,7 @@ use server::{
     GraphQlServerOperationMetricLabels, GraphQlServerQueryLabel,
     HttpGraphQlServerQueryMetricLabels, WebSocketGraphQlServerConnectionMetricLabels,
 };
+use utils::datetime::format_datetime;
 
 use crate::server::{
     action::opentelemetry::OpenTelemetryMiddlewareErrorAction,
@@ -257,10 +257,9 @@ where
 }
 
 pub fn generate_session_recording_filename(suffix: Option<&str>) -> String {
-    let datetime: DateTime<Utc> = SystemTime::now().into();
     format!(
         "{}{}.session",
-        datetime.format("%Y-%m-%d-%s"),
+        format_datetime(SystemTime::now(), "%Y-%m-%d-%s"),
         suffix.unwrap_or("")
     )
 }

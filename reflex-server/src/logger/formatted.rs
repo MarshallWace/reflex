@@ -12,54 +12,6 @@ use crate::logger::{
     ActionLogger,
 };
 
-#[derive(Debug)]
-pub struct PrefixedLogFormatter<T: LogFormatter> {
-    prefix: &'static str,
-    formatter: T,
-}
-impl<T: LogFormatter> PrefixedLogFormatter<T> {
-    pub fn new(prefix: &'static str, formatter: T) -> Self {
-        Self { prefix, formatter }
-    }
-}
-impl<T: LogFormatter> Clone for PrefixedLogFormatter<T>
-where
-    T: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            prefix: self.prefix,
-            formatter: self.formatter.clone(),
-        }
-    }
-}
-impl<T: LogFormatter> Copy for PrefixedLogFormatter<T> where T: Copy {}
-impl<T: LogFormatter> LogFormatter for PrefixedLogFormatter<T> {
-    type Message = T::Message;
-    type Writer<'a> = PrefixedLogWriter<T::Writer<'a>>
-    where
-        Self: 'a,
-        Self::Message: 'a;
-    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>> {
-        self.formatter
-            .format(message)
-            .map(|inner| PrefixedLogWriter {
-                prefix: self.prefix,
-                inner,
-            })
-    }
-}
-pub struct PrefixedLogWriter<T: LogWriter> {
-    prefix: &'static str,
-    inner: T,
-}
-impl<T: LogWriter> LogWriter for PrefixedLogWriter<T> {
-    fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
-        write!(f, "[{}] ", self.prefix)?;
-        self.inner.write(f)
-    }
-}
-
 pub struct FormattedActionLogger<TOut, TFormatter, TAction, TTask>
 where
     TFormatter: LogFormatter,

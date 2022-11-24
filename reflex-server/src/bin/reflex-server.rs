@@ -37,11 +37,9 @@ use reflex_server::{
     },
     imports::server_imports,
     logger::{
-        formatted::{FormattedActionLogger, PrefixedLogFormatter},
-        json::JsonActionLogger,
-        messages::DefaultActionFormatter,
-        prometheus::PrometheusLogger,
-        ActionLogger, ChainLogger, EitherLogger,
+        formatted::FormattedActionLogger, formatter::PrefixedLogFormatter, json::JsonActionLogger,
+        messages::DefaultActionFormatter, prometheus::PrometheusLogger, ActionLogger, ChainLogger,
+        EitherLogger,
     },
     scheduler_metrics::{
         ServerMetricsHandlerTimer, ServerMetricsInstrumentation, ServerSchedulerMetricNames,

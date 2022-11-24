@@ -34,10 +34,8 @@ use reflex_server::{
     },
     imports::server_imports,
     logger::{
-        formatted::{FormattedActionLogger, PrefixedLogFormatter},
-        json::JsonActionLogger,
-        messages::DefaultActionFormatter,
-        EitherLogger,
+        formatted::FormattedActionLogger, formatter::PrefixedLogFormatter, json::JsonActionLogger,
+        messages::DefaultActionFormatter, EitherLogger,
     },
     scheduler_metrics::ServerMetricsInstrumentation,
     server::{utils::EitherTracer, NoopWebSocketGraphQlServerQueryTransform},

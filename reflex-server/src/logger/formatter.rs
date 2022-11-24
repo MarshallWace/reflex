@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::SystemTime};
+
+use crate::utils::datetime::format_datetime;
 
 pub trait LogFormatter {
     type Message;
@@ -178,6 +180,126 @@ where
     fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
         self.left.write(f)?;
         self.right.write(f)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct PrefixedLogFormatter<T: LogFormatter> {
+    prefix: &'static str,
+    formatter: T,
+}
+impl<T: LogFormatter> PrefixedLogFormatter<T> {
+    pub fn new(prefix: &'static str, formatter: T) -> Self {
+        Self { prefix, formatter }
+    }
+}
+impl<T: LogFormatter> Clone for PrefixedLogFormatter<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            prefix: self.prefix,
+            formatter: self.formatter.clone(),
+        }
+    }
+}
+impl<T: LogFormatter> Copy for PrefixedLogFormatter<T> where T: Copy {}
+impl<T: LogFormatter> LogFormatter for PrefixedLogFormatter<T> {
+    type Message = T::Message;
+    type Writer<'a> = PrefixedLogWriter<T::Writer<'a>>
+    where
+        Self: 'a,
+        Self::Message: 'a;
+    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+        self.formatter
+            .format(message)
+            .map(|inner| PrefixedLogWriter {
+                prefix: self.prefix,
+                inner,
+            })
+    }
+}
+pub struct PrefixedLogWriter<T: LogWriter> {
+    prefix: &'static str,
+    inner: T,
+}
+impl<T: LogWriter> LogWriter for PrefixedLogWriter<T> {
+    fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
+        write!(f, "[{}] ", self.prefix)?;
+        self.inner.write(f)
+    }
+}
+
+#[derive(Debug)]
+pub struct TimestampedLogFormatter<T> {
+    inner: T,
+    format: &'static str,
+}
+impl<T> TimestampedLogFormatter<T> {
+    pub fn new(format: &'static str, formatter: T) -> Self {
+        Self {
+            inner: formatter,
+            format,
+        }
+    }
+}
+impl<T> Clone for TimestampedLogFormatter<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            format: self.format,
+        }
+    }
+}
+impl<T> Copy for TimestampedLogFormatter<T> where T: Copy {}
+impl<T, V> LogFormatter for TimestampedLogFormatter<T>
+where
+    T: LogFormatter<Message = V>,
+{
+    type Message = V;
+    type Writer<'a> = TimestampedLogWriter<T::Writer<'a>>
+    where
+        Self: 'a,
+        Self::Message: 'a;
+    fn format<'a>(&self, message: &'a V) -> Option<Self::Writer<'a>> {
+        self.inner
+            .format(message)
+            .map(|inner| TimestampedLogWriter {
+                inner,
+                format: self.format,
+            })
+    }
+}
+#[derive(Debug)]
+pub struct TimestampedLogWriter<T> {
+    inner: T,
+    format: &'static str,
+}
+impl<T> Clone for TimestampedLogWriter<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            format: self.format,
+        }
+    }
+}
+impl<T> Copy for TimestampedLogWriter<T> where T: Copy {}
+impl<T> LogWriter for TimestampedLogWriter<T>
+where
+    T: LogWriter,
+{
+    fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
+        let label = format_datetime(SystemTime::now(), self.format);
+        write!(f, "{}", label)?;
+        self.inner.write(f)?;
         Ok(())
     }
 }
