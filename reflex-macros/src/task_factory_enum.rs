@@ -339,7 +339,6 @@ fn actor_for_factory(input: &TaskFactoryConfiguration) -> TokenStream2 {
         .collect();
     quote_spanned! {
         span =>
-        #[derive(Clone)]
         #visibility enum #actor_name<#params> #where_clause {
             #(#actor_variants),*
         }

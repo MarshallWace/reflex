@@ -511,7 +511,6 @@ blanket_trait!(
     }
 );
 
-#[derive(Clone)]
 enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
