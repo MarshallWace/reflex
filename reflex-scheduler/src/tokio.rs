@@ -14,7 +14,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{future, Future, Sink, SinkExt, Stream, StreamExt};
+use futures::{
+    future::{self, Ready},
+    sink::With,
+    Future, SinkExt, Stream, StreamExt,
+};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -23,9 +27,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::{PollSendError, PollSender};
 
 use reflex_dispatcher::{
-    utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, ActorEvents, Handler,
-    HandlerContext, MessageData, MessageOffset, ProcessId, SchedulerCommand, SchedulerMode,
-    SchedulerTransition, TaskFactory, TaskInbox, TaskMessage, Worker,
+    utils::with_unsubscribe_callback::WithUnsubscribeCallback, Action, Actor, ActorEvents,
+    AsyncScheduler, Handler, HandlerContext, MessageData, MessageOffset, ProcessId,
+    SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox, TaskMessage,
+    Worker,
 };
 
 pub mod metrics;
@@ -443,52 +448,78 @@ where
             result,
         )
     }
-    pub fn actions(&self) -> impl Sink<(ProcessId, TAction)>
+}
+
+impl<TAction, TTask> AsyncScheduler for TokioScheduler<TAction, TTask>
+where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+{
+    type Action = TAction;
+    type Sink = With<
+        PollSender<(TokioCommand<TAction, TTask>, Instant)>,
+        (TokioCommand<TAction, TTask>, Instant),
+        TAction,
+        Ready<
+            Result<
+                (TokioCommand<TAction, TTask>, Instant),
+                TokioSinkError<(AsyncMessage<TAction>, Instant)>,
+            >,
+        >,
+        Box<
+            dyn FnMut(
+                    TAction,
+                ) -> Ready<
+                    Result<
+                        (TokioCommand<TAction, TTask>, Instant),
+                        TokioSinkError<(AsyncMessage<TAction>, Instant)>,
+                    >,
+                > + Send,
+        >,
+    >;
+    type Subscription<F, V> = Pin<Box<dyn Future<Output = Self::SubscriptionResults<F, V>> + Send + 'static>>
     where
-        TAction: Send + Sync + 'static,
-        TTask: Send + 'static,
-    {
-        PollSender::new(self.commands.clone()).with({
+        F: Fn(&Self::Action) -> Option<V>,
+        V: Send + 'static;
+    type SubscriptionResults<F, V> = Pin<Box<dyn Stream<Item = V> + Send + 'static>>
+    where
+        F: Fn(&Self::Action) -> Option<V>,
+        V: Send + 'static;
+
+    fn actions(&self, pid: ProcessId) -> Self::Sink {
+        PollSender::new(self.commands.clone()).with(Box::new({
             let next_offset = self.next_offset.clone();
-            move |(pid, message)| {
-                future::ready(
-                    Result::<_, TokioSinkError<(AsyncMessage<TAction>, Instant)>>::Ok({
-                        let enqueue_time = Instant::now();
-                        let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
-                        (
-                            TokioCommand::Send {
-                                pid,
-                                message: AsyncMessage::Owned {
-                                    message,
-                                    offset,
-                                    redispatched_from: None,
-                                    caller: None,
-                                    enqueue_time,
-                                },
+            move |message| {
+                future::ready(Ok({
+                    let enqueue_time = Instant::now();
+                    let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
+                    (
+                        TokioCommand::Send {
+                            pid,
+                            message: AsyncMessage::Owned {
+                                message,
+                                offset,
+                                redispatched_from: None,
+                                caller: None,
+                                enqueue_time,
                             },
-                            enqueue_time,
-                        )
-                    }),
-                )
+                        },
+                        enqueue_time,
+                    )
+                }))
             }
-        })
+        }))
     }
-    pub fn subscribe<V: Send + 'static>(
-        &self,
-        pid: ProcessId,
-        transform: impl Fn(&TAction) -> Option<V> + Send + 'static,
-    ) -> Pin<
-        Box<dyn Future<Output = Pin<Box<dyn Stream<Item = V> + Send + 'static>>> + Send + 'static>,
-    >
+    fn subscribe<F, V>(&self, pid: ProcessId, selector: F) -> Self::Subscription<F, V>
     where
-        TAction: Send + Sync + 'static,
-        TTask: Send + 'static,
+        F: Fn(&Self::Action) -> Option<V> + Send + 'static,
+        V: Send + 'static,
     {
         let (results_tx, results_rx) = mpsc::channel(32);
         let subscription_id =
             TokioSubscriberId::from(increment_atomic_counter(&self.next_subscriber_id));
         let subscriber = TokioSubscriber::new(move |action| {
-            let value = transform(action)?;
+            let value = selector(action)?;
             let results = results_tx.clone();
             Some(Box::pin(async move {
                 let _ = results.send(value).await;
@@ -528,7 +559,9 @@ where
         let results_stream = ReceiverStream::new(results_rx);
         Box::pin(async move {
             let _ = subscribe_task.await;
-            let results: Pin<Box<dyn Stream<Item = V> + Send + 'static>> =
+            // At this point the subscription has been initialized, which is a good opportunity for the listener to
+            // perform any actions before subscribing to the results stream
+            let results: Self::SubscriptionResults<F, V> =
                 Box::pin(WithUnsubscribeCallback::new(results_stream, {
                     move || {
                         let _ = tokio::spawn(unsubscribe_task);
@@ -574,13 +607,13 @@ where
     instrumentation.set_current_queue_size(scheduler_pid, 0);
     let (async_task_pool, async_tasks_tx) = {
         let (requests_tx, requests_rx) =
-            mpsc::channel::<TokioThreadPoolRequest<TAction, TTask>>(1024);
+            mpsc::channel::<TokioThreadPoolRequest<TAction, TTask>>(async_buffer_capacity);
         let task_pool = async_tasks.create(ReceiverStream::new(requests_rx));
         (task_pool, requests_tx)
     };
     let (blocking_task_pool, blocking_tasks_tx) = {
         let (requests_tx, requests_rx) =
-            mpsc::channel::<TokioThreadPoolRequest<TAction, TTask>>(1024);
+            mpsc::channel::<TokioThreadPoolRequest<TAction, TTask>>(async_buffer_capacity);
         let task_pool = blocking_tasks.create(ReceiverStream::new(requests_rx));
         (task_pool, requests_tx)
     };
@@ -801,7 +834,7 @@ where
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
     let state = actor.init();
-    let (inbox_tx, inbox) = create_inbox();
+    let (inbox_tx, inbox) = create_worker_inbox();
     match actor.events(inbox) {
         ActorEvents::Sync(inbox) => {
             let actor = Arc::new(actor);
@@ -883,7 +916,7 @@ where
     <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
-    let (actor_inbox_tx, actor_inbox) = create_inbox();
+    let (actor_inbox_tx, actor_inbox) = create_worker_inbox();
     let inbox_task =
         create_async_events_task(events, actor_pid, next_offset.clone(), results.clone());
     let actor_process = spawn_worker_actor_process(
@@ -988,8 +1021,9 @@ where
     }
 }
 
-fn create_inbox<TAction: Action>() -> (mpsc::Sender<AsyncMessage<TAction>>, TokioInbox<TAction>) {
-    let (inbox_tx, inbox_rx) = mpsc::channel(1024);
+fn create_worker_inbox<TAction: Action>(
+) -> (mpsc::Sender<AsyncMessage<TAction>>, TokioInbox<TAction>) {
+    let (inbox_tx, inbox_rx) = mpsc::channel(64);
     (inbox_tx, TokioInbox(ReceiverStream::new(inbox_rx)))
 }
 

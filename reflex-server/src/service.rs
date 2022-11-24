@@ -22,8 +22,8 @@ use reflex::core::{
     Rewritable,
 };
 use reflex_dispatcher::{
-    utils::take_until_final_item::TakeUntilFinalItem, Action, Actor, Handler, Matcher, ProcessId,
-    Redispatcher, SchedulerTransition, TaskFactory,
+    utils::take_until_final_item::TakeUntilFinalItem, Action, Actor, AsyncScheduler, Handler,
+    Matcher, ProcessId, Redispatcher, SchedulerTransition, TaskFactory,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -247,19 +247,16 @@ pub trait GraphQlWebServerInstrumentation: TokioSchedulerInstrumentation {
     ) -> Self::InstrumentedTask<T>;
 }
 
-pub struct GraphQlWebServer<TInstrumentation, TAction, TTask>
+pub struct GraphQlWebServer<TAction, TTask>
 where
-    TInstrumentation: GraphQlWebServerInstrumentation,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
     runtime: TokioScheduler<TAction, TTask>,
     main_pid: ProcessId,
-    instrumentation: TInstrumentation,
 }
-impl<TInstrumentation, TAction, TTask> GraphQlWebServer<TInstrumentation, TAction, TTask>
+impl<TAction, TTask> GraphQlWebServer<TAction, TTask>
 where
-    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + 'static,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
@@ -278,6 +275,7 @@ where
         TTracer,
         TLogger,
         TTimer,
+        TInstrumentation,
     >(
         graph_root: (CompiledProgram, InstructionPointer),
         schema: Option<GraphQlSchema>,
@@ -396,15 +394,11 @@ where
             },
             logger,
             timer,
-            instrumentation.clone(),
+            instrumentation,
             async_tasks,
             blocking_tasks,
         );
-        Ok(Self {
-            instrumentation,
-            runtime,
-            main_pid,
-        })
+        Ok(Self { runtime, main_pid })
     }
     pub fn handle_graphql_http_request(
         &self,
@@ -420,16 +414,44 @@ where
             + 'static,
         TTask: TaskFactory<TAction, TTask> + Send + 'static,
     {
-        handle_graphql_http_request(&self.runtime, request, self.main_pid)
+        handle_graphql_http_request(request, &self.runtime, self.main_pid)
     }
     pub fn main_pid(&self) -> ProcessId {
         self.main_pid
     }
 }
 
-pub fn graphql_service<TInstrumentation, TAction, TTask>(
-    server: Arc<GraphQlWebServer<TInstrumentation, TAction, TTask>>,
-    main_pid: ProcessId,
+impl<TAction, TTask> AsyncScheduler for GraphQlWebServer<TAction, TTask>
+where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+{
+    type Action = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Action;
+    type Sink = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Sink;
+    type Subscription<F, V> = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Subscription<F, V>
+        where
+            F: Fn(&Self::Action) -> Option<V>,
+            V: Send + 'static;
+    type SubscriptionResults<F, V> = <TokioScheduler<TAction, TTask> as AsyncScheduler>::SubscriptionResults<F, V>
+        where
+            F: Fn(&Self::Action) -> Option<V>,
+            V: Send + 'static;
+    fn actions(&self, pid: ProcessId) -> Self::Sink {
+        self.runtime.actions(pid)
+    }
+    fn subscribe<F, V>(&self, pid: ProcessId, selector: F) -> Self::Subscription<F, V>
+    where
+        F: Fn(&Self::Action) -> Option<V> + Send + 'static,
+        V: Send + 'static,
+    {
+        self.runtime.subscribe(pid, selector)
+    }
+}
+
+pub fn graphql_service<TAction>(
+    runtime: Arc<impl AsyncScheduler<Action = TAction> + Send + Sync + 'static>,
+    server_pid: ProcessId,
+    instrumentation: impl GraphQlWebServerInstrumentation + Clone + Send + 'static,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -437,7 +459,6 @@ pub fn graphql_service<TInstrumentation, TAction, TTask>(
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
 >
 where
-    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action
         + Matcher<HttpServerResponseAction>
         + Matcher<WebSocketServerSendAction>
@@ -450,23 +471,18 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
-    let instrumentation = server.instrumentation.clone();
     service_fn({
         move |req: Request<Body>| {
-            let server = server.clone();
+            let runtime = runtime.clone();
             let instrumentation = instrumentation.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
-                    &Method::POST => {
-                        handle_graphql_http_request(&server.runtime, req, main_pid).await
-                    }
+                    &Method::POST => handle_graphql_http_request(req, &*runtime, server_pid).await,
                     &Method::GET => {
                         if hyper_tungstenite::is_upgrade_request(&req) {
-                            match handle_graphql_websocket_request(&server.runtime, req, main_pid)
-                                .await
+                            match handle_graphql_websocket_request(req, &*runtime, server_pid).await
                             {
                                 Err(response) => response,
                                 Ok((response, listen_task)) => {
@@ -491,9 +507,9 @@ where
     })
 }
 
-pub fn query_inspector_service<TInstrumentation, TAction, TTask>(
-    server: Arc<GraphQlWebServer<TInstrumentation, TAction, TTask>>,
-    main_pid: ProcessId,
+pub fn query_inspector_service<TAction>(
+    runtime: Arc<impl AsyncScheduler<Action = TAction> + Send + Sync>,
+    server_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -501,7 +517,6 @@ pub fn query_inspector_service<TInstrumentation, TAction, TTask>(
     Future = impl Future<Output = Result<Response<Body>, Infallible>> + Send,
 >
 where
-    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action
         + Matcher<QueryInspectorServerHttpResponseAction>
         + From<QueryInspectorServerHttpRequestAction>
@@ -509,16 +524,15 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     service_fn({
         move |req: Request<Body>| {
-            let server = server.clone();
+            let runtime = runtime.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
                     &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => handle_query_inspector_http_request(&server.runtime, req, main_pid).await,
+                    _ => handle_query_inspector_http_request(req, &*runtime, server_pid).await,
                 };
                 response.headers_mut().extend(cors_headers);
                 Ok(response)
@@ -527,9 +541,9 @@ where
     })
 }
 
-pub fn session_playback_service<T, TInstrumentation, TAction, TTask>(
-    server: Arc<GraphQlWebServer<TInstrumentation, TAction, TTask>>,
-    main_pid: ProcessId,
+pub fn session_playback_service<T, TAction>(
+    runtime: Arc<impl AsyncScheduler<Action = TAction> + Send + Sync>,
+    server_pid: ProcessId,
 ) -> impl Service<
     Request<Body>,
     Response = Response<Body>,
@@ -538,18 +552,16 @@ pub fn session_playback_service<T, TInstrumentation, TAction, TTask>(
 >
 where
     T: Expression,
-    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
     TAction: Action + SessionPlaybackServerAction<T> + Send + Sync + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     service_fn({
         move |req: Request<Body>| {
-            let server = server.clone();
+            let runtime = runtime.clone();
             async move {
                 let cors_headers = get_cors_headers(&req).into_iter().collect::<Vec<_>>();
                 let mut response = match req.method() {
                     &Method::OPTIONS => handle_cors_preflight_request(req),
-                    _ => handle_session_playback_http_request(&server.runtime, req, main_pid).await,
+                    _ => handle_session_playback_http_request(req, &*runtime, server_pid).await,
                 };
                 response.headers_mut().extend(cors_headers);
                 Ok(response)
@@ -558,10 +570,10 @@ where
     })
 }
 
-fn handle_graphql_http_request<TAction, TTask>(
-    scheduler: &TokioScheduler<TAction, TTask>,
+fn handle_graphql_http_request<TAction>(
     request: Request<Body>,
-    main_pid: ProcessId,
+    runtime: &impl AsyncScheduler<Action = TAction>,
+    server_pid: ProcessId,
 ) -> impl Future<Output = Response<Body>>
 where
     TAction: Action
@@ -571,12 +583,11 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     handle_http_request(
         request,
-        scheduler,
-        main_pid,
+        runtime,
+        server_pid,
         |request_id, request| {
             HttpServerRequestAction {
                 request_id,
@@ -604,10 +615,10 @@ where
     )
 }
 
-fn handle_graphql_websocket_request<TAction, TTask>(
-    scheduler: &TokioScheduler<TAction, TTask>,
+fn handle_graphql_websocket_request<TAction>(
     request: Request<Body>,
-    main_pid: ProcessId,
+    runtime: &impl AsyncScheduler<Action = TAction>,
+    server_pid: ProcessId,
 ) -> impl Future<Output = Result<(Response<Body>, impl Future<Output = ()>), Response<Body>>>
 where
     TAction: Action
@@ -621,7 +632,6 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     let connection_id = Uuid::new_v4();
     let request_headers = clone_http_request_wrapper(&request);
@@ -631,8 +641,8 @@ where
             response,
             connection.then({
                 let subscribe_websocket_responses =
-                    create_websocket_response_stream(scheduler, connection_id, main_pid);
-                let commands = scheduler.actions();
+                    create_websocket_response_stream(runtime, connection_id, server_pid);
+                let mut commands = runtime.actions(server_pid);
                 move |connection| match connection {
                     Err(err) => {
                         let action = TAction::from(WebSocketServerSendAction {
@@ -644,9 +654,8 @@ where
                                 ),
                             ),
                         });
-                        let mut commands = commands;
                         async move {
-                            let _ = commands.send((main_pid, action));
+                            let _ = commands.send(action);
                         }
                     }
                     .left_future(),
@@ -659,7 +668,7 @@ where
                             upgraded_socket,
                             subscribe_websocket_responses,
                         )
-                        .map(move |action| (main_pid, action));
+                        .map(move |action| action);
                         pipe_stream(actions, commands).right_future()
                     }
                 }
@@ -669,10 +678,10 @@ where
     }
 }
 
-fn create_websocket_response_stream<TAction, TTask>(
-    scheduler: &TokioScheduler<TAction, TTask>,
+fn create_websocket_response_stream<TAction>(
+    runtime: &impl AsyncScheduler<Action = TAction>,
     connection_id: Uuid,
-    main_pid: ProcessId,
+    server_pid: ProcessId,
 ) -> impl Future<Output = impl Stream<Item = Message>>
 where
     TAction: Action
@@ -681,10 +690,9 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
-    scheduler
-        .subscribe(main_pid, move |action: &TAction| {
+    runtime
+        .subscribe(server_pid, move |action: &TAction| {
             if let Some(action) = action.match_type() {
                 let WebSocketServerSendAction {
                     connection_id: emitted_connection_id,
@@ -766,10 +774,10 @@ where
     connect_action.chain(message_actions)
 }
 
-fn handle_query_inspector_http_request<TAction, TTask>(
-    scheduler: &TokioScheduler<TAction, TTask>,
+fn handle_query_inspector_http_request<TAction>(
     request: Request<Body>,
-    main_pid: ProcessId,
+    runtime: &impl AsyncScheduler<Action = TAction>,
+    server_pid: ProcessId,
 ) -> impl Future<Output = Response<Body>>
 where
     TAction: Action
@@ -779,12 +787,11 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     handle_http_request(
         request,
-        scheduler,
-        main_pid,
+        runtime,
+        server_pid,
         |request_id, request| {
             QueryInspectorServerHttpRequestAction {
                 request_id,
@@ -812,10 +819,10 @@ where
     )
 }
 
-fn handle_session_playback_http_request<TAction, TTask>(
-    scheduler: &TokioScheduler<TAction, TTask>,
+fn handle_session_playback_http_request<TAction>(
     request: Request<Body>,
-    main_pid: ProcessId,
+    runtime: &impl AsyncScheduler<Action = TAction>,
+    server_pid: ProcessId,
 ) -> impl Future<Output = Response<Body>>
 where
     TAction: Action
@@ -825,12 +832,11 @@ where
         + Send
         + Sync
         + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     handle_http_request(
         request,
-        scheduler,
-        main_pid,
+        runtime,
+        server_pid,
         |request_id, request| {
             SessionPlaybackServerHttpRequestAction {
                 request_id,

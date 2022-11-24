@@ -499,18 +499,17 @@ where
         tracer,
         logger,
         timer,
-        instrumentation,
+        instrumentation.clone(),
         async_tasks,
         blocking_tasks,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;
+    let main_pid = app.main_pid();
+    let runtime = Arc::new(app);
     let service = make_service_fn({
-        let main_pid = app.main_pid();
-        let app = Arc::new(app);
         move |_socket: &AddrStream| {
-            let app = Arc::clone(&app);
-            let service = graphql_service(app, main_pid);
+            let service = graphql_service(Arc::clone(&runtime), main_pid, instrumentation.clone());
             future::ready(Ok::<_, Infallible>(service))
         }
     });

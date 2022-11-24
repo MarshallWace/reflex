@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{ops::Deref, pin::Pin};
 
-use futures::{future::AbortHandle, Future, Stream};
+use futures::{future::AbortHandle, Future, Sink, Stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
@@ -286,4 +286,22 @@ impl std::fmt::Display for ProcessId {
 pub trait HandlerContext {
     fn pid(&self) -> ProcessId;
     fn generate_pid(&mut self) -> ProcessId;
+}
+
+pub trait AsyncScheduler {
+    type Action: Action + Send + 'static;
+    type Sink: Sink<Self::Action> + Unpin + Send + 'static;
+    type Subscription<F, V>: Future<Output = Self::SubscriptionResults<F, V>> + Send + 'static
+    where
+        F: Fn(&Self::Action) -> Option<V>,
+        V: Send + 'static;
+    type SubscriptionResults<F, V>: Stream<Item = V> + Unpin + Send + 'static
+    where
+        F: Fn(&Self::Action) -> Option<V>,
+        V: Send + 'static;
+    fn actions(&self, pid: ProcessId) -> Self::Sink;
+    fn subscribe<F, V>(&self, pid: ProcessId, selector: F) -> Self::Subscription<F, V>
+    where
+        F: Fn(&Self::Action) -> Option<V> + Send + 'static,
+        V: Send + 'static;
 }

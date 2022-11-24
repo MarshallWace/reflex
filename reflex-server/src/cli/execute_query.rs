@@ -198,7 +198,7 @@ where
             })
             .with_context(|| anyhow!("Failed to create GraphQL request payload"))
     }?;
-    let app = GraphQlWebServer::<TInstrumentation, TAction, TTask>::new(
+    let app = GraphQlWebServer::<TAction, TTask>::new(
         graph_root,
         schema,
         custom_actors,

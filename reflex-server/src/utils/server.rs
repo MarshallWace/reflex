@@ -5,28 +5,26 @@ use bytes::Bytes;
 use futures::{future, Future, FutureExt, SinkExt, StreamExt};
 use http::{Request, Response, StatusCode};
 use hyper::{body, Body};
-use reflex_dispatcher::{Action, ProcessId, TaskFactory};
-use reflex_scheduler::tokio::TokioScheduler;
+use reflex_dispatcher::{Action, AsyncScheduler, ProcessId};
 use uuid::Uuid;
 
 use crate::server::utils::create_http_response;
 
-pub fn handle_http_request<TAction, TTask>(
+pub fn handle_http_request<TAction>(
     request: Request<Body>,
-    scheduler: &TokioScheduler<TAction, TTask>,
-    main_pid: ProcessId,
+    runtime: &impl AsyncScheduler<Action = TAction>,
+    server_pid: ProcessId,
     create_request: impl Fn(Uuid, Request<Bytes>) -> TAction + 'static,
     create_response: impl Fn(Uuid, Response<Bytes>) -> TAction + 'static,
     match_result: impl for<'a> Fn(Uuid, &'a TAction) -> Option<Response<Bytes>> + Send + 'static,
 ) -> impl Future<Output = Response<Body>> + 'static
 where
     TAction: Action + Send + Sync + 'static,
-    TTask: TaskFactory<TAction, TTask> + Send + 'static,
 {
     let (headers, body) = request.into_parts();
     let request_id = Uuid::new_v4();
     let dispatch_request = {
-        let mut actions = scheduler.actions();
+        let mut actions = runtime.actions(server_pid);
         async move {
             let action = match body::to_bytes(body).await {
                 Ok(bytes) => create_request(request_id, Request::from_parts(headers, bytes)),
@@ -39,11 +37,11 @@ where
                     ),
                 ),
             };
-            actions.send((main_pid, action)).await
+            actions.send(action).await
         }
     };
-    let subscribe_response_stream = scheduler
-        .subscribe(main_pid, move |action: &TAction| {
+    let subscribe_response_stream = runtime
+        .subscribe(server_pid, move |action: &TAction| {
             match_result(request_id, action)
         })
         .map(|stream| stream.take(1));

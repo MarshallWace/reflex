@@ -28,9 +28,9 @@ use reflex::{
 };
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
-    Action, Actor, ActorEvents, Handler, HandlerContext, Matcher, MessageData, Named, Redispatcher,
-    SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
-    TaskFactory, TaskInbox, Worker,
+    Action, Actor, ActorEvents, AsyncScheduler, Handler, HandlerContext, Matcher, MessageData,
+    Named, Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction,
+    SerializedAction, TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::{
     action::{
