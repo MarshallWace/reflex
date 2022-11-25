@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::Entry, HashMap},
     marker::PhantomData,
@@ -364,6 +365,17 @@ dispatcher!({
         }
     }
 });
+impl<
+        T: Expression,
+        TAction: Action + QueryInspectorAction<T>,
+        TTask: TaskFactory<TAction, TTask>,
+    > TaskFactory<TAction, TTask> for QueryInspector<T>
+{
+    type Actor = Self;
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 impl<T: Expression> QueryInspector<T> {
     fn handle_evaluate_start<TAction, TTask>(

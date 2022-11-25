@@ -87,6 +87,18 @@ where
         ActorEvents::Sync(inbox)
     }
 }
+impl<T, TFactory, TAction, TTask> TaskFactory<TAction, TTask> for QueryInspectorServer<T, TFactory>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAction: Action + QueryInspectorServerAction<T>,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Actor = Self;
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 impl<T, TFactory, TAction, TTask> Worker<TAction, SchedulerTransition<TAction, TTask>>
     for QueryInspectorServer<T, TFactory>

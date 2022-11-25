@@ -146,6 +146,21 @@ where
         ActorEvents::Sync(inbox)
     }
 }
+impl<T, TFactory, TRecordedAction, TRecordedTask, TAction, TTask> TaskFactory<TAction, TTask>
+    for SessionPlaybackServer<T, TFactory, TRecordedAction, TRecordedTask>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TRecordedAction: Action + SerializableAction + Clone + Matcher<EvaluateResultAction<T>>,
+    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
+    TAction: Action + SessionPlaybackServerAction<T> + From<TRecordedAction>,
+    TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
+{
+    type Actor = Self;
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 impl<T, TFactory, TRecordedAction, TRecordedTask, TAction, TTask>
     Worker<TAction, SchedulerTransition<TAction, TTask>>

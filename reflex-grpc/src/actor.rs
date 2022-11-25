@@ -1189,6 +1189,25 @@ where
             .map(SchedulerTransition::new)
     }
 }
+impl<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect, TAction, TTask>
+    TaskFactory<TAction, TTask>
+    for GrpcHandler<T, TFactory, TAllocator, TTranscoder, TConfig, TReconnect>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T>,
+    TFactory: AsyncExpressionFactory<T>,
+    TAllocator: AsyncHeapAllocator<T>,
+    TTranscoder: ProtoTranscoder + Clone + Send + 'static,
+    TConfig: GrpcConfig + 'static,
+    TReconnect: ReconnectTimeout + Send,
+    TAction:
+        Action + GrpcHandlerActorAction<T> + GrpcHandlerConnectionTaskActorAction + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder>,
+{
+    type Actor = Self;
+    fn create(self) -> Self::Actor {
+        self
+    }
+}
 
 fn create_grpc_connect_task(
     connection_id: GrpcConnectionId,

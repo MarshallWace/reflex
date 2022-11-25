@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use reflex_macros::{dispatcher, Named};
@@ -204,5 +205,20 @@ where
                     SessionPlaybackEndAction.into(),
                 ))),
         ))
+    }
+}
+impl<TRecordedAction, TRecordedTask, TAction, TTask> TaskFactory<TAction, TTask>
+    for SessionPlayback<TRecordedAction, TRecordedTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+    TRecordedAction: Action + Clone,
+    TRecordedTask: TaskFactory<TRecordedAction, TRecordedTask> + Clone,
+    TAction: Action + SessionPlaybackAction + From<TRecordedAction>,
+    TTask: TaskFactory<TAction, TTask> + From<TRecordedTask>,
+{
+    type Actor = Self;
+    fn create(self) -> Self::Actor {
+        self
     }
 }
