@@ -50,8 +50,8 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_scheduler::tokio::{
-    TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerHandlerTimer,
-    TokioSchedulerInstrumentation, TokioSchedulerLogger, TokioThreadPoolFactory,
+    TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerInstrumentation,
+    TokioSchedulerLogger, TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
 use uuid::Uuid;
@@ -274,7 +274,6 @@ where
         TWorkerMetricLabels,
         TTracer,
         TLogger,
-        TTimer,
         TInstrumentation,
     >(
         graph_root: (CompiledProgram, InstructionPointer),
@@ -294,7 +293,6 @@ where
         get_worker_metric_labels: TWorkerMetricLabels,
         tracer: TTracer,
         logger: TLogger,
-        timer: TTimer,
         instrumentation: TInstrumentation,
         async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
         blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
@@ -321,9 +319,11 @@ where
         TTracer: Tracer + Send + 'static,
         TTracer::Span: Span + Send + Sync + 'static,
         TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
-        TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Clone + Send + 'static,
-        TTimer::Span: Send + 'static,
-        TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + 'static,
+        TInstrumentation: GraphQlWebServerInstrumentation
+            + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+            + Clone
+            + Send
+            + 'static,
         TAction: Action + GraphQlWebServerAction<T> + Send + Sync + 'static,
         TTask: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask + Send + 'static,
         TTask::Actor: From<
@@ -393,7 +393,6 @@ where
                 (actors, init_commands, main_pid)
             },
             logger,
-            timer,
             instrumentation,
             async_tasks,
             blocking_tasks,

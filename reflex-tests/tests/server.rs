@@ -9,9 +9,7 @@ use std::{
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex_handlers::actor::HandlerActor;
-use reflex_scheduler::{
-    threadpool::AsyncTokioThreadPoolFactory, tokio::NoopTokioSchedulerHandlerTimer,
-};
+use reflex_scheduler::threadpool::AsyncTokioThreadPoolFactory;
 use reflex_server::{
     cli::{
         execute_query::GraphQlWebServerMetricLabels,
@@ -103,8 +101,12 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         GraphQlWebServerMetricLabels,
         TTracer,
     >;
-    type TInstrumentation = ServerMetricsInstrumentation;
-    let app = GraphQlWebServer::<TInstrumentation, TAction, TTask>::new(
+    let tracer = NoopTracer::default();
+    let logger = NoopLogger::default();
+    let instrumentation = ServerMetricsInstrumentation::new(Default::default());
+    let async_tasks = AsyncTokioThreadPoolFactory::default();
+    let blocking_tasks = AsyncTokioThreadPoolFactory::default();
+    let app = GraphQlWebServer::<TAction, TTask>::new(
         graph_root,
         None,
         {
@@ -136,21 +138,21 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         GraphQlWebServerMetricLabels,
         GraphQlWebServerMetricLabels,
         GraphQlWebServerMetricLabels,
-        NoopTracer::default(),
-        NoopLogger::default(),
-        NoopTokioSchedulerHandlerTimer::default(),
-        ServerMetricsInstrumentation::new(Default::default()),
-        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
-        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
+        tracer,
+        logger,
+        instrumentation.clone(),
+        async_tasks,
+        blocking_tasks,
     )
     .unwrap();
     let socket_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let service = make_service_fn({
         let main_pid = app.main_pid();
         let app = Arc::new(app);
+        let instrumentation = instrumentation.clone();
         move |_socket: &AddrStream| {
             let app = Arc::clone(&app);
-            let service = graphql_service(app, main_pid);
+            let service = graphql_service::<TAction>(app, main_pid, instrumentation.clone());
             future::ready(Ok::<_, Infallible>(service))
         }
     });

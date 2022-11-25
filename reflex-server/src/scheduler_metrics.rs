@@ -1,18 +1,14 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{
-    marker::PhantomData,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{marker::PhantomData, sync::Arc, time::Duration};
 
 use futures::Future;
-use metrics::{describe_counter, describe_gauge, describe_histogram, gauge, histogram, Unit};
-use reflex_dispatcher::{Action, MessageData, Named, ProcessId, TaskFactory};
-use reflex_scheduler::tokio::{
-    metrics::TokioTaskMetricNames, TokioSchedulerHandlerTimer, TokioSchedulerInstrumentation,
+use metrics::{
+    decrement_gauge, describe_gauge, describe_histogram, gauge, histogram, increment_gauge, Unit,
 };
+use reflex_dispatcher::{Action, Named, ProcessId, TaskFactory};
+use reflex_scheduler::tokio::{metrics::TokioTaskMetricNames, TokioSchedulerInstrumentation};
 use tokio::task::JoinHandle;
 use tokio_metrics::{Instrumented, TaskMonitor};
 
@@ -22,21 +18,30 @@ pub use metrics::SharedString;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerSchedulerMetricNames {
-    pub event_bus_queued_messages: &'static str,
-    pub event_bus_message_queue_capacity: &'static str,
-    pub event_processing_duration_micros: &'static str,
-    pub event_bus_queued_duration_micros: &'static str,
-    pub handler_processing_time_micros: &'static str,
+    pub scheduler_queue_capacity: &'static str,
+    pub scheduler_queue_current_size: &'static str,
+    pub scheduler_command_waiting_duration_micros: &'static str,
+    pub scheduler_command_working_duration_micros: &'static str,
+    pub worker_count: &'static str,
+    pub worker_inbox_capacity: &'static str,
+    pub worker_inbox_current_size: &'static str,
+    pub worker_action_waiting_duration_micros: &'static str,
+    pub worker_action_working_duration_micros: &'static str,
+
     pub tokio_task_metric_names: TokioTaskMetricNames,
 }
 impl Default for ServerSchedulerMetricNames {
     fn default() -> Self {
         Self {
-            event_bus_queued_messages: "event_bus_queued_messages",
-            event_bus_message_queue_capacity: "event_bus_message_capacity",
-            event_processing_duration_micros: "event_processing_duration_micros",
-            event_bus_queued_duration_micros: "event_bus_queued_duration_micros",
-            handler_processing_time_micros: "handler_processing_time_micros",
+            scheduler_queue_capacity: "scheduler_queue_capacity",
+            scheduler_queue_current_size: "scheduler_queue_current_size",
+            scheduler_command_waiting_duration_micros: "scheduler_command_waiting_duration_micros",
+            scheduler_command_working_duration_micros: "scheduler_command_working_duration_micros",
+            worker_count: "worker_count",
+            worker_inbox_capacity: "worker_inbox_capacity",
+            worker_inbox_current_size: "worker_inbox_current_size",
+            worker_action_waiting_duration_micros: "worker_action_waiting_duration_micros",
+            worker_action_working_duration_micros: "worker_action_working_duration_micros",
             tokio_task_metric_names: TokioTaskMetricNames::default(),
         }
     }
@@ -44,99 +49,60 @@ impl Default for ServerSchedulerMetricNames {
 impl ServerSchedulerMetricNames {
     pub fn init(self) -> Self {
         describe_gauge!(
-            self.event_bus_queued_messages,
-            Unit::Count,
-            "Number of event bus messages currently queued awaiting processing"
-        );
-        describe_gauge!(
-            self.event_bus_message_queue_capacity,
+            self.scheduler_queue_capacity,
             Unit::Count,
             "Event bus message queue buffer capacity"
         );
+        describe_gauge!(
+            self.scheduler_queue_current_size,
+            Unit::Count,
+            "Number of event bus messages currently queued awaiting processing"
+        );
         describe_histogram!(
-            self.event_bus_queued_duration_micros,
+            self.scheduler_command_waiting_duration_micros,
             Unit::Microseconds,
             "Time individual messages spend in the event bus waiting to be handled"
         );
         describe_histogram!(
-            self.event_processing_duration_micros,
+            self.scheduler_command_working_duration_micros,
             Unit::Microseconds,
             "Time spent handling an individual message that has been taken from the event bus"
         );
-        describe_counter!(
-            self.handler_processing_time_micros,
+        describe_gauge!(
+            self.worker_count,
             Unit::Count,
-            "Time spent within a handler method for a specific handler / message combination"
+            "Overall number of active workers currently registered"
+        );
+        describe_gauge!(
+            self.worker_inbox_capacity,
+            Unit::Count,
+            "Overall worker queue buffer capacity"
+        );
+        describe_gauge!(
+            self.worker_inbox_current_size,
+            Unit::Count,
+            "Overall number of worker messages currently queued awaiting processing"
+        );
+        describe_histogram!(
+            self.worker_action_waiting_duration_micros,
+            Unit::Microseconds,
+            "Time individual actions spend in the worker queue waiting to be handled"
+        );
+        describe_histogram!(
+            self.worker_action_working_duration_micros,
+            Unit::Microseconds,
+            "Time spent handling an individual action that has been taken from the worker queue"
         );
         self
     }
 }
 
-#[derive(Clone)]
-pub struct ServerMetricsHandlerTimer<TAction, TTask>
-where
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    metric_names: ServerSchedulerMetricNames,
-    _action: PhantomData<TAction>,
-    _task: PhantomData<TTask>,
-}
-impl<TAction, TTask> ServerMetricsHandlerTimer<TAction, TTask>
-where
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-{
-    pub fn new(metric_names: ServerSchedulerMetricNames) -> Self {
-        Self {
-            metric_names,
-            _action: PhantomData,
-            _task: PhantomData,
-        }
-    }
-}
-impl<TAction, TTask> TokioSchedulerHandlerTimer for ServerMetricsHandlerTimer<TAction, TTask>
+pub struct ServerMetricsInstrumentation<TAction, TTask>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
 {
-    type Span = Instant;
-    type Action = TAction;
-    type Task = TTask;
-    fn start_span(
-        &self,
-        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
-        _message: &Self::Action,
-        _pid: ProcessId,
-        _metadata: &MessageData,
-    ) -> Self::Span {
-        Instant::now()
-    }
-    fn end_span(
-        &self,
-        span: Self::Span,
-        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
-        action: &Self::Action,
-        pid: ProcessId,
-        _metadata: &MessageData,
-    ) {
-        let elapsed_time = span.elapsed();
-        let metric_labels = [
-            ("pid", get_pid_metric_label(pid)),
-            ("actor", actor.name().into()),
-            ("action", action.name().into()),
-        ];
-        histogram!(
-            self.metric_names.handler_processing_time_micros,
-            elapsed_time.as_micros() as f64,
-            &metric_labels,
-        );
-    }
-}
-
-#[derive(Clone)]
-pub struct ServerMetricsInstrumentation {
     metric_names: ServerSchedulerMetricNames,
     scheduler_task_monitor: TaskMonitor,
     async_task_monitor: TaskMonitor,
@@ -148,15 +114,51 @@ pub struct ServerMetricsInstrumentation {
     unsubscribe_task_monitor: TaskMonitor,
     graphql_connection_task_monitor: TaskMonitor,
     task_monitor_poll_handles: Arc<[JoinHandle<()>; 9]>,
+    _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
 }
-impl Drop for ServerMetricsInstrumentation {
+impl<TAction, TTask> Clone for ServerMetricsInstrumentation<TAction, TTask>
+where
+    TAction: Action + Named,
+    TTask: TaskFactory<TAction, TTask>,
+    TTask::Actor: Named,
+{
+    fn clone(&self) -> Self {
+        Self {
+            metric_names: self.metric_names.clone(),
+            scheduler_task_monitor: self.scheduler_task_monitor.clone(),
+            async_task_monitor: self.async_task_monitor.clone(),
+            blocking_task_monitor: self.blocking_task_monitor.clone(),
+            worker_task_monitor: self.worker_task_monitor.clone(),
+            task_inbox_task_monitor: self.task_inbox_task_monitor.clone(),
+            dispose_task_monitor: self.dispose_task_monitor.clone(),
+            subscribe_task_monitor: self.subscribe_task_monitor.clone(),
+            unsubscribe_task_monitor: self.unsubscribe_task_monitor.clone(),
+            graphql_connection_task_monitor: self.graphql_connection_task_monitor.clone(),
+            task_monitor_poll_handles: self.task_monitor_poll_handles.clone(),
+            _action: PhantomData,
+            _task: PhantomData,
+        }
+    }
+}
+impl<TAction, TTask> Drop for ServerMetricsInstrumentation<TAction, TTask>
+where
+    TAction: Action + Named,
+    TTask: TaskFactory<TAction, TTask>,
+    TTask::Actor: Named,
+{
     fn drop(&mut self) {
         for handle in self.task_monitor_poll_handles.iter() {
             handle.abort()
         }
     }
 }
-impl ServerMetricsInstrumentation {
+impl<TAction, TTask> ServerMetricsInstrumentation<TAction, TTask>
+where
+    TAction: Action + Named,
+    TTask: TaskFactory<TAction, TTask>,
+    TTask::Actor: Named,
+{
     pub fn new(metric_names: ServerSchedulerMetricNames) -> Self {
         let (scheduler_task_monitor, scheduler_task_monitor_poll_task) =
             create_named_task_monitor("scheduler", &metric_names.tokio_task_metric_names);
@@ -198,11 +200,20 @@ impl ServerMetricsInstrumentation {
                 tokio::spawn(unsubscribe_task_monitor_poll_task),
                 tokio::spawn(graphql_connection_task_monitor_poll_task),
             ]),
+            _action: PhantomData,
+            _task: PhantomData,
         }
     }
 }
 
-impl TokioSchedulerInstrumentation for ServerMetricsInstrumentation {
+impl<TTask, TAction> TokioSchedulerInstrumentation for ServerMetricsInstrumentation<TAction, TTask>
+where
+    TAction: Action + Named,
+    TTask: TaskFactory<TAction, TTask>,
+    TTask::Actor: Named,
+{
+    type Action = TAction;
+    type Task = TTask;
     type InstrumentedTask<T: Future + Send + 'static> = Instrumented<T>;
 
     fn instrument_main_thread<T: Future + Send + 'static>(
@@ -254,37 +265,120 @@ impl TokioSchedulerInstrumentation for ServerMetricsInstrumentation {
         self.unsubscribe_task_monitor.instrument(task)
     }
 
-    fn set_queue_capacity(&self, pid: ProcessId, value: usize) {
-        gauge!(
-            self.metric_names.event_bus_message_queue_capacity,
-            value as f64,
-            "pid" => get_pid_metric_label(pid),
-        );
+    fn record_scheduler_queue_capacity(&self, value: usize) {
+        gauge!(self.metric_names.scheduler_queue_capacity, value as f64,);
     }
-    fn set_current_queue_size(&self, pid: ProcessId, value: usize) {
-        gauge!(
-            self.metric_names.event_bus_queued_messages,
-            value as f64,
-            "pid" => get_pid_metric_label(pid),
-        );
+    fn record_scheduler_current_queue_size(&self, value: usize) {
+        gauge!(self.metric_names.scheduler_queue_current_size, value as f64,);
     }
-    fn record_queue_item_waiting_duration(&self, pid: ProcessId, value: Duration) {
+    fn record_scheduler_command_waiting_duration(&self, value: Duration) {
         histogram!(
-            self.metric_names.event_bus_queued_duration_micros,
+            self.metric_names.scheduler_command_waiting_duration_micros,
             value.as_micros() as f64,
-            "pid" => get_pid_metric_label(pid),
         );
     }
-    fn record_queue_item_working_duration(&self, pid: ProcessId, value: Duration) {
+    fn record_scheduler_command_working_duration(&self, value: Duration) {
         histogram!(
-            self.metric_names.event_processing_duration_micros,
+            self.metric_names.scheduler_command_working_duration_micros,
             value.as_micros() as f64,
-            "pid" => get_pid_metric_label(pid),
+        );
+    }
+    fn record_worker_spawn(&self, _pid: ProcessId, actor: &TTask::Actor, inbox_capacity: usize) {
+        increment_gauge!(
+            self.metric_names.worker_count,
+            1.0,
+            "actor" => actor.name(),
+        );
+        increment_gauge!(
+            self.metric_names.worker_inbox_capacity,
+            inbox_capacity as f64,
+            "actor" => actor.name(),
+        );
+    }
+    fn record_worker_kill(
+        &self,
+        _pid: ProcessId,
+        actor: &TTask::Actor,
+        inbox_capacity: usize,
+        inbox_size: usize,
+    ) {
+        decrement_gauge!(
+            self.metric_names.worker_inbox_current_size,
+            inbox_size as f64,
+            "actor" => actor.name(),
+        );
+        decrement_gauge!(
+            self.metric_names.worker_inbox_capacity,
+            inbox_capacity as f64,
+            "actor" => actor.name(),
+        );
+        decrement_gauge!(
+            self.metric_names.worker_count,
+            1.0,
+            "actor" => actor.name(),
+        );
+    }
+    fn record_worker_action_enqueue(
+        &self,
+        _pid: ProcessId,
+        actor: &TTask::Actor,
+        _action: &TAction,
+    ) {
+        increment_gauge!(
+            self.metric_names.worker_inbox_current_size,
+            1.0 as f64,
+            "actor" => actor.name(),
+        );
+    }
+    fn record_worker_action_dequeue(
+        &self,
+        _pid: ProcessId,
+        actor: &TTask::Actor,
+        _action: &TAction,
+    ) {
+        decrement_gauge!(
+            self.metric_names.worker_inbox_current_size,
+            1.0 as f64,
+            "actor" => actor.name(),
+        );
+    }
+    fn record_worker_action_waiting_duration(
+        &self,
+        _pid: ProcessId,
+        actor: &TTask::Actor,
+        action: &TAction,
+        value: Duration,
+    ) {
+        histogram!(
+            self.metric_names.worker_action_waiting_duration_micros,
+            value.as_micros() as f64,
+            "actor" => actor.name(),
+            "action" => action.name(),
+        );
+    }
+    fn record_worker_action_working_duration(
+        &self,
+        _pid: ProcessId,
+        actor: &TTask::Actor,
+        action: &TAction,
+        value: Duration,
+    ) {
+        histogram!(
+            self.metric_names.worker_action_working_duration_micros,
+            value.as_micros() as f64,
+            "actor" => actor.name(),
+            "action" => action.name(),
         );
     }
 }
 
-impl GraphQlWebServerInstrumentation for ServerMetricsInstrumentation {
+impl<TAction, TTask> GraphQlWebServerInstrumentation
+    for ServerMetricsInstrumentation<TAction, TTask>
+where
+    TAction: Action + Named,
+    TTask: TaskFactory<TAction, TTask>,
+    TTask::Actor: Named,
+{
     fn instrument_websocket_connection<T: Future + Send + 'static>(
         &self,
         task: T,
@@ -424,31 +518,5 @@ fn poll_task_monitor<const NUM_LABELS: usize>(
             );
             tokio::time::sleep(poll_interval).await;
         }
-    }
-}
-
-fn get_pid_metric_label(pid: ProcessId) -> SharedString {
-    get_usize_metric_label(pid.into())
-}
-
-fn get_usize_metric_label(value: usize) -> SharedString {
-    match value {
-        0 => SharedString::borrowed("0"),
-        1 => SharedString::borrowed("1"),
-        2 => SharedString::borrowed("2"),
-        3 => SharedString::borrowed("3"),
-        4 => SharedString::borrowed("4"),
-        5 => SharedString::borrowed("5"),
-        6 => SharedString::borrowed("6"),
-        7 => SharedString::borrowed("7"),
-        8 => SharedString::borrowed("8"),
-        9 => SharedString::borrowed("9"),
-        10 => SharedString::borrowed("10"),
-        11 => SharedString::borrowed("11"),
-        12 => SharedString::borrowed("12"),
-        13 => SharedString::borrowed("13"),
-        14 => SharedString::borrowed("14"),
-        15 => SharedString::borrowed("15"),
-        value => SharedString::owned(format!("{}", value)),
     }
 }

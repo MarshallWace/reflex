@@ -20,9 +20,7 @@ use reflex_handlers::{
 };
 use reflex_interpreter::compiler::CompilerOptions;
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
-use reflex_scheduler::{
-    threadpool::AsyncTokioThreadPoolFactory, tokio::NoopTokioSchedulerHandlerTimer,
-};
+use reflex_scheduler::threadpool::AsyncTokioThreadPoolFactory;
 use reflex_server::{
     action::ServerCliAction,
     builtins::ServerBuiltins,
@@ -182,7 +180,7 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     )?;
-    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _>(
+    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _, _, _>(
         args.into(),
         graph_root,
         schema,
@@ -214,12 +212,11 @@ async fn main() -> Result<()> {
             Some(tracer) => EitherTracer::Right(tracer),
         },
         logger,
-        NoopTokioSchedulerHandlerTimer::default(),
         ServerMetricsInstrumentation::new(Default::default()),
         GraphQlWebServerMetricNames::default(),
         TokioRuntimeMonitorMetricNames::default(),
-        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
-        AsyncTokioThreadPoolFactory::new(NoopTokioSchedulerHandlerTimer::default()),
+        AsyncTokioThreadPoolFactory::default(),
+        AsyncTokioThreadPoolFactory::default(),
     )
     .await
     .map(|response| println!("{}", response))

@@ -4,9 +4,9 @@
 use std::{marker::PhantomData, pin::Pin};
 
 use futures::{Future, Stream, StreamExt};
-use reflex_dispatcher::{Action, Handler, HandlerContext, TaskFactory};
+use reflex_dispatcher::{Action, Handler, TaskFactory};
 
-use crate::tokio::{TokioSchedulerHandlerTimer, TokioThreadPoolFactory, TokioThreadPoolRequest};
+use crate::tokio::{TokioThreadPoolFactory, TokioThreadPoolRequest};
 
 pub struct TokioRuntimeThreadPoolFactory<T, TAction, TTask>
 where
@@ -58,37 +58,29 @@ where
     }
 }
 
-pub struct AsyncTokioThreadPoolFactory<TTimer, TAction, TTask>
+pub struct AsyncTokioThreadPoolFactory<TAction, TTask>
 where
-    TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Send + 'static,
-    TTimer::Span: Send + 'static,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    timer: TTimer,
     _action: PhantomData<TAction>,
     _task: PhantomData<TTask>,
 }
-impl<TTimer, TAction, TTask> AsyncTokioThreadPoolFactory<TTimer, TAction, TTask>
+impl<TAction, TTask> Default for AsyncTokioThreadPoolFactory<TAction, TTask>
 where
-    TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Send + 'static,
-    TTimer::Span: Send + 'static,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    pub fn new(timer: TTimer) -> Self {
+    fn default() -> Self {
         Self {
-            timer,
             _action: PhantomData,
             _task: PhantomData,
         }
     }
 }
-impl<TTimer, TAction, TTask> TokioThreadPoolFactory<TAction, TTask>
-    for AsyncTokioThreadPoolFactory<TTimer, TAction, TTask>
+impl<TAction, TTask> TokioThreadPoolFactory<TAction, TTask>
+    for AsyncTokioThreadPoolFactory<TAction, TTask>
 where
-    TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Send + 'static,
-    TTimer::Span: Send + 'static,
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
@@ -100,7 +92,6 @@ where
             + Send
             + 'static,
     ) -> Self::Task {
-        let Self { timer, .. } = self;
         Box::pin(async move {
             while let Some(request) = requests.next().await {
                 let TokioThreadPoolRequest {
@@ -111,10 +102,7 @@ where
                     mut context,
                     response,
                 } = request;
-                let pid = context.pid();
-                let span = timer.start_span(&actor, &message, pid, &metadata);
                 let result = actor.handle(&mut state, &message, &metadata, &mut context);
-                timer.end_span(span, &actor, &message, pid, &metadata);
                 let _ = response.send((message, state, result));
             }
         })

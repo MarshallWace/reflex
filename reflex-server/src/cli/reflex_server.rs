@@ -49,7 +49,7 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_scheduler::tokio::{
-    TokioInbox, TokioInitContext, TokioSchedulerHandlerTimer, TokioSchedulerLogger,
+    TokioInbox, TokioInitContext, TokioSchedulerInstrumentation, TokioSchedulerLogger,
     TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
@@ -392,7 +392,6 @@ pub fn cli<
     TWorkerMetricLabels,
     TTracer,
     TLogger,
-    TTimer,
     TInstrumentation,
 >(
     args: ReflexServerCliOptions,
@@ -414,7 +413,6 @@ pub fn cli<
     get_worker_metric_labels: TWorkerMetricLabels,
     tracer: TTracer,
     logger: TLogger,
-    timer: TTimer,
     instrumentation: TInstrumentation,
     async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
     blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
@@ -446,9 +444,12 @@ where
     TTracer: Tracer + Send + 'static,
     TTracer::Span: Span + Send + Sync + 'static,
     TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
-    TTimer: TokioSchedulerHandlerTimer<Action = TAction, Task = TTask> + Clone + Send + 'static,
-    TTimer::Span: Send + 'static,
-    TInstrumentation: GraphQlWebServerInstrumentation + Clone + Send + Sync + 'static,
+    TInstrumentation: GraphQlWebServerInstrumentation
+        + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     TAction: Action + GraphQlWebServerAction<T> + Clone + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask>
         + GraphQlWebServerTask<T, TFactory, TAllocator>
@@ -498,7 +499,6 @@ where
         get_worker_metric_labels,
         tracer,
         logger,
-        timer,
         instrumentation.clone(),
         async_tasks,
         blocking_tasks,
