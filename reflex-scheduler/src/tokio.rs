@@ -659,6 +659,7 @@ where
                 let (process, extra) = spawn_worker_process(
                     actor,
                     pid,
+                    1024,
                     &next_pid,
                     &next_offset,
                     &commands_tx,
@@ -728,6 +729,7 @@ where
                             let (process, sidecar) = spawn_worker_process(
                                 actor,
                                 pid,
+                                64,
                                 &next_pid,
                                 &next_offset,
                                 &async_commands,
@@ -868,6 +870,7 @@ where
 fn spawn_worker_process<TAction, TTask>(
     actor: <TTask as TaskFactory<TAction, TTask>>::Actor,
     pid: ProcessId,
+    inbox_capacity: usize,
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
@@ -890,7 +893,6 @@ where
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
     let state = actor.init();
-    let inbox_capacity = 64;
     let (inbox_tx, inbox) = create_worker_inbox(inbox_capacity);
     instrumentation.record_worker_spawn(pid, &actor, inbox_capacity);
     match actor.events(inbox) {
