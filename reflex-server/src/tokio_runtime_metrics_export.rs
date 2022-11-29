@@ -220,7 +220,7 @@ pub fn start_runtime_monitoring(
         "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.elapsed"
     );
 
-    tokio::spawn(async move {
+    runtime_handle.spawn(async move {
         let labels = [("threadpool", runtime_name)];
         for interval in runtime_monitor.intervals() {
             gauge!(
