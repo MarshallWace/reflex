@@ -16,7 +16,9 @@ use reflex_server::{
         task::{ServerCliTaskActor, ServerCliTaskFactory},
     },
     opentelemetry::trace::noop::NoopTracer,
-    scheduler_metrics::ServerMetricsInstrumentation,
+    scheduler_metrics::{
+        NoopServerMetricsSchedulerQueueInstrumentation, ServerMetricsInstrumentation,
+    },
 };
 use tokio::sync::oneshot;
 
@@ -101,12 +103,20 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         GraphQlWebServerMetricLabels,
         TTracer,
     >;
+    type TInstrumentation = ServerMetricsInstrumentation<
+        TAction,
+        TTask,
+        NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
+    >;
     let tracer = NoopTracer::default();
     let logger = NoopLogger::default();
-    let instrumentation = ServerMetricsInstrumentation::new(Default::default());
+    let instrumentation = ServerMetricsInstrumentation::new(
+        NoopServerMetricsSchedulerQueueInstrumentation::default(),
+        Default::default(),
+    );
     let async_tasks = AsyncTokioThreadPoolFactory::default();
     let blocking_tasks = AsyncTokioThreadPoolFactory::default();
-    let app = GraphQlWebServer::<TAction, TTask>::new(
+    let app = GraphQlWebServer::<TAction, TTask, TInstrumentation>::new(
         graph_root,
         None,
         {

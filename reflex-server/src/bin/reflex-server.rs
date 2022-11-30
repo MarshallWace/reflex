@@ -41,7 +41,10 @@ use reflex_server::{
         messages::DefaultActionFormatter, prometheus::PrometheusLogger, ActionLogger, ChainLogger,
         EitherLogger,
     },
-    scheduler_metrics::{ServerMetricsInstrumentation, ServerSchedulerMetricNames},
+    scheduler_metrics::{
+        NoopServerMetricsSchedulerQueueInstrumentation, ServerMetricsInstrumentation,
+        ServerSchedulerMetricNames,
+    },
     server::action::init::{
         InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
         InitPrometheusMetricsAction,
@@ -271,7 +274,10 @@ pub async fn main() -> Result<()> {
             Some(tracer) => EitherTracer::Right(tracer),
         },
         logger,
-        ServerMetricsInstrumentation::new(metric_names),
+        ServerMetricsInstrumentation::new(
+            NoopServerMetricsSchedulerQueueInstrumentation::default(),
+            metric_names,
+        ),
         AsyncTokioThreadPoolFactory::default(),
         AsyncTokioThreadPoolFactory::default(),
     )

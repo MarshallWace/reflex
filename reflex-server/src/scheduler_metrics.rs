@@ -8,7 +8,10 @@ use metrics::{
     decrement_gauge, describe_gauge, describe_histogram, gauge, histogram, increment_gauge, Unit,
 };
 use reflex_dispatcher::{Action, Named, ProcessId, TaskFactory};
-use reflex_scheduler::tokio::{metrics::TokioTaskMetricNames, TokioSchedulerInstrumentation};
+use reflex_scheduler::tokio::{
+    metrics::TokioTaskMetricNames, TokioSchedulerInstrumentation, TokioSchedulerState,
+    TokioWorkerState,
+};
 use tokio::task::JoinHandle;
 use tokio_metrics::{Instrumented, TaskMonitor};
 
@@ -97,13 +100,81 @@ impl ServerSchedulerMetricNames {
     }
 }
 
-pub struct ServerMetricsInstrumentation<TAction, TTask>
+pub trait ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn record_scheduler_state(&self, state: TokioSchedulerState);
+    fn record_worker_state(&self, pid: ProcessId, actor: &TTask::Actor, state: TokioWorkerState);
+}
+
+impl<T, TAction, TTask> ServerMetricsSchedulerQueueInstrumentation<TAction, TTask> for Option<T>
+where
+    T: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn record_scheduler_state(&self, state: TokioSchedulerState) {
+        match self {
+            Some(inner) => inner.record_scheduler_state(state),
+            None => {}
+        }
+    }
+    fn record_worker_state(&self, pid: ProcessId, actor: &TTask::Actor, state: TokioWorkerState) {
+        match self {
+            Some(inner) => inner.record_worker_state(pid, actor, state),
+            None => {}
+        }
+    }
+}
+
+pub struct NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask> {
+    _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
+}
+impl<TAction, TTask> Default for NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask> {
+    fn default() -> Self {
+        Self {
+            _action: PhantomData,
+            _task: PhantomData,
+        }
+    }
+}
+impl<TAction, TTask> Clone for NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask> {
+    fn clone(&self) -> Self {
+        Self {
+            _action: PhantomData,
+            _task: PhantomData,
+        }
+    }
+}
+impl<TAction, TTask> Copy for NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask> {}
+impl<TAction, TTask> ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>
+    for NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn record_scheduler_state(&self, _state: TokioSchedulerState) {}
+    fn record_worker_state(
+        &self,
+        _pid: ProcessId,
+        _actor: &TTask::Actor,
+        _state: TokioWorkerState,
+    ) {
+    }
+}
+
+pub struct ServerMetricsInstrumentation<TAction, TTask, TQueue>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
+    TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
 {
     metric_names: ServerSchedulerMetricNames,
+    queue_instrumentation: TQueue,
     scheduler_task_monitor: TaskMonitor,
     async_task_monitor: TaskMonitor,
     blocking_task_monitor: TaskMonitor,
@@ -117,15 +188,17 @@ where
     _action: PhantomData<TAction>,
     _task: PhantomData<TTask>,
 }
-impl<TAction, TTask> Clone for ServerMetricsInstrumentation<TAction, TTask>
+impl<TAction, TTask, TQueue> Clone for ServerMetricsInstrumentation<TAction, TTask, TQueue>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
+    TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask> + Clone,
 {
     fn clone(&self) -> Self {
         Self {
             metric_names: self.metric_names.clone(),
+            queue_instrumentation: self.queue_instrumentation.clone(),
             scheduler_task_monitor: self.scheduler_task_monitor.clone(),
             async_task_monitor: self.async_task_monitor.clone(),
             blocking_task_monitor: self.blocking_task_monitor.clone(),
@@ -141,11 +214,12 @@ where
         }
     }
 }
-impl<TAction, TTask> Drop for ServerMetricsInstrumentation<TAction, TTask>
+impl<TAction, TTask, TQueue> Drop for ServerMetricsInstrumentation<TAction, TTask, TQueue>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
+    TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
 {
     fn drop(&mut self) {
         for handle in self.task_monitor_poll_handles.iter() {
@@ -153,13 +227,14 @@ where
         }
     }
 }
-impl<TAction, TTask> ServerMetricsInstrumentation<TAction, TTask>
+impl<TAction, TTask, TQueue> ServerMetricsInstrumentation<TAction, TTask, TQueue>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
+    TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
 {
-    pub fn new(metric_names: ServerSchedulerMetricNames) -> Self {
+    pub fn new(queue_instrumentation: TQueue, metric_names: ServerSchedulerMetricNames) -> Self {
         let (scheduler_task_monitor, scheduler_task_monitor_poll_task) =
             create_named_task_monitor("scheduler", &metric_names.tokio_task_metric_names);
         let (async_task_monitor, async_task_monitor_poll_task) =
@@ -180,6 +255,7 @@ where
             create_named_task_monitor("graphql_connection", &metric_names.tokio_task_metric_names);
         Self {
             metric_names: metric_names.init(),
+            queue_instrumentation,
             scheduler_task_monitor,
             async_task_monitor,
             blocking_task_monitor,
@@ -206,11 +282,13 @@ where
     }
 }
 
-impl<TTask, TAction> TokioSchedulerInstrumentation for ServerMetricsInstrumentation<TAction, TTask>
+impl<TTask, TAction, TQueue> TokioSchedulerInstrumentation
+    for ServerMetricsInstrumentation<TAction, TTask, TQueue>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
+    TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
 {
     type Action = TAction;
     type Task = TTask;
@@ -268,8 +346,14 @@ where
     fn record_scheduler_queue_capacity(&self, value: usize) {
         gauge!(self.metric_names.scheduler_queue_capacity, value as f64,);
     }
-    fn record_scheduler_current_queue_size(&self, value: usize) {
-        gauge!(self.metric_names.scheduler_queue_current_size, value as f64,);
+    fn record_scheduler_enqueue(&self, num_commands: usize) {
+        increment_gauge!(
+            self.metric_names.scheduler_queue_current_size,
+            num_commands as f64,
+        );
+    }
+    fn record_scheduler_dequeue(&self) {
+        decrement_gauge!(self.metric_names.scheduler_queue_current_size, 1.0);
     }
     fn record_scheduler_command_waiting_duration(&self, value: Duration) {
         histogram!(
@@ -370,14 +454,22 @@ where
             "action" => action.name(),
         );
     }
+    fn record_scheduler_state(&self, state: TokioSchedulerState) {
+        self.queue_instrumentation.record_scheduler_state(state)
+    }
+    fn record_worker_state(&self, pid: ProcessId, actor: &TTask::Actor, state: TokioWorkerState) {
+        self.queue_instrumentation
+            .record_worker_state(pid, actor, state)
+    }
 }
 
-impl<TAction, TTask> GraphQlWebServerInstrumentation
-    for ServerMetricsInstrumentation<TAction, TTask>
+impl<TAction, TTask, TQueue> GraphQlWebServerInstrumentation
+    for ServerMetricsInstrumentation<TAction, TTask, TQueue>
 where
     TAction: Action + Named,
     TTask: TaskFactory<TAction, TTask>,
     TTask::Actor: Named,
+    TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
 {
     fn instrument_websocket_connection<T: Future + Send + 'static>(
         &self,

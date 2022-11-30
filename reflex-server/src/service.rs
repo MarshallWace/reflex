@@ -247,18 +247,26 @@ pub trait GraphQlWebServerInstrumentation: TokioSchedulerInstrumentation {
     ) -> Self::InstrumentedTask<T>;
 }
 
-pub struct GraphQlWebServer<TAction, TTask>
+pub struct GraphQlWebServer<TAction, TTask, TInstrumentation>
 where
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
+    TAction: Action + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TInstrumentation:
+        TokioSchedulerInstrumentation<Action = TAction, Task = TTask> + Send + 'static,
 {
-    runtime: TokioScheduler<TAction, TTask>,
+    runtime: TokioScheduler<TAction, TTask, TInstrumentation>,
     main_pid: ProcessId,
 }
-impl<TAction, TTask> GraphQlWebServer<TAction, TTask>
+impl<TAction, TTask, TInstrumentation> GraphQlWebServer<TAction, TTask, TInstrumentation>
 where
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
+    TAction: Action + Send + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TInstrumentation: GraphQlWebServerInstrumentation
+        + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     pub fn new<
         T,
@@ -274,7 +282,6 @@ where
         TWorkerMetricLabels,
         TTracer,
         TLogger,
-        TInstrumentation,
     >(
         graph_root: (CompiledProgram, InstructionPointer),
         schema: Option<GraphQlSchema>,
@@ -319,11 +326,6 @@ where
         TTracer: Tracer + Send + 'static,
         TTracer::Span: Span + Send + Sync + 'static,
         TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
-        TInstrumentation: GraphQlWebServerInstrumentation
-            + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
-            + Clone
-            + Send
-            + 'static,
         TAction: Action + GraphQlWebServerAction<T> + Send + Sync + 'static,
         TTask: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask + Send + 'static,
         TTask::Actor: From<
@@ -350,7 +352,7 @@ where
             Send + 'static,
     {
         let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
-        let (runtime, main_pid) = TokioScheduler::<TAction, TTask>::new(
+        let (runtime, main_pid) = TokioScheduler::<TAction, TTask, TInstrumentation>::new(
             move |context| {
                 let main_pid = context.generate_pid();
                 let mut actors = {
@@ -420,18 +422,25 @@ where
     }
 }
 
-impl<TAction, TTask> AsyncScheduler for GraphQlWebServer<TAction, TTask>
+impl<TAction, TTask, TInstrumentation> AsyncScheduler
+    for GraphQlWebServer<TAction, TTask, TInstrumentation>
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TInstrumentation: GraphQlWebServerInstrumentation
+        + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
-    type Action = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Action;
-    type Sink = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Sink;
-    type Subscription<F, V> = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Subscription<F, V>
+    type Action = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::Action;
+    type Sink = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::Sink;
+    type Subscription<F, V> = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::Subscription<F, V>
         where
             F: Fn(&Self::Action) -> Option<V>,
             V: Send + 'static;
-    type SubscriptionResults<F, V> = <TokioScheduler<TAction, TTask> as AsyncScheduler>::SubscriptionResults<F, V>
+    type SubscriptionResults<F, V> = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::SubscriptionResults<F, V>
         where
             F: Fn(&Self::Action) -> Option<V>,
             V: Send + 'static;

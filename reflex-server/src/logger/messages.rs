@@ -51,7 +51,7 @@ blanket_trait!(
     }
 );
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct DefaultActionFormatter<T, TAction>
 where
     T: Expression,
@@ -59,6 +59,24 @@ where
 {
     _expression: PhantomData<T>,
     _action: PhantomData<TAction>,
+}
+impl<T, TAction> Clone for DefaultActionFormatter<T, TAction>
+where
+    T: Expression,
+    TAction: Action,
+{
+    fn clone(&self) -> Self {
+        Self {
+            _expression: PhantomData,
+            _action: PhantomData,
+        }
+    }
+}
+impl<T, TAction> Copy for DefaultActionFormatter<T, TAction>
+where
+    T: Expression,
+    TAction: Action,
+{
 }
 impl<T, TAction> Default for DefaultActionFormatter<T, TAction>
 where
@@ -165,24 +183,20 @@ where
 {
     fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
         match self {
-            DefaultActionFormatWriter::InitPrometheusMetrics(inner) => inner.write(f),
-            DefaultActionFormatWriter::InitOpenTelemetry(inner) => inner.write(f),
-            DefaultActionFormatWriter::InitGraphRoot(inner) => inner.write(f),
-            DefaultActionFormatWriter::InitHttpServer(inner) => inner.write(f),
-            DefaultActionFormatWriter::OpenTelemetryMiddlewareError(inner) => inner.write(f),
-            DefaultActionFormatWriter::GraphQlServerSubscribe(inner) => inner.write(f),
-            DefaultActionFormatWriter::GraphQlHandlerWebSocketConnectSuccess(inner) => {
-                inner.write(f)
-            }
-            DefaultActionFormatWriter::GraphQlHandlerWebSocketConnectionError(inner) => {
-                inner.write(f)
-            }
-            DefaultActionFormatWriter::GrpcHandlerConnectSuccess(inner) => inner.write(f),
-            DefaultActionFormatWriter::GrpcHandlerConnectError(inner) => inner.write(f),
-            DefaultActionFormatWriter::GrpcHandlerTransportError(inner) => inner.write(f),
-            DefaultActionFormatWriter::EffectSubscribe(inner) => inner.write(f),
-            DefaultActionFormatWriter::EffectUnsubscribe(inner) => inner.write(f),
-            DefaultActionFormatWriter::EffectEmit(inner) => inner.write(f),
+            Self::InitPrometheusMetrics(inner) => inner.write(f),
+            Self::InitOpenTelemetry(inner) => inner.write(f),
+            Self::InitGraphRoot(inner) => inner.write(f),
+            Self::InitHttpServer(inner) => inner.write(f),
+            Self::OpenTelemetryMiddlewareError(inner) => inner.write(f),
+            Self::GraphQlServerSubscribe(inner) => inner.write(f),
+            Self::GraphQlHandlerWebSocketConnectSuccess(inner) => inner.write(f),
+            Self::GraphQlHandlerWebSocketConnectionError(inner) => inner.write(f),
+            Self::GrpcHandlerConnectSuccess(inner) => inner.write(f),
+            Self::GrpcHandlerConnectError(inner) => inner.write(f),
+            Self::GrpcHandlerTransportError(inner) => inner.write(f),
+            Self::EffectSubscribe(inner) => inner.write(f),
+            Self::EffectUnsubscribe(inner) => inner.write(f),
+            Self::EffectEmit(inner) => inner.write(f),
         }
     }
 }

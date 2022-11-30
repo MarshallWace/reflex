@@ -130,6 +130,7 @@ where
         + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
+        + Sync
         + 'static,
     TAction:
         Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + Sync + 'static,
@@ -198,7 +199,7 @@ where
             })
             .with_context(|| anyhow!("Failed to create GraphQL request payload"))
     }?;
-    let app = GraphQlWebServer::<TAction, TTask>::new(
+    let app = GraphQlWebServer::<TAction, TTask, TInstrumentation>::new(
         graph_root,
         schema,
         custom_actors,

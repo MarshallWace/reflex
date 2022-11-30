@@ -35,7 +35,9 @@ use reflex_server::{
         formatted::FormattedActionLogger, formatter::PrefixedLogFormatter, json::JsonActionLogger,
         messages::DefaultActionFormatter, EitherLogger,
     },
-    scheduler_metrics::ServerMetricsInstrumentation,
+    scheduler_metrics::{
+        NoopServerMetricsSchedulerQueueInstrumentation, ServerMetricsInstrumentation,
+    },
     server::{utils::EitherTracer, NoopWebSocketGraphQlServerQueryTransform},
     GraphQlWebServerMetricNames,
 };
@@ -212,7 +214,10 @@ async fn main() -> Result<()> {
             Some(tracer) => EitherTracer::Right(tracer),
         },
         logger,
-        ServerMetricsInstrumentation::new(Default::default()),
+        ServerMetricsInstrumentation::new(
+            NoopServerMetricsSchedulerQueueInstrumentation::default(),
+            Default::default(),
+        ),
         GraphQlWebServerMetricNames::default(),
         TokioRuntimeMonitorMetricNames::default(),
         AsyncTokioThreadPoolFactory::default(),

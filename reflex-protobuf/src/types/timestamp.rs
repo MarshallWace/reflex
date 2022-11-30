@@ -46,8 +46,15 @@ impl CustomType for TimestampMessage {
         let seconds = get_message_field(message, "seconds")?;
         let nanos = get_message_field(message, "nanos")?;
         match (seconds, nanos) {
-            (Value::I64(seconds), Value::I32(nanos)) => Ok(factory
-                .create_string_term(allocator.create_string(format_timestamp(*seconds, *nanos)))),
+            (Value::I64(seconds), Value::I32(nanos)) => match format_timestamp(*seconds, *nanos) {
+                Some(timestamp) => {
+                    Ok(factory.create_string_term(allocator.create_string(timestamp)))
+                }
+                None => Err(format!(
+                    "Invalid Timestamp, received {{ \"seconds\": {:?}, \"nanos\": {:?} }}",
+                    seconds, nanos
+                )),
+            },
             _ => Err(format!(
                 "Expected Timestamp, received {{ \"seconds\": {:?}, \"nanos\": {:?} }}",
                 seconds, nanos
@@ -62,9 +69,14 @@ fn parse_timestamp(value: &str) -> Option<(i64, i32)> {
         .map(|date| (date.timestamp(), date.timestamp_subsec_nanos() as i32))
 }
 
-fn format_timestamp(seconds: i64, nanos: i32) -> String {
-    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(seconds, nanos as u32), Utc)
-        .to_rfc3339_opts(SecondsFormat::AutoSi, true)
+fn format_timestamp(seconds: i64, nanos: i32) -> Option<String> {
+    Some(
+        DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp_opt(seconds, nanos as u32)?,
+            Utc,
+        )
+        .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+    )
 }
 
 #[cfg(test)]

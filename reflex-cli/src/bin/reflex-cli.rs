@@ -133,6 +133,7 @@ pub async fn main() -> Result<()> {
     type TAction = CliActions<T>;
     type TMetricLabels = CliMetricLabels;
     type TTask = CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>;
+    type TInstrumentation = NoopTokioSchedulerInstrumentation<TAction, TTask>;
     let args = Args::parse();
     let unoptimized = args.unoptimized;
     let debug_actions = args.log;
@@ -231,7 +232,7 @@ pub async fn main() -> Result<()> {
                 let instrumentation = NoopTokioSchedulerInstrumentation::default();
                 let async_tasks = AsyncTokioThreadPoolFactory::default();
                 let blocking_tasks = AsyncTokioThreadPoolFactory::default();
-                let (scheduler, main_pid) = TokioScheduler::<TAction, TTask>::new(
+                let (scheduler, main_pid) = TokioScheduler::<TAction, TTask, TInstrumentation>::new(
                     |context| {
                         let main_pid = context.generate_pid();
                         let mut actors = {
