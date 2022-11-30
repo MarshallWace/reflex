@@ -152,7 +152,6 @@ pub enum TokioWorkerState {
     Awaiting,
     Dispatching {
         num_commands: usize,
-        command_index: usize,
         target_queue_size: usize,
         target_capacity: usize,
     },
@@ -277,16 +276,27 @@ impl<T> TokioSinkError<T> {
         inner
     }
 }
-impl<TAction, TTask> From<PollSendError<(TokioCommand<TAction, TTask>, Instant)>>
-    for TokioSinkError<(AsyncMessage<TAction>, Instant)>
+impl<TAction, TTask> From<PollSendError<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>>
+    for TokioSinkError<Vec<(AsyncMessage<TAction>, Instant)>>
 where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    fn from(err: PollSendError<(TokioCommand<TAction, TTask>, Instant)>) -> Self {
+    fn from(err: PollSendError<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>) -> Self {
         match err.into_inner() {
-            Some((TokioCommand::Send { message, .. }, enqueue_time)) => {
-                TokioSinkError(Some((message, enqueue_time)))
+            Some(commands) => {
+                let messages = commands
+                    .into_iter()
+                    .filter_map(|(command, enqueue_time)| match command {
+                        TokioCommand::Send { pid: _, message } => Some((message, enqueue_time)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                TokioSinkError(if messages.is_empty() {
+                    None
+                } else {
+                    Some(messages)
+                })
             }
             _ => TokioSinkError(None),
         }
@@ -300,7 +310,7 @@ where
     TInstrumentation:
         TokioSchedulerInstrumentation<Action = TAction, Task = TTask> + Send + 'static,
 {
-    sender: mpsc::Sender<(TokioCommand<TAction, TTask>, Instant)>,
+    sender: mpsc::Sender<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>,
     instrumentation: TInstrumentation,
 }
 impl<TAction, TTask, TInstrumentation> Clone for TokioEventChannel<TAction, TTask, TInstrumentation>
@@ -326,19 +336,17 @@ where
 {
     async fn send(
         &self,
-        command: TokioCommand<TAction, TTask>,
-        enqueue_time: Option<Instant>,
-    ) -> Result<(), SendError<(TokioCommand<TAction, TTask>, Instant)>> {
-        self.instrumentation.record_scheduler_enqueue(1);
-        self.sender
-            .send((command, enqueue_time.unwrap_or_else(|| Instant::now())))
-            .await
+        commands: VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
+    ) -> Result<(), SendError<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>> {
+        self.instrumentation
+            .record_scheduler_enqueue(commands.len());
+        self.sender.send(commands).await
     }
     fn capacity(&self) -> usize {
-        self.sender.capacity()
-    }
-    fn max_capacity(&self) -> usize {
         self.sender.max_capacity()
+    }
+    fn queue_size(&self) -> usize {
+        self.sender.max_capacity() - self.sender.capacity()
     }
 }
 
@@ -562,7 +570,7 @@ where
                 commands,
                 next_pid,
                 next_offset.clone(),
-                15 * 1024,
+                1024,
                 logger,
                 instrumentation.clone(),
             );
@@ -595,13 +603,13 @@ where
 {
     type Action = TAction;
     type Sink = With<
-        PollSender<(TokioCommand<TAction, TTask>, Instant)>,
-        (TokioCommand<TAction, TTask>, Instant),
+        PollSender<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>,
+        VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
         TAction,
         Ready<
             Result<
-                (TokioCommand<TAction, TTask>, Instant),
-                TokioSinkError<(AsyncMessage<TAction>, Instant)>,
+                VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
+                TokioSinkError<Vec<(AsyncMessage<TAction>, Instant)>>,
             >,
         >,
         Box<
@@ -609,8 +617,8 @@ where
                     TAction,
                 ) -> Ready<
                     Result<
-                        (TokioCommand<TAction, TTask>, Instant),
-                        TokioSinkError<(AsyncMessage<TAction>, Instant)>,
+                        VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
+                        TokioSinkError<Vec<(AsyncMessage<TAction>, Instant)>>,
                     >,
                 > + Send,
         >,
@@ -633,7 +641,7 @@ where
                     instrumentation.record_scheduler_enqueue(1);
                     let enqueue_time = Instant::now();
                     let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
-                    (
+                    [(
                         TokioCommand::Send {
                             pid,
                             message: AsyncMessage::Owned {
@@ -645,7 +653,9 @@ where
                             },
                         },
                         enqueue_time,
-                    )
+                    )]
+                    .into_iter()
+                    .collect()
                 }))
             }
         }))
@@ -669,12 +679,16 @@ where
             let commands = self.commands.clone();
             async move {
                 let send_task = commands.send(
-                    TokioCommand::Subscribe {
-                        subscription_id,
-                        pid,
-                        subscriber,
-                    },
-                    None,
+                    [(
+                        TokioCommand::Subscribe {
+                            subscription_id,
+                            pid,
+                            subscriber,
+                        },
+                        Instant::now(),
+                    )]
+                    .into_iter()
+                    .collect(),
                 );
                 let _ = send_task.await;
             }
@@ -684,11 +698,15 @@ where
             async move {
                 let _ = commands
                     .send(
-                        TokioCommand::Unsubscribe {
-                            subscription_id,
-                            pid,
-                        },
-                        None,
+                        [(
+                            TokioCommand::Unsubscribe {
+                                subscription_id,
+                                pid,
+                            },
+                            Instant::now(),
+                        )]
+                        .into_iter()
+                        .collect(),
                     )
                     .await;
             }
@@ -739,7 +757,7 @@ where
         + 'static,
 {
     let (commands_tx, mut commands_rx) =
-        mpsc::channel::<(TokioCommand<TAction, TTask>, Instant)>(command_queue_capacity);
+        mpsc::channel::<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>(command_queue_capacity);
     let event_channel = TokioEventChannel {
         sender: commands_tx,
         instrumentation: instrumentation.clone(),
@@ -800,187 +818,201 @@ where
                 SchedulerCommand::Kill(pid) => Some(TokioCommand::Kill { pid, caller: None }),
                 // TODO: Forbid forward commands in initial scheduler command batch
                 SchedulerCommand::Forward(_) => None,
-            })
+            });
+        let async_commands = event_channel.clone();
+        let mut logger = logger;
+        let mut queue = init_commands
             .map({
                 let enqueue_time = Instant::now();
                 move |command| (command, enqueue_time)
             })
-            .collect::<Vec<_>>();
-        let async_commands = event_channel.clone();
-        let mut logger = logger;
+            .collect::<VecDeque<_>>();
         async move {
             let mut processes = init_processes;
-            for (command, enqueue_time) in init_commands {
-                let _ = async_commands.send(command, Some(enqueue_time)).await;
-            }
             instrumentation.record_scheduler_queue_capacity(command_queue_capacity);
+            instrumentation.record_scheduler_enqueue(queue.len());
             // Main runtime event loop
-            while let Some((command, enqueue_time)) = {
-                instrumentation.record_scheduler_state(TokioSchedulerState::Waiting);
-                commands_rx.recv()
-            }
-            .await
-            {
-                instrumentation.record_scheduler_dequeue();
-                instrumentation.record_scheduler_state(TokioSchedulerState::Working {
-                    queue_size: command_queue_capacity - async_commands.capacity(),
-                    capacity: command_queue_capacity,
-                });
-                instrumentation.record_scheduler_command_waiting_duration(enqueue_time.elapsed());
-                logger.log(&command);
-                let command_processing_start_time = Instant::now();
-                match command {
-                    TokioCommand::Spawn {
-                        pid,
-                        factory,
-                        caller: _,
-                    } => {
-                        if let Entry::Vacant(entry) = processes.entry(pid) {
-                            let actor = factory.create();
-                            let (process, sidecar) = spawn_worker_process(
-                                actor,
-                                pid,
-                                64,
-                                &next_pid,
-                                &next_offset,
-                                &async_commands,
-                                &async_tasks_tx,
-                                &blocking_tasks_tx,
-                                instrumentation.clone(),
-                            );
-                            entry.insert(process);
-                            if let Some((pid, process)) = sidecar {
-                                processes.insert(pid, process);
+            loop {
+                // Process queued commands individually
+                while let Some((command, enqueue_time)) = queue.pop_front() {
+                    instrumentation.record_scheduler_dequeue();
+                    instrumentation.record_scheduler_state(TokioSchedulerState::Working {
+                        queue_size: command_queue_capacity - async_commands.capacity(),
+                        capacity: command_queue_capacity,
+                    });
+                    instrumentation
+                        .record_scheduler_command_waiting_duration(enqueue_time.elapsed());
+                    logger.log(&command);
+                    let command_processing_start_time = Instant::now();
+                    match command {
+                        TokioCommand::Spawn {
+                            pid,
+                            factory,
+                            caller: _,
+                        } => {
+                            if let Entry::Vacant(entry) = processes.entry(pid) {
+                                let actor = factory.create();
+                                let (process, sidecar) = spawn_worker_process(
+                                    actor,
+                                    pid,
+                                    64,
+                                    &next_pid,
+                                    &next_offset,
+                                    &async_commands,
+                                    &async_tasks_tx,
+                                    &blocking_tasks_tx,
+                                    instrumentation.clone(),
+                                );
+                                entry.insert(process);
+                                if let Some((pid, process)) = sidecar {
+                                    processes.insert(pid, process);
+                                }
                             }
                         }
-                    }
-                    TokioCommand::Send { pid, message } => {
-                        let (send_task, subscriptions) = if let Some(process) = processes.get(&pid)
-                        {
-                            match process {
-                                TokioProcess::Task(instance) => {
-                                    let send_task = instance.inbox.send(message);
-                                    let inbox_capacity = instance.inbox_capacity;
-                                    let inbox_queue_size = instance.inbox.capacity();
-                                    let subscriptions = None;
-                                    (
-                                        Some((send_task, inbox_capacity, inbox_queue_size)),
-                                        subscriptions,
-                                    )
-                                }
-                                TokioProcess::Actor(instance) => {
-                                    let is_accepted_message = instance.actor.accept(&message);
-                                    let subscriptions = if instance.subscribers.is_empty() {
-                                        None
-                                    } else {
-                                        let subscriptions = instance
-                                            .subscribers
-                                            .values()
-                                            .filter_map(|subscriber| subscriber.emit(&message))
-                                            .collect::<Vec<_>>();
-                                        if subscriptions.is_empty() {
-                                            None
-                                        } else {
-                                            Some(subscriptions)
-                                        }
-                                    };
-                                    let send_task = if is_accepted_message {
+                        TokioCommand::Send { pid, message } => {
+                            let (send_task, subscriptions) = if let Some(process) =
+                                processes.get(&pid)
+                            {
+                                match process {
+                                    TokioProcess::Task(instance) => {
+                                        let send_task = instance.inbox.send(message);
                                         let inbox_capacity = instance.inbox_capacity;
                                         let inbox_queue_size = instance.inbox.capacity();
-                                        instrumentation.record_worker_action_enqueue(
-                                            pid,
-                                            &instance.actor,
-                                            &message,
-                                        );
-                                        let send_task = instance.inbox.send(message);
-                                        Some((send_task, inbox_capacity, inbox_queue_size))
-                                    } else {
-                                        None
-                                    };
-                                    (send_task, subscriptions)
+                                        let subscriptions = None;
+                                        (
+                                            Some((send_task, inbox_capacity, inbox_queue_size)),
+                                            subscriptions,
+                                        )
+                                    }
+                                    TokioProcess::Actor(instance) => {
+                                        let is_accepted_message = instance.actor.accept(&message);
+                                        let subscriptions = if instance.subscribers.is_empty() {
+                                            None
+                                        } else {
+                                            let subscriptions = instance
+                                                .subscribers
+                                                .values()
+                                                .filter_map(|subscriber| subscriber.emit(&message))
+                                                .collect::<Vec<_>>();
+                                            if subscriptions.is_empty() {
+                                                None
+                                            } else {
+                                                Some(subscriptions)
+                                            }
+                                        };
+                                        let send_task = if is_accepted_message {
+                                            let inbox_capacity = instance.inbox_capacity;
+                                            let inbox_queue_size = instance.inbox.capacity();
+                                            instrumentation.record_worker_action_enqueue(
+                                                pid,
+                                                &instance.actor,
+                                                &message,
+                                            );
+                                            let send_task = instance.inbox.send(message);
+                                            Some((send_task, inbox_capacity, inbox_queue_size))
+                                        } else {
+                                            None
+                                        };
+                                        (send_task, subscriptions)
+                                    }
                                 }
-                            }
-                        } else {
-                            (None, None)
-                        };
-                        if let Some((send_task, target_capacity, target_queue_size)) = send_task {
-                            instrumentation.record_scheduler_state(
-                                TokioSchedulerState::Dispatching {
-                                    target_queue_size,
-                                    target_capacity,
-                                },
-                            );
-                            let _ = send_task.await;
-                        }
-                        if let Some(subscriptions) = subscriptions {
-                            for task in subscriptions {
-                                let _ =
-                                    tokio::spawn(instrumentation.instrument_subscribe_task(task));
-                            }
-                        }
-                    }
-                    TokioCommand::Kill { pid, caller: _ } => {
-                        if let Some(process) = processes.remove(&pid) {
-                            let actor_instance = match process {
-                                TokioProcess::Actor(instance) => instance,
-                                TokioProcess::Task(mut task) => {
-                                    let actor_pid = task.actor_pid;
-                                    tokio::spawn(instrumentation.instrument_dispose_task(
-                                        async move { task.abort().await },
-                                    ));
-                                    let actor_instance = processes
-                                        .remove(&actor_pid)
-                                        .and_then(|process| match process {
-                                            TokioProcess::Actor(instance) => Some(instance),
-                                            TokioProcess::Task(_) => None,
-                                        })
-                                        .expect("Invalid task actor process");
-                                    actor_instance
-                                }
+                            } else {
+                                (None, None)
                             };
-                            let inbox_capacity = actor_instance.inbox_capacity;
-                            let inbox_size = inbox_capacity - actor_instance.inbox.capacity();
-                            instrumentation.record_worker_kill(
-                                pid,
-                                &actor_instance.actor,
-                                inbox_capacity,
-                                inbox_size,
-                            );
-                        }
-                    }
-                    TokioCommand::Subscribe {
-                        subscription_id,
-                        pid,
-                        subscriber,
-                    } => {
-                        if let Some(entry) = processes
-                            .get_mut(&pid)
-                            .and_then(|process| match process {
-                                TokioProcess::Actor(instance) => Some(instance),
-                                TokioProcess::Task(_) => None,
-                            })
-                            .and_then(|instance| {
-                                match instance.subscribers.entry(subscription_id) {
-                                    Entry::Occupied(_) => None,
-                                    Entry::Vacant(entry) => Some(entry),
+                            if let Some((send_task, target_capacity, target_queue_size)) = send_task
+                            {
+                                instrumentation.record_scheduler_state(
+                                    TokioSchedulerState::Dispatching {
+                                        target_queue_size,
+                                        target_capacity,
+                                    },
+                                );
+                                let _ = send_task.await;
+                            }
+                            if let Some(subscriptions) = subscriptions {
+                                for task in subscriptions {
+                                    let _ = tokio::spawn(
+                                        instrumentation.instrument_subscribe_task(task),
+                                    );
                                 }
-                            })
-                        {
-                            entry.insert(subscriber);
+                            }
                         }
-                    }
-                    TokioCommand::Unsubscribe {
-                        subscription_id,
-                        pid,
-                    } => {
-                        if let Some(TokioProcess::Actor(instance)) = processes.get_mut(&pid) {
-                            instance.subscribers.remove(&subscription_id);
+                        TokioCommand::Kill { pid, caller: _ } => {
+                            if let Some(process) = processes.remove(&pid) {
+                                let actor_instance = match process {
+                                    TokioProcess::Actor(instance) => instance,
+                                    TokioProcess::Task(mut task) => {
+                                        let actor_pid = task.actor_pid;
+                                        tokio::spawn(instrumentation.instrument_dispose_task(
+                                            async move { task.abort().await },
+                                        ));
+                                        let actor_instance = processes
+                                            .remove(&actor_pid)
+                                            .and_then(|process| match process {
+                                                TokioProcess::Actor(instance) => Some(instance),
+                                                TokioProcess::Task(_) => None,
+                                            })
+                                            .expect("Invalid task actor process");
+                                        actor_instance
+                                    }
+                                };
+                                let inbox_capacity = actor_instance.inbox_capacity;
+                                let inbox_size = inbox_capacity - actor_instance.inbox.capacity();
+                                instrumentation.record_worker_kill(
+                                    pid,
+                                    &actor_instance.actor,
+                                    inbox_capacity,
+                                    inbox_size,
+                                );
+                            }
                         }
+                        TokioCommand::Subscribe {
+                            subscription_id,
+                            pid,
+                            subscriber,
+                        } => {
+                            if let Some(entry) = processes
+                                .get_mut(&pid)
+                                .and_then(|process| match process {
+                                    TokioProcess::Actor(instance) => Some(instance),
+                                    TokioProcess::Task(_) => None,
+                                })
+                                .and_then(|instance| {
+                                    match instance.subscribers.entry(subscription_id) {
+                                        Entry::Occupied(_) => None,
+                                        Entry::Vacant(entry) => Some(entry),
+                                    }
+                                })
+                            {
+                                entry.insert(subscriber);
+                            }
+                        }
+                        TokioCommand::Unsubscribe {
+                            subscription_id,
+                            pid,
+                        } => {
+                            if let Some(TokioProcess::Actor(instance)) = processes.get_mut(&pid) {
+                                instance.subscribers.remove(&subscription_id);
+                            }
+                        }
+                    };
+                    instrumentation.record_scheduler_command_working_duration(
+                        command_processing_start_time.elapsed(),
+                    );
+                }
+                // Wait for the next batch of commands
+                match commands_rx.recv().await {
+                    None => break,
+                    Some(commands) => {
+                        // Collect any remaining buffered commands into the current batch
+                        let mut combined_commands = commands;
+                        while let Ok(commands) = commands_rx.try_recv() {
+                            combined_commands.extend(commands);
+                        }
+                        // Assign this batch of commands to the queue
+                        queue = combined_commands
                     }
-                };
-                instrumentation.record_scheduler_command_working_duration(
-                    command_processing_start_time.elapsed(),
-                )
+                }
             }
         }
     };
@@ -1198,11 +1230,19 @@ where
                     enqueue_time,
                 ),
             };
-            let command = TokioCommand::Send {
-                pid: actor_pid,
-                message,
-            };
-            let _ = results.send(command, Some(enqueue_time)).await;
+            let _ = results
+                .send(
+                    [(
+                        TokioCommand::Send {
+                            pid: actor_pid,
+                            message,
+                        },
+                        enqueue_time,
+                    )]
+                    .into_iter()
+                    .collect(),
+                )
+                .await;
         }
     }
 }
@@ -1341,9 +1381,7 @@ where
                                 }
                             });
                             match async_tasks.send(request).await {
-                                Err(_err) => {
-                                    break;
-                                }
+                                Err(_err) => break,
                                 Ok(_) => {
                                     instrumentation.record_worker_state(
                                         pid,
@@ -1376,9 +1414,7 @@ where
                                 }
                             });
                             match blocking_tasks.send(request).await {
-                                Err(_err) => {
-                                    break;
-                                }
+                                Err(_err) => break,
                                 Ok(_) => {
                                     instrumentation.record_worker_state(
                                         pid,
@@ -1402,7 +1438,9 @@ where
                     );
                     if let Some(commands) = actions {
                         let enqueue_time = Instant::now();
-                        let commands = collect_worker_results(
+                        let mut queue = VecDeque::with_capacity(commands.len());
+                        collect_handler_results(
+                            &mut queue,
                             commands,
                             message,
                             offset,
@@ -1410,20 +1448,14 @@ where
                             enqueue_time,
                             &next_offset,
                         );
-                        let num_commands = commands.len();
-                        let target_capacity = results.max_capacity();
-                        for (index, command) in commands.into_iter().enumerate() {
-                            instrumentation.record_worker_state(pid, &actor, {
-                                let target_queue_size = target_capacity - results.capacity();
-                                TokioWorkerState::Dispatching {
-                                    num_commands,
-                                    command_index: index,
-                                    target_queue_size,
-                                    target_capacity,
-                                }
-                            });
-                            let _ = results.send(command, Some(enqueue_time)).await;
-                        }
+                        instrumentation.record_worker_state(pid, &actor, {
+                            TokioWorkerState::Dispatching {
+                                num_commands: queue.len(),
+                                target_queue_size: results.queue_size(),
+                                target_capacity: results.capacity(),
+                            }
+                        });
+                        let _ = results.send(queue).await;
                     }
                 }
             }
@@ -1431,15 +1463,20 @@ where
     }
 }
 
-fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
+fn collect_handler_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
+    queue: &mut VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
     commands: SchedulerTransition<TAction, TTask>,
     message: AsyncMessage<TAction>,
     offset: MessageOffset,
     pid: ProcessId,
     enqueue_time: Instant,
     next_offset: &Arc<AtomicUsize>,
-) -> VecDeque<TokioCommand<TAction, TTask>> {
-    enum RedispatchedMessage<T> {
+) {
+    let redispatched_from = message.redispatched_from();
+    let caller = Some((offset, pid));
+    // Redispatches are handled specially in order to minimise unnecessary sharing/allocations for situations where the
+    // current action is redispatched to a single target
+    enum RedispatchedMessageState<T> {
         Owned {
             message: T,
             target_pid: Option<ProcessId>,
@@ -1449,75 +1486,79 @@ fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
             num_redispatched_messages: usize,
         },
     }
-    let redispatched_from = message.redispatched_from();
-    let caller = Some((offset, pid));
-    let num_commands = commands.len();
-    let (mut results, redispatch_state) = commands.into_iter().fold(
-        (
-            VecDeque::with_capacity(num_commands),
-            match message {
-                AsyncMessage::Pending { message } => RedispatchedMessage::Owned {
-                    message,
-                    target_pid: None,
-                },
-                AsyncMessage::Owned { message, .. } => RedispatchedMessage::Owned {
-                    message,
-                    target_pid: None,
-                },
-                AsyncMessage::Shared { message, .. } => RedispatchedMessage::Shared {
-                    message,
-                    num_redispatched_messages: 0,
-                },
+    // Extend the queue with the handler commands
+    let redispatch_state = commands.into_iter().fold(
+        match message {
+            AsyncMessage::Pending { message } => RedispatchedMessageState::Owned {
+                message,
+                target_pid: None,
             },
-        ),
-        |(mut queue, redispatch_state), command| match command {
+            AsyncMessage::Owned { message, .. } => RedispatchedMessageState::Owned {
+                message,
+                target_pid: None,
+            },
+            AsyncMessage::Shared { message, .. } => RedispatchedMessageState::Shared {
+                message,
+                num_redispatched_messages: 0,
+            },
+        },
+        |redispatch_state, command| match command {
             SchedulerCommand::Send(target_pid, message) => {
                 queue.push_back({
                     let offset = MessageOffset::from(increment_atomic_counter(next_offset));
-                    TokioCommand::Send {
-                        pid: target_pid,
-                        message: AsyncMessage::Owned {
-                            message,
-                            offset,
-                            redispatched_from: None,
-                            caller,
-                            enqueue_time,
+                    (
+                        TokioCommand::Send {
+                            pid: target_pid,
+                            message: AsyncMessage::Owned {
+                                message,
+                                offset,
+                                redispatched_from: None,
+                                caller,
+                                enqueue_time,
+                            },
                         },
-                    }
+                        enqueue_time,
+                    )
                 });
-                (queue, redispatch_state)
+                redispatch_state
             }
             SchedulerCommand::Task(worker_pid, factory) => {
-                queue.push_back(TokioCommand::Spawn {
-                    pid: worker_pid,
-                    factory,
-                    caller,
-                });
-                (queue, redispatch_state)
+                queue.push_back((
+                    TokioCommand::Spawn {
+                        pid: worker_pid,
+                        factory,
+                        caller,
+                    },
+                    enqueue_time,
+                ));
+                redispatch_state
             }
             SchedulerCommand::Kill(worker_pid) => {
-                queue.push_back(TokioCommand::Kill {
-                    pid: worker_pid,
-                    caller,
-                });
-                (queue, redispatch_state)
+                queue.push_back((
+                    TokioCommand::Kill {
+                        pid: worker_pid,
+                        caller,
+                    },
+                    enqueue_time,
+                ));
+                redispatch_state
             }
             SchedulerCommand::Forward(target_pid) => {
                 let redispatched_from = Some(redispatched_from.unwrap_or(offset));
                 match redispatch_state {
-                    RedispatchedMessage::Owned {
+                    RedispatchedMessageState::Owned {
                         message,
                         target_pid: None,
                     } => {
                         // This message might still be forwarded to multiple targets, so don't enqueue it yet
                         // (seeing as it might need to be wrapped in a shared pointer before adding to the queue)
-                        let redispatch_state = RedispatchedMessage::Owned {
+                        let redispatch_state = RedispatchedMessageState::Owned {
                             message,
                             target_pid: Some(target_pid),
                         };
-                        (queue, redispatch_state)
+                        redispatch_state
                     }
-                    RedispatchedMessage::Owned {
+                    RedispatchedMessageState::Owned {
                         message,
                         target_pid: Some(existing_target_pid),
                     } => {
@@ -1528,38 +1569,44 @@ fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
                         let shared_message = Arc::new(message);
                         queue.push_front({
                             let offset = MessageOffset::from(increment_atomic_counter(next_offset));
-                            TokioCommand::Send {
-                                pid: existing_target_pid,
-                                message: AsyncMessage::Shared {
-                                    message: Arc::clone(&shared_message),
-                                    offset,
-                                    redispatched_from,
-                                    caller,
-                                    enqueue_time,
+                            (
+                                TokioCommand::Send {
+                                    pid: existing_target_pid,
+                                    message: AsyncMessage::Shared {
+                                        message: Arc::clone(&shared_message),
+                                        offset,
+                                        redispatched_from,
+                                        caller,
+                                        enqueue_time,
+                                    },
                                 },
-                            }
+                                enqueue_time,
+                            )
                         });
                         queue.push_front({
                             let offset = MessageOffset::from(increment_atomic_counter(next_offset));
-                            TokioCommand::Send {
-                                pid: target_pid,
-                                message: AsyncMessage::Shared {
-                                    message: Arc::clone(&shared_message),
-                                    offset,
-                                    redispatched_from,
-                                    caller,
-                                    enqueue_time,
+                            (
+                                TokioCommand::Send {
+                                    pid: target_pid,
+                                    message: AsyncMessage::Shared {
+                                        message: Arc::clone(&shared_message),
+                                        offset,
+                                        redispatched_from,
+                                        caller,
+                                        enqueue_time,
+                                    },
                                 },
-                            }
+                                enqueue_time,
+                            )
                         });
                         let num_redispatched_messages = 2;
-                        let redispatch_state = RedispatchedMessage::Shared {
+                        let redispatch_state = RedispatchedMessageState::Shared {
                             message: shared_message,
                             num_redispatched_messages,
                         };
-                        (queue, redispatch_state)
+                        redispatch_state
                     }
-                    RedispatchedMessage::Shared {
+                    RedispatchedMessageState::Shared {
                         message: shared_message,
                         num_redispatched_messages,
                     } => {
@@ -1569,65 +1616,69 @@ fn collect_worker_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
                         // once all commands have been processed).
                         queue.push_front({
                             let offset = MessageOffset::from(increment_atomic_counter(next_offset));
-                            TokioCommand::Send {
-                                pid: target_pid,
-                                message: AsyncMessage::Shared {
-                                    message: Arc::clone(&shared_message),
-                                    offset,
-                                    redispatched_from,
-                                    caller,
-                                    enqueue_time,
+                            (
+                                TokioCommand::Send {
+                                    pid: target_pid,
+                                    message: AsyncMessage::Shared {
+                                        message: Arc::clone(&shared_message),
+                                        offset,
+                                        redispatched_from,
+                                        caller,
+                                        enqueue_time,
+                                    },
                                 },
-                            }
+                                enqueue_time,
+                            )
                         });
-                        let redispatch_state = RedispatchedMessage::Shared {
+                        let redispatch_state = RedispatchedMessageState::Shared {
                             message: shared_message,
                             num_redispatched_messages: num_redispatched_messages + 1,
                         };
-                        (queue, redispatch_state)
+                        redispatch_state
                     }
                 }
             }
         },
     );
+    // Prepend any potential residual redispatched action that has not yet been added to the queue
     match redispatch_state {
-        RedispatchedMessage::Owned {
+        RedispatchedMessageState::Owned {
             message: _,
             target_pid: None,
         } => {
-            // If no redispatch commands were encountered, return the unmodified message queue
-            results
+            // If no redispatch commands were encountered, no more manipulation of the queue needed
         }
-        RedispatchedMessage::Owned {
+        RedispatchedMessageState::Owned {
             message,
             target_pid: Some(target_pid),
         } => {
             // If after all commands have been processed we're left with a single forwarding target for the message,
             // enqueue the forwarded command at the FRONT of the queue, for immediate redispatch
             let redispatched_from = Some(redispatched_from.unwrap_or(offset));
-            results.push_front({
+            queue.push_front({
                 let offset = MessageOffset::from(increment_atomic_counter(next_offset));
-                TokioCommand::Send {
-                    pid: target_pid,
-                    message: AsyncMessage::Owned {
-                        message,
-                        offset,
-                        redispatched_from,
-                        caller,
-                        enqueue_time,
+                (
+                    TokioCommand::Send {
+                        pid: target_pid,
+                        message: AsyncMessage::Owned {
+                            message,
+                            offset,
+                            redispatched_from,
+                            caller,
+                            enqueue_time,
+                        },
                     },
-                }
+                    enqueue_time,
+                )
             });
-            results
         }
-        RedispatchedMessage::Shared {
+        RedispatchedMessageState::Shared {
             message: _,
             num_redispatched_messages,
         } => {
             // If multiple forwarded messages were encountered, the iteration will have added them to the front of the
             // queue in the opposite order from the order in which they were produced, so we need to reverse them
-            reverse_first_n_queue_entries(&mut results, num_redispatched_messages);
-            results
+            reverse_first_n_queue_entries(queue, num_redispatched_messages);
         }
     }
 }
