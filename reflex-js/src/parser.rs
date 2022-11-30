@@ -15,11 +15,11 @@ use reflex::{
 use reflex_stdlib::Stdlib;
 use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
-    ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, CondExpr,
-    Decl, EsVersion, Expr, ExprOrSpread, ExprOrSuper, ExprStmt, Ident, ImportDecl, ImportSpecifier,
-    Lit, MemberExpr, Module, ModuleDecl, ModuleItem, NewExpr, Null, Number, ObjectLit,
-    ObjectPatProp, Pat, Prop, PropName, PropOrSpread, Stmt, Str, TaggedTpl, Tpl, TplElement,
-    UnaryExpr, UnaryOp, VarDeclKind, VarDeclarator,
+    ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, Callee,
+    CondExpr, Decl, EsVersion, Expr, ExprOrSpread, ExprStmt, Ident, ImportDecl, ImportSpecifier,
+    Lit, MemberExpr, MemberProp, Module, ModuleDecl, ModuleExportName, ModuleItem, NewExpr, Null,
+    Number, ObjectLit, ObjectPatProp, Pat, Prop, PropName, PropOrSpread, Stmt, Str, TaggedTpl, Tpl,
+    TplElement, UnaryExpr, UnaryOp, VarDeclKind, VarDeclarator,
 };
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
@@ -297,10 +297,13 @@ where
                     let imported_field = node
                         .imported
                         .as_ref()
-                        .map(parse_identifier)
-                        .unwrap_or(identifier);
+                        .map(|export_name| match export_name {
+                            ModuleExportName::Ident(name) => String::from(parse_identifier(name)),
+                            ModuleExportName::Str(name) => parse_string(name),
+                        })
+                        .unwrap_or_else(|| String::from(identifier));
                     let value =
-                        get_static_field(module.clone(), imported_field, factory, allocator);
+                        get_static_field(module.clone(), &imported_field, factory, allocator);
                     (identifier, value)
                 }
             };
@@ -979,10 +982,10 @@ fn parse_template_element(node: &TplElement) -> String {
     node.cooked
         .as_ref()
         .map(|value| {
-            let value: &str = &value.value;
+            let value: &str = &value;
             String::from(value)
         })
-        .unwrap_or_else(|| parse_string(&node.raw))
+        .unwrap_or_else(|| parse_escaped_string(&node.raw))
 }
 
 fn parse_tagged_template<T: Expression + Rewritable<T>>(
@@ -1744,27 +1747,33 @@ fn parse_member_expression<T: Expression + Rewritable<T>>(
 where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
-    match &node.obj {
-        ExprOrSuper::Expr(target) => {
-            let target = parse_expression(target, scope, env, factory, allocator)?;
-            let field_name = parse_static_member_field_name(node)?;
-            match field_name {
-                Some(field_name) => Ok(get_static_field(target, &field_name, factory, allocator)),
-                None => {
-                    let field = parse_expression(&node.prop, scope, env, factory, allocator)?;
-                    Ok(get_dynamic_field(target, field, factory, allocator))
+    let target = parse_expression(&node.obj, scope, env, factory, allocator)?;
+    let field_name = parse_static_member_field_name(node)?;
+    match field_name {
+        Some(field_name) => Ok(get_static_field(target, &field_name, factory, allocator)),
+        None => {
+            let field = match &node.prop {
+                MemberProp::Ident(name) => Ok(factory.create_string_term(
+                    allocator.create_string(String::from(parse_identifier(&name))),
+                )),
+                MemberProp::Computed(key) => {
+                    parse_expression(&key.expr, scope, env, factory, allocator)
                 }
-            }
+                MemberProp::PrivateName(_) => Err(err_unimplemented(node)),
+            }?;
+            Ok(get_dynamic_field(target, field, factory, allocator))
         }
-        ExprOrSuper::Super(_) => Err(err_unimplemented(node)),
     }
 }
 
 fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<String>> {
-    Ok(match &*node.prop {
-        Expr::Ident(name) => Some(String::from(parse_identifier(&name))),
-        Expr::Lit(name) => match name {
-            Lit::Str(name) => Some(parse_string(&name)),
+    Ok(match &node.prop {
+        MemberProp::Ident(name) => Some(String::from(parse_identifier(&name))),
+        MemberProp::Computed(key) => match &*key.expr {
+            Expr::Lit(name) => match name {
+                Lit::Str(name) => Some(parse_string(&name)),
+                _ => None,
+            },
             _ => None,
         },
         _ => None,
@@ -1827,25 +1836,22 @@ where
     T::Builtin: From<Stdlib> + From<JsStdlib>,
 {
     let static_dispatch = match &node.callee {
-        ExprOrSuper::Expr(callee) => match &**callee {
-            Expr::Member(callee) => match &callee.obj {
-                ExprOrSuper::Expr(target) => {
-                    let method_name = parse_static_member_field_name(callee)?;
-                    match method_name {
-                        Some(method_name) => Some(parse_static_method_call_expression(
-                            target,
-                            &method_name,
-                            &node.args,
-                            scope,
-                            env,
-                            factory,
-                            allocator,
-                        )?),
-                        None => None,
-                    }
+        Callee::Expr(callee) => match &**callee {
+            Expr::Member(callee) => {
+                let method_name = parse_static_member_field_name(&callee)?;
+                match method_name {
+                    Some(method_name) => Some(parse_static_method_call_expression(
+                        &callee.obj,
+                        &method_name,
+                        &node.args,
+                        scope,
+                        env,
+                        factory,
+                        allocator,
+                    )?),
+                    None => None,
                 }
-                _ => None,
-            },
+            }
             _ => None,
         },
         _ => None,
@@ -1853,13 +1859,13 @@ where
     match static_dispatch {
         Some(expression) => Ok(expression),
         None => match &node.callee {
-            ExprOrSuper::Expr(callee) => {
-                let callee = parse_expression(callee, scope, env, factory, allocator)?;
+            Callee::Expr(callee) => {
+                let callee = parse_expression(&callee, scope, env, factory, allocator)?;
                 parse_function_application_expression(
                     callee, &node.args, scope, env, factory, allocator,
                 )
             }
-            ExprOrSuper::Super(_) => Err(err_unimplemented(node)),
+            _ => Err(err_unimplemented(&node.callee)),
         },
     }
 }
