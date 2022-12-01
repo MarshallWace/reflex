@@ -3,6 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter::once,
     marker::PhantomData,
@@ -11,7 +12,7 @@ use std::{
 
 use metrics::{
     counter, decrement_gauge, describe_counter, describe_gauge, describe_histogram, gauge,
-    histogram, increment_gauge, Unit,
+    histogram, increment_counter, increment_gauge, SharedString, Unit,
 };
 use reflex::{
     core::{
@@ -50,6 +51,8 @@ pub struct EvaluateHandlerMetricNames {
     pub state_gc_duration: &'static str,
     pub total_effect_count: &'static str,
     pub active_effect_count: &'static str,
+    pub total_effect_emissions_count: &'static str,
+    pub total_effect_updates_count: &'static str,
     pub active_query_worker_count: &'static str,
     pub pending_query_worker_count: &'static str,
     pub error_query_worker_count: &'static str,
@@ -75,6 +78,16 @@ impl EvaluateHandlerMetricNames {
         );
         describe_counter!(self.total_effect_count, Unit::Count, "Total effect count");
         describe_gauge!(self.active_effect_count, Unit::Count, "Active effect count");
+        describe_counter!(
+            self.total_effect_emissions_count,
+            Unit::Count,
+            "Number of effect update batches emitted"
+        );
+        describe_counter!(
+            self.total_effect_updates_count,
+            Unit::Count,
+            "Number of individual effect value updates"
+        );
         describe_gauge!(
             self.active_query_worker_count,
             Unit::Count,
@@ -111,6 +124,8 @@ impl Default for EvaluateHandlerMetricNames {
             state_gc_duration: "state_gc_duration",
             total_effect_count: "total_effect_count",
             active_effect_count: "active_effect_count",
+            total_effect_emissions_count: "total_effect_emissions_count",
+            total_effect_updates_count: "total_effect_updates_count",
             active_query_worker_count: "active_query_worker_count",
             pending_query_worker_count: "pending_query_worker_count",
             error_query_worker_count: "error_query_worker_count",
@@ -991,16 +1006,34 @@ where
         TAction: Action + From<EvaluateUpdateAction<T>>,
         TTask: TaskFactory<TAction, TTask>,
     {
-        let EffectEmitAction {
-            effect_types: updates,
-        } = action;
-        let (updated_state_tokens, updates) = if updates.is_empty() {
+        let EffectEmitAction { effect_types } = action;
+        let (updated_state_tokens, updates) = if effect_types.is_empty() {
             (HashSet::<StateToken>::default(), Vec::default())
         } else {
             let existing_state = &state.state_cache.combined_state;
-            let updates = updates
+            let updates = effect_types
                 .iter()
-                .flat_map(|batch| batch.updates.iter())
+                .flat_map(|batch| {
+                    let metric_names = match &batch.effect_type {
+                        Cow::Borrowed(effect_type) => {
+                            [("effect_type", SharedString::borrowed(effect_type))]
+                        }
+                        Cow::Owned(effect_type) => [(
+                            "effect_type",
+                            SharedString::owned(String::from(effect_type)),
+                        )],
+                    };
+                    increment_counter!(
+                        self.metric_names.total_effect_emissions_count,
+                        &metric_names,
+                    );
+                    counter!(
+                        self.metric_names.total_effect_updates_count,
+                        batch.updates.len() as u64,
+                        &metric_names,
+                    );
+                    batch.updates.iter()
+                })
                 .filter_map(|(state_token, update)| {
                     let is_unchanged = existing_state
                         .get(state_token)
