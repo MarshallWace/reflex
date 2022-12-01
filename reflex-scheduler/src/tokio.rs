@@ -144,6 +144,7 @@ pub trait TokioSchedulerInstrumentation {
         pid: ProcessId,
         actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
         action: &Self::Action,
+        scheduler_mode: SchedulerMode,
         value: Duration,
     );
 }
@@ -1569,90 +1570,102 @@ where
                 let parent_offset = message.parent_offset();
                 if let Some(mut state) = actor_state.take() {
                     let scheduler_mode = actor.schedule(&message, &state);
-                    let handler_start_time = Instant::now();
                     let (message, state, actions) = match scheduler_mode {
                         None => (message, state, None),
-                        Some(SchedulerMode::Sync) => {
-                            let metadata = get_message_metadata(offset, parent_offset);
-                            let mut context = context.clone();
-                            let actions =
-                                actor.handle(&mut state, &message, &metadata, &mut context);
+                        Some(scheduler_mode) => {
+                            let handler_start_time = Instant::now();
+                            let (message, state, actions) = match scheduler_mode {
+                                SchedulerMode::Sync => {
+                                    let metadata = get_message_metadata(offset, parent_offset);
+                                    let mut context = context.clone();
+                                    let actions =
+                                        actor.handle(&mut state, &message, &metadata, &mut context);
+                                    (message, state, actions)
+                                }
+                                SchedulerMode::Async => {
+                                    let (response_tx, response_rx) = oneshot::channel();
+                                    let request = TokioThreadPoolRequest {
+                                        actor: actor.clone(),
+                                        state,
+                                        message,
+                                        metadata: get_message_metadata(offset, parent_offset),
+                                        context: context.clone(),
+                                        response: response_tx,
+                                    };
+                                    instrumentation.record_worker_state(actor_pid, &actor, {
+                                        let target_capacity = async_tasks.max_capacity();
+                                        let target_queue_size =
+                                            target_capacity - async_tasks.capacity();
+                                        TokioWorkerState::Sending {
+                                            target_queue_size,
+                                            target_capacity,
+                                        }
+                                    });
+                                    match async_tasks.send(request).await {
+                                        Err(_err) => break,
+                                        Ok(_) => {
+                                            instrumentation.record_worker_state(
+                                                actor_pid,
+                                                &actor,
+                                                TokioWorkerState::Awaiting,
+                                            );
+                                            match response_rx.await {
+                                                Err(_err) => break,
+                                                Ok((message, state, actions)) => {
+                                                    (message, state, actions)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                SchedulerMode::Blocking => {
+                                    let (response_tx, response_rx) = oneshot::channel();
+                                    let request = TokioThreadPoolRequest {
+                                        actor: actor.clone(),
+                                        state,
+                                        message,
+                                        metadata: get_message_metadata(offset, parent_offset),
+                                        context: context.clone(),
+                                        response: response_tx,
+                                    };
+                                    instrumentation.record_worker_state(actor_pid, &actor, {
+                                        let target_capacity = blocking_tasks.max_capacity();
+                                        let target_queue_size =
+                                            target_capacity - blocking_tasks.capacity();
+                                        TokioWorkerState::Sending {
+                                            target_queue_size,
+                                            target_capacity,
+                                        }
+                                    });
+                                    match blocking_tasks.send(request).await {
+                                        Err(_err) => break,
+                                        Ok(_) => {
+                                            instrumentation.record_worker_state(
+                                                actor_pid,
+                                                &actor,
+                                                TokioWorkerState::Awaiting,
+                                            );
+                                            match response_rx.await {
+                                                Err(_err) => break,
+                                                Ok((message, state, actions)) => {
+                                                    (message, state, actions)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+                            instrumentation.record_worker_action_working_duration(
+                                actor_pid,
+                                &actor,
+                                &message,
+                                scheduler_mode,
+                                handler_start_time.elapsed(),
+                            );
                             (message, state, actions)
-                        }
-                        Some(SchedulerMode::Async) => {
-                            let (response_tx, response_rx) = oneshot::channel();
-                            let request = TokioThreadPoolRequest {
-                                actor: actor.clone(),
-                                state,
-                                message,
-                                metadata: get_message_metadata(offset, parent_offset),
-                                context: context.clone(),
-                                response: response_tx,
-                            };
-                            instrumentation.record_worker_state(actor_pid, &actor, {
-                                let target_capacity = async_tasks.max_capacity();
-                                let target_queue_size = target_capacity - async_tasks.capacity();
-                                TokioWorkerState::Sending {
-                                    target_queue_size,
-                                    target_capacity,
-                                }
-                            });
-                            match async_tasks.send(request).await {
-                                Err(_err) => break,
-                                Ok(_) => {
-                                    instrumentation.record_worker_state(
-                                        actor_pid,
-                                        &actor,
-                                        TokioWorkerState::Awaiting,
-                                    );
-                                    match response_rx.await {
-                                        Err(_err) => break,
-                                        Ok((message, state, actions)) => (message, state, actions),
-                                    }
-                                }
-                            }
-                        }
-                        Some(SchedulerMode::Blocking) => {
-                            let (response_tx, response_rx) = oneshot::channel();
-                            let request = TokioThreadPoolRequest {
-                                actor: actor.clone(),
-                                state,
-                                message,
-                                metadata: get_message_metadata(offset, parent_offset),
-                                context: context.clone(),
-                                response: response_tx,
-                            };
-                            instrumentation.record_worker_state(actor_pid, &actor, {
-                                let target_capacity = blocking_tasks.max_capacity();
-                                let target_queue_size = target_capacity - blocking_tasks.capacity();
-                                TokioWorkerState::Sending {
-                                    target_queue_size,
-                                    target_capacity,
-                                }
-                            });
-                            match blocking_tasks.send(request).await {
-                                Err(_err) => break,
-                                Ok(_) => {
-                                    instrumentation.record_worker_state(
-                                        actor_pid,
-                                        &actor,
-                                        TokioWorkerState::Awaiting,
-                                    );
-                                    match response_rx.await {
-                                        Err(_err) => break,
-                                        Ok((message, state, actions)) => (message, state, actions),
-                                    }
-                                }
-                            }
                         }
                     };
                     actor_state.replace(state);
-                    instrumentation.record_worker_action_working_duration(
-                        actor_pid,
-                        &actor,
-                        &message,
-                        handler_start_time.elapsed(),
-                    );
                     if let Some(commands) = actions {
                         let enqueue_time = Instant::now();
                         let mut queue = VecDeque::with_capacity(commands.len());
@@ -2122,6 +2135,7 @@ where
         _pid: ProcessId,
         _actor: &TTask::Actor,
         _action: &TAction,
+        _scheduler_mode: SchedulerMode,
         _value: Duration,
     ) {
     }

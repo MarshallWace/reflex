@@ -7,7 +7,7 @@ use futures::Future;
 use metrics::{
     decrement_gauge, describe_gauge, describe_histogram, gauge, histogram, increment_gauge, Unit,
 };
-use reflex_dispatcher::{Action, Named, ProcessId, TaskFactory};
+use reflex_dispatcher::{Action, Named, ProcessId, SchedulerMode, TaskFactory};
 use reflex_scheduler::tokio::{
     metrics::TokioTaskMetricNames, TokioSchedulerInstrumentation, TokioSchedulerState,
     TokioWorkerState,
@@ -467,6 +467,7 @@ where
         _pid: ProcessId,
         actor: &TTask::Actor,
         action: &TAction,
+        scheduler_mode: SchedulerMode,
         value: Duration,
     ) {
         histogram!(
@@ -474,6 +475,11 @@ where
             value.as_micros() as f64,
             "actor" => actor.name(),
             "action" => action.name(),
+            "mode" => match scheduler_mode {
+                SchedulerMode::Sync => "sync",
+                SchedulerMode::Async => "async",
+                SchedulerMode::Blocking => "blocking",
+            }
         );
     }
     fn record_scheduler_state(&self, state: TokioSchedulerState) {
