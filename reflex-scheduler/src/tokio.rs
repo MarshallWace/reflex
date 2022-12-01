@@ -75,9 +75,11 @@ pub trait TokioSchedulerInstrumentation {
         &self,
         task: T,
     ) -> Self::InstrumentedTask<T>;
-    fn record_scheduler_queue_capacity(&self, value: usize);
-    fn record_scheduler_enqueue(&self, num_commands: usize);
-    fn record_scheduler_dequeue(&self);
+    fn record_scheduler_event_bus_capacity(&self, value: usize);
+    fn record_scheduler_event_bus_enqueue(&self, num_batches: usize);
+    fn record_scheduler_event_bus_dequeue(&self, num_batches: usize);
+    fn record_scheduler_enqueue_commands(&self, num_commands: usize);
+    fn record_scheduler_dequeue_commands(&self, num_commands: usize);
     fn record_scheduler_state(&self, state: TokioSchedulerState);
     fn record_worker_state(
         &self,
@@ -361,8 +363,9 @@ where
         &self,
         commands: VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
     ) -> Result<(), SendError<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>> {
+        self.instrumentation.record_scheduler_event_bus_enqueue(1);
         self.instrumentation
-            .record_scheduler_enqueue(commands.len());
+            .record_scheduler_enqueue_commands(commands.len());
         self.sender.send(commands).await
     }
     fn max_capacity(&self) -> usize {
@@ -754,7 +757,8 @@ where
             let instrumentation = self.commands.instrumentation.clone();
             move |message| {
                 future::ready(Ok({
-                    instrumentation.record_scheduler_enqueue(1);
+                    instrumentation.record_scheduler_event_bus_enqueue(1);
+                    instrumentation.record_scheduler_enqueue_commands(1);
                     let enqueue_time = Instant::now();
                     let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
                     [(
@@ -950,15 +954,15 @@ where
         let mut queue = init_commands;
         async move {
             let mut processes = processes;
-            instrumentation.record_scheduler_queue_capacity(command_queue_capacity);
+            instrumentation.record_scheduler_event_bus_capacity(command_queue_capacity);
             if !queue.is_empty() {
-                instrumentation.record_scheduler_enqueue(queue.len());
+                instrumentation.record_scheduler_enqueue_commands(queue.len());
             }
             // Main runtime event loop
             loop {
                 // Process queued commands individually
                 while let Some((command, enqueue_time)) = queue.pop_front() {
-                    instrumentation.record_scheduler_dequeue();
+                    instrumentation.record_scheduler_dequeue_commands(1);
                     instrumentation.record_scheduler_state(TokioSchedulerState::Working {
                         queue_size: async_commands.num_queued_items(),
                         capacity: async_commands.max_capacity(),
@@ -1047,9 +1051,10 @@ where
                                                     let num_added_commands =
                                                         queue.len() - existing_queue_size;
                                                     if num_added_commands > 0 {
-                                                        instrumentation.record_scheduler_enqueue(
-                                                            num_added_commands,
-                                                        );
+                                                        instrumentation
+                                                            .record_scheduler_enqueue_commands(
+                                                                num_added_commands,
+                                                            );
                                                     }
                                                 }
                                             }
@@ -1213,10 +1218,13 @@ where
                     None => break,
                     Some(commands) => {
                         // Collect any remaining buffered commands into the current batch
+                        let mut num_batches = 1;
                         let mut combined_commands = commands;
                         while let Ok(commands) = commands_rx.try_recv() {
+                            num_batches += 1;
                             combined_commands.extend(commands);
                         }
+                        instrumentation.record_scheduler_event_bus_dequeue(num_batches);
                         // Assign this batch of commands to the queue
                         queue = combined_commands
                     }
@@ -2062,9 +2070,11 @@ where
     ) -> Self::InstrumentedTask<T> {
         task
     }
-    fn record_scheduler_queue_capacity(&self, _value: usize) {}
-    fn record_scheduler_enqueue(&self, _num_commands: usize) {}
-    fn record_scheduler_dequeue(&self) {}
+    fn record_scheduler_event_bus_capacity(&self, _value: usize) {}
+    fn record_scheduler_event_bus_enqueue(&self, _num_batches: usize) {}
+    fn record_scheduler_event_bus_dequeue(&self, _num_batches: usize) {}
+    fn record_scheduler_enqueue_commands(&self, _num_commands: usize) {}
+    fn record_scheduler_dequeue_commands(&self, _num_commands: usize) {}
     fn record_scheduler_state(&self, _state: TokioSchedulerState) {}
     fn record_scheduler_command_waiting_duration(&self, _value: Duration) {}
     fn record_scheduler_command_working_duration(&self, _value: Duration) {}

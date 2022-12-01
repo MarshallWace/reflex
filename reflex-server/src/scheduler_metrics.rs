@@ -21,8 +21,9 @@ pub use metrics::SharedString;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerSchedulerMetricNames {
-    pub scheduler_queue_capacity: &'static str,
-    pub scheduler_queue_current_size: &'static str,
+    pub scheduler_event_bus_capacity: &'static str,
+    pub scheduler_event_bus_queued_messages: &'static str,
+    pub scheduler_command_queue_size: &'static str,
     pub scheduler_command_waiting_duration_micros: &'static str,
     pub scheduler_command_working_duration_micros: &'static str,
     pub worker_count: &'static str,
@@ -37,8 +38,9 @@ pub struct ServerSchedulerMetricNames {
 impl Default for ServerSchedulerMetricNames {
     fn default() -> Self {
         Self {
-            scheduler_queue_capacity: "scheduler_queue_capacity",
-            scheduler_queue_current_size: "scheduler_queue_current_size",
+            scheduler_event_bus_capacity: "scheduler_event_bus_capacity",
+            scheduler_event_bus_queued_messages: "scheduler_event_bus_queued_messages",
+            scheduler_command_queue_size: "scheduler_command_queue_size",
             scheduler_command_waiting_duration_micros: "scheduler_command_waiting_duration_micros",
             scheduler_command_working_duration_micros: "scheduler_command_working_duration_micros",
             worker_count: "worker_count",
@@ -54,12 +56,12 @@ impl Default for ServerSchedulerMetricNames {
 impl ServerSchedulerMetricNames {
     pub fn init(self) -> Self {
         describe_gauge!(
-            self.scheduler_queue_capacity,
+            self.scheduler_event_bus_capacity,
             Unit::Count,
             "Event bus message queue buffer capacity"
         );
         describe_gauge!(
-            self.scheduler_queue_current_size,
+            self.scheduler_event_bus_queued_messages,
             Unit::Count,
             "Number of event bus messages currently queued awaiting processing"
         );
@@ -345,17 +347,32 @@ where
         self.unsubscribe_task_monitor.instrument(task)
     }
 
-    fn record_scheduler_queue_capacity(&self, value: usize) {
-        gauge!(self.metric_names.scheduler_queue_capacity, value as f64,);
+    fn record_scheduler_event_bus_capacity(&self, value: usize) {
+        gauge!(self.metric_names.scheduler_event_bus_capacity, value as f64,);
     }
-    fn record_scheduler_enqueue(&self, num_commands: usize) {
+    fn record_scheduler_event_bus_enqueue(&self, num_batches: usize) {
         increment_gauge!(
-            self.metric_names.scheduler_queue_current_size,
+            self.metric_names.scheduler_event_bus_queued_messages,
+            num_batches as f64,
+        );
+    }
+    fn record_scheduler_event_bus_dequeue(&self, num_batches: usize) {
+        decrement_gauge!(
+            self.metric_names.scheduler_event_bus_queued_messages,
+            num_batches as f64
+        );
+    }
+    fn record_scheduler_enqueue_commands(&self, num_commands: usize) {
+        increment_gauge!(
+            self.metric_names.scheduler_command_queue_size,
             num_commands as f64,
         );
     }
-    fn record_scheduler_dequeue(&self) {
-        decrement_gauge!(self.metric_names.scheduler_queue_current_size, 1.0);
+    fn record_scheduler_dequeue_commands(&self, num_commands: usize) {
+        decrement_gauge!(
+            self.metric_names.scheduler_command_queue_size,
+            num_commands as f64,
+        );
     }
     fn record_scheduler_command_waiting_duration(&self, value: Duration) {
         histogram!(
