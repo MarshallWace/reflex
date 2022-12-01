@@ -35,6 +35,7 @@ pub struct TokioRuntimeMonitorMetricNames {
     pub tokio_runtime_total_steal_count: &'static str,
     pub tokio_runtime_workers_count: &'static str,
     pub tokio_runtime_elapsed_duration: &'static str,
+    pub tokio_runtime_worker_busy_duration_micros: &'static str,
 }
 
 impl Default for TokioRuntimeMonitorMetricNames {
@@ -68,6 +69,7 @@ impl Default for TokioRuntimeMonitorMetricNames {
             tokio_runtime_total_steal_count: "tokio_runtime_total_steal_count",
             tokio_runtime_workers_count: "tokio_runtime_workers_count",
             tokio_runtime_elapsed_duration: "tokio_runtime_elapsed_duration",
+            tokio_runtime_worker_busy_duration_micros: "tokio_runtime_worker_busy_duration",
         }
     }
 }
@@ -78,147 +80,10 @@ pub fn start_runtime_monitoring(
     runtime_name: &'static str,
 ) {
     let runtime_monitor = tokio_metrics::RuntimeMonitor::new(&runtime_handle);
+    let mut per_worker_metrics = PerWorkerMetrics::new(&runtime_handle.metrics(), runtime_name);
+    let inner_handle = runtime_handle.clone();
 
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_injection_queue_depth,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.injection_queue_depth"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_busy_duration,
-        Unit::Microseconds,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_busy_duration"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_local_queue_depth,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_local_queue_depth"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_local_schedule_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_local_schedule_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_noop_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_noop_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_overflow_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_overflow_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_park_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_park_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_polls_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_polls_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_max_steal_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_steal_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_busy_duration,
-        Unit::Microseconds,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_busy_duration"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_local_queue_depth,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_local_queue_depth"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_local_schedule_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_local_schedule_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_noop_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_noop_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_overflow_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_overflow_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_park_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_park_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_polls_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_polls_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_min_steal_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_steal_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_num_remote_schedules,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.num_remote_schedules"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_busy_duration,
-        Unit::Microseconds,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_busy_duration"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_local_queue_depth,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_local_queue_depth"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_local_schedule_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_local_schedule_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_noop_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_noop_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_overflow_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_overflow_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_park_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_park_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_polls_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_polls_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_total_steal_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_steal_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_workers_count,
-        Unit::Count,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.workers_count"
-    );
-    describe_gauge!(
-        tokio_runtime_metric_names.tokio_runtime_elapsed_duration,
-        Unit::Microseconds,
-        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.elapsed"
-    );
+    describe_gauges(&tokio_runtime_metric_names);
 
     runtime_handle.spawn(async move {
         let labels = [("threadpool", runtime_name)];
@@ -363,7 +228,203 @@ pub fn start_runtime_monitoring(
                 interval.elapsed.as_micros() as f64,
                 &labels
             );
+            per_worker_metrics.record_metrics(inner_handle.metrics(), &tokio_runtime_metric_names);
+
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
+}
+
+struct PerWorkerMetrics {
+    interval_start_busy_durations: Vec<Duration>,
+    labels: Vec<[(String, String); 2]>,
+}
+
+impl PerWorkerMetrics {
+    fn new(
+        tokio_runtime_metrics: &tokio::runtime::RuntimeMetrics,
+        threadpool_name: &'static str,
+    ) -> Self {
+        let (durations, labels) = (0..tokio_runtime_metrics.num_workers())
+            .map(|worker| {
+                (
+                    tokio_runtime_metrics.worker_total_busy_duration(worker),
+                    [
+                        ("threadpool".to_string(), threadpool_name.to_string()),
+                        ("worker".to_string(), worker.to_string()),
+                    ],
+                )
+            })
+            .unzip();
+        Self {
+            interval_start_busy_durations: durations,
+            labels,
+        }
+    }
+
+    fn record_metrics(
+        &mut self,
+        tokio_runtime_metrics: tokio::runtime::RuntimeMetrics,
+        metric_names: &TokioRuntimeMonitorMetricNames,
+    ) {
+        let num_workers = self.interval_start_busy_durations.len();
+        for worker in 0..num_workers {
+            let current_duration = tokio_runtime_metrics.worker_total_busy_duration(worker);
+            let previous_duration = self.interval_start_busy_durations[worker];
+            gauge!(
+                metric_names.tokio_runtime_worker_busy_duration_micros,
+                (current_duration - previous_duration).as_micros() as f64,
+                &self.labels[worker]
+            );
+            self.interval_start_busy_durations[worker] = current_duration;
+        }
+    }
+}
+
+fn describe_gauges(tokio_runtime_metric_names: &TokioRuntimeMonitorMetricNames) {
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_injection_queue_depth,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.injection_queue_depth"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_busy_duration,
+        Unit::Microseconds,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_busy_duration"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_local_queue_depth,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_local_queue_depth"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_local_schedule_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_local_schedule_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_noop_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_noop_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_overflow_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_overflow_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_park_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_park_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_polls_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_polls_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_max_steal_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.max_steal_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_busy_duration,
+        Unit::Microseconds,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_busy_duration"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_local_queue_depth,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_local_queue_depth"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_local_schedule_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_local_schedule_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_noop_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_noop_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_overflow_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_overflow_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_park_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_park_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_polls_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_polls_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_min_steal_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.min_steal_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_num_remote_schedules,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.num_remote_schedules"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_busy_duration,
+        Unit::Microseconds,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_busy_duration"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_local_queue_depth,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_local_queue_depth"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_local_schedule_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_local_schedule_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_noop_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_noop_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_overflow_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_overflow_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_park_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_park_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_polls_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_polls_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_total_steal_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.total_steal_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_workers_count,
+        Unit::Count,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.workers_count"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_elapsed_duration,
+        Unit::Microseconds,
+        "See https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.RuntimeMetrics.html#structfield.elapsed"
+    );
+    describe_gauge!(
+        tokio_runtime_metric_names.tokio_runtime_worker_busy_duration_micros,
+        Unit::Microseconds,
+        "Derived from https://docs.rs/tokio/latest/tokio/runtime/struct.RuntimeMetrics.html#method.worker_total_busy_duration"
+    );
 }
