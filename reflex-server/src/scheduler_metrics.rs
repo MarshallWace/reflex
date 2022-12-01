@@ -475,7 +475,7 @@ where
             value.as_micros() as f64,
             "actor" => actor.name(),
             "action" => action.name(),
-            "mode" => match scheduler_mode {
+            "type" => match scheduler_mode {
                 SchedulerMode::Sync => "sync",
                 SchedulerMode::Async => "async",
                 SchedulerMode::Blocking => "blocking",
