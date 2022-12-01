@@ -23,8 +23,7 @@ use reflex_runtime::{
     AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_scheduler::tokio::{
-    TokioInbox, TokioInitContext, TokioSchedulerInstrumentation, TokioSchedulerLogger,
-    TokioThreadPoolFactory,
+    TokioInbox, TokioSchedulerInstrumentation, TokioSchedulerLogger, TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
@@ -37,8 +36,9 @@ use crate::{
     },
     tokio_runtime_metrics_export::{start_runtime_monitoring, TokioRuntimeMonitorMetricNames},
     utils::operation::format_graphql_operation_label,
-    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor,
-    GraphQlWebServerInstrumentation, GraphQlWebServerMetricNames, GraphQlWebServerTask,
+    GraphQlWebServer, GraphQlWebServerAction, GraphQlWebServerActor, GraphQlWebServerActorFactory,
+    GraphQlWebServerInitContext, GraphQlWebServerInstrumentation, GraphQlWebServerMetricNames,
+    GraphQlWebServerTask,
 };
 pub use hyper::Body;
 
@@ -58,6 +58,7 @@ pub async fn cli<
     T,
     TFactory,
     TAllocator,
+    TActorFactory,
     TActors,
     TTransformHttp,
     TTransformWs,
@@ -72,11 +73,22 @@ pub async fn cli<
     TTracer,
     TLogger,
     TInstrumentation,
+    TAsyncTasks,
+    TBlockingTasks,
 >(
     options: ExecuteQueryCliOptions,
     graph_root: (CompiledProgram, InstructionPointer),
     schema: Option<GraphQlSchema>,
-    custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
+    custom_actors: GraphQlWebServerActorFactory<
+        TAction,
+        TTask,
+        TLogger,
+        TInstrumentation,
+        TAsyncTasks,
+        TBlockingTasks,
+        TActorFactory,
+        TActors,
+    >,
     factory: &TFactory,
     allocator: &TAllocator,
     transform_http: TTransformHttp,
@@ -92,8 +104,8 @@ pub async fn cli<
     instrumentation: TInstrumentation,
     metric_names: GraphQlWebServerMetricNames,
     tokio_runtime_metric_names: TokioRuntimeMonitorMetricNames,
-    async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
-    blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
+    async_tasks: TAsyncTasks,
+    blocking_tasks: TBlockingTasks,
 ) -> Result<String>
 where
     T: AsyncExpression
@@ -112,7 +124,18 @@ where
     T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
     TFactory: AsyncExpressionFactory<T> + Default,
     TAllocator: AsyncHeapAllocator<T> + Default,
-    TActors: IntoIterator<Item = (ProcessId, TTask::Actor)>,
+    TActorFactory: for<'a> FnOnce(
+        &'a mut GraphQlWebServerInitContext<
+            'a,
+            TAction,
+            TTask,
+            TLogger,
+            TInstrumentation,
+            TAsyncTasks,
+            TBlockingTasks,
+        >,
+    ) -> TActors,
+    TActors: IntoIterator<Item = (ProcessId, TTask::Actor)> + 'static,
     TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
     TTransformWs: WebSocketGraphQlServerQueryTransform + Send + 'static,
     THttpMiddleware: HttpMiddleware<THttpPre, THttpPost>,
@@ -132,6 +155,8 @@ where
         + Send
         + Sync
         + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
     TAction:
         Action + SerializableAction + GraphQlWebServerAction<T> + Clone + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask>

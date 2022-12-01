@@ -8,6 +8,7 @@ use std::{
 };
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
+use reflex_dispatcher::HandlerContext;
 use reflex_handlers::actor::HandlerActor;
 use reflex_scheduler::threadpool::AsyncTokioThreadPoolFactory;
 use reflex_server::{
@@ -19,6 +20,7 @@ use reflex_server::{
     scheduler_metrics::{
         NoopServerMetricsSchedulerQueueInstrumentation, ServerMetricsInstrumentation,
     },
+    GraphQlWebServerActorFactory,
 };
 use tokio::sync::oneshot;
 
@@ -122,7 +124,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         {
             let factory = factory.clone();
             let allocator = allocator.clone();
-            move |context, main_pid| {
+            GraphQlWebServerActorFactory::new(move |context| {
                 [(
                     context.generate_pid(),
                     ServerCliTaskActor::from(HandlerActor::GraphQlHandler(GraphQlHandler::new(
@@ -131,10 +133,10 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
                         allocator,
                         NoopReconnectTimeout {},
                         GraphQlHandlerMetricNames::default(),
-                        main_pid,
+                        context.pid(),
                     ))),
                 )]
-            }
+            })
         },
         compiler_options,
         interpreter_options,

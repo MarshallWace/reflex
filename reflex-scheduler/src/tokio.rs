@@ -87,6 +87,16 @@ pub trait TokioSchedulerInstrumentation {
     );
     fn record_scheduler_command_waiting_duration(&self, value: Duration);
     fn record_scheduler_command_working_duration(&self, value: Duration);
+    fn record_actor_spawn(
+        &self,
+        pid: ProcessId,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+    );
+    fn record_actor_kill(
+        &self,
+        pid: ProcessId,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+    );
     fn record_worker_spawn(
         &self,
         pid: ProcessId,
@@ -99,6 +109,16 @@ pub trait TokioSchedulerInstrumentation {
         actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
         inbox_capacity: usize,
         inbox_size: usize,
+    );
+    fn record_task_spawn(
+        &self,
+        pid: ProcessId,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+    );
+    fn record_task_kill(
+        &self,
+        pid: ProcessId,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
     );
     fn record_worker_action_enqueue(
         &self,
@@ -311,6 +331,7 @@ where
         TokioSchedulerInstrumentation<Action = TAction, Task = TTask> + Send + 'static,
 {
     sender: mpsc::Sender<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>,
+    max_capacity: usize,
     instrumentation: TInstrumentation,
 }
 impl<TAction, TTask, TInstrumentation> Clone for TokioEventChannel<TAction, TTask, TInstrumentation>
@@ -323,6 +344,7 @@ where
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
+            max_capacity: self.max_capacity,
             instrumentation: self.instrumentation.clone(),
         }
     }
@@ -342,11 +364,14 @@ where
             .record_scheduler_enqueue(commands.len());
         self.sender.send(commands).await
     }
-    fn capacity(&self) -> usize {
-        self.sender.max_capacity()
+    fn max_capacity(&self) -> usize {
+        self.max_capacity
     }
-    fn queue_size(&self) -> usize {
-        self.sender.max_capacity() - self.sender.capacity()
+    fn capacity(&self) -> usize {
+        self.sender.capacity()
+    }
+    fn num_queued_items(&self) -> usize {
+        self.max_capacity - self.capacity()
     }
 }
 
@@ -383,13 +408,25 @@ where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    // Synchronous actor
+    // Synchronous actor that uses the main event bus as its inbox
     Actor(TokioActorInstance<TAction, TTask>),
+    // Synchronous actor with its own asynchronous inbox
+    Worker(TokioWorkerInstance<TAction, TTask>),
     // Asynchronous event stream (used as input to an actor process)
     Task(TokioTask<TAction, TTask>),
 }
 
 struct TokioActorInstance<TAction, TTask>
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    actor: TTask::Actor,
+    state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
+    subscribers: HashMap<TokioSubscriberId, TokioSubscriber<TAction>>,
+}
+
+struct TokioWorkerInstance<TAction, TTask>
 where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
@@ -400,7 +437,7 @@ where
     handle: JoinHandle<()>,
     subscribers: HashMap<TokioSubscriberId, TokioSubscriber<TAction>>,
 }
-impl<TAction, TTask> Drop for TokioActorInstance<TAction, TTask>
+impl<TAction, TTask> Drop for TokioWorkerInstance<TAction, TTask>
 where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
@@ -435,20 +472,8 @@ where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    async fn abort(&mut self) {
-        if let Some(dispose) = self.dispose.take() {
-            dispose.await;
-        }
-    }
-}
-
-pub struct TokioInitContext {
-    next_pid: ProcessId,
-}
-impl TokioInitContext {
-    pub fn generate_pid(&mut self) -> ProcessId {
-        let next_pid = self.next_pid.next();
-        std::mem::replace(&mut self.next_pid, next_pid)
+    fn dispose(&mut self) -> Option<<TTask::Actor as Actor<TAction, TTask>>::Dispose> {
+        self.dispose.take()
     }
 }
 
@@ -525,71 +550,161 @@ pub struct TokioThreadPoolRequest<TAction: Action, TTask: TaskFactory<TAction, T
     )>,
 }
 
+pub struct TokioSchedulerBuilder<
+    TAction,
+    TTask,
+    TLogger,
+    TInstrumentation,
+    TAsyncTasks,
+    TBlockingTasks,
+> where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+{
+    logger: TLogger,
+    instrumentation: TInstrumentation,
+    async_tasks: TAsyncTasks,
+    blocking_tasks: TBlockingTasks,
+    next_pid: ProcessId,
+    actors: Vec<(ProcessId, TTask::Actor)>,
+    workers: Vec<(ProcessId, TTask::Actor)>,
+    init_messages: Vec<(ProcessId, TAction)>,
+}
+impl<TAction, TTask, TLogger, TInstrumentation, TAsyncTasks, TBlockingTasks>
+    TokioSchedulerBuilder<TAction, TTask, TLogger, TInstrumentation, TAsyncTasks, TBlockingTasks>
+where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+{
+    pub fn new(
+        logger: TLogger,
+        instrumentation: TInstrumentation,
+        async_tasks: TAsyncTasks,
+        blocking_tasks: TBlockingTasks,
+    ) -> Self {
+        Self {
+            logger,
+            instrumentation,
+            async_tasks,
+            blocking_tasks,
+            actors: Default::default(),
+            workers: Default::default(),
+            init_messages: Default::default(),
+            next_pid: ProcessId::default().next(),
+        }
+    }
+    pub fn generate_pid(&mut self) -> ProcessId {
+        let next_pid = self.next_pid.next();
+        std::mem::replace(&mut self.next_pid, next_pid)
+    }
+    pub fn actor(&mut self, pid: ProcessId, actor: TTask::Actor) {
+        self.actors.push((pid, actor));
+    }
+    pub fn worker(&mut self, pid: ProcessId, actor: TTask::Actor) {
+        self.workers.push((pid, actor));
+    }
+    pub fn send(&mut self, pid: ProcessId, message: TAction) {
+        self.init_messages.push((pid, message))
+    }
+    pub fn build(self) -> TokioScheduler<TAction, TTask, TInstrumentation> {
+        let Self {
+            logger,
+            instrumentation,
+            async_tasks,
+            blocking_tasks,
+            actors,
+            workers,
+            init_messages,
+            next_pid,
+        } = self;
+        TokioScheduler::new(
+            logger,
+            instrumentation,
+            async_tasks,
+            blocking_tasks,
+            actors,
+            workers,
+            init_messages,
+            next_pid,
+        )
+    }
+}
+
 impl<TAction, TTask, TInstrumentation> TokioScheduler<TAction, TTask, TInstrumentation>
 where
-    TAction: Action + Send + 'static,
+    TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
     TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
         + Sync
         + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
-    pub fn new<V>(
-        init_commands: impl FnOnce(
-            &mut TokioInitContext,
-        ) -> (
-            Vec<(ProcessId, TTask::Actor)>,
-            SchedulerTransition<TAction, TTask>,
-            V,
-        ),
+    fn new(
         logger: impl TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
         instrumentation: TInstrumentation,
         async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
         blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
-    ) -> (Self, V)
-    where
-        TAction: Sync,
-        TTask::Actor: Send + Sync + 'static,
-        <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
-        <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
-        <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State:
-            Send + 'static,
-    {
-        let mut context = TokioInitContext {
-            next_pid: ProcessId::default().next(),
-        };
-        let (init_processes, commands, result) = (init_commands)(&mut context);
-        let TokioInitContext { next_pid } = context;
+        actors: impl IntoIterator<Item = (ProcessId, TTask::Actor)> + 'static,
+        workers: impl IntoIterator<Item = (ProcessId, TTask::Actor)> + 'static,
+        init_messages: impl IntoIterator<Item = (ProcessId, TAction)> + 'static,
+        next_pid: ProcessId,
+    ) -> Self {
         let next_offset = Arc::new(AtomicUsize::new(Default::default()));
         let (main_event_loop, async_task_pool, blocking_task_pool, commands) =
             create_scheduler_thread(
                 async_tasks,
                 blocking_tasks,
-                init_processes,
-                commands,
+                actors,
+                workers,
+                init_messages,
                 next_pid,
                 next_offset.clone(),
                 1024,
                 logger,
                 instrumentation.clone(),
             );
-        (
-            Self {
-                commands,
-                // TODO: Panic main thread when scheduler task threads panic
-                task: tokio::spawn(instrumentation.instrument_main_thread(main_event_loop)),
-                async_task_pool: tokio::spawn(
-                    instrumentation.instrument_async_task_pool(async_task_pool),
-                ),
-                blocking_task_pool: tokio::spawn(
-                    instrumentation.instrument_blocking_task_pool(blocking_task_pool),
-                ),
-                next_subscriber_id: Default::default(),
-                next_offset,
-            },
-            result,
-        )
+        Self {
+            commands,
+            // TODO: Panic main thread when scheduler task threads panic
+            task: tokio::spawn(instrumentation.instrument_main_thread(main_event_loop)),
+            async_task_pool: tokio::spawn(
+                instrumentation.instrument_async_task_pool(async_task_pool),
+            ),
+            blocking_task_pool: tokio::spawn(
+                instrumentation.instrument_blocking_task_pool(blocking_task_pool),
+            ),
+            next_subscriber_id: Default::default(),
+            next_offset,
+        }
     }
 }
 
@@ -730,36 +845,38 @@ where
 fn create_scheduler_thread<TAction, TTask, TInstrumentation>(
     async_tasks: impl TokioThreadPoolFactory<TAction, TTask>,
     blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask>,
-    init_processes: impl IntoIterator<Item = (ProcessId, TTask::Actor)>,
-    init_commands: SchedulerTransition<TAction, TTask>,
+    actors: impl IntoIterator<Item = (ProcessId, TTask::Actor)>,
+    workers: impl IntoIterator<Item = (ProcessId, TTask::Actor)>,
+    init_messages: impl IntoIterator<Item = (ProcessId, TAction)>,
     next_pid: ProcessId,
     next_offset: Arc<AtomicUsize>,
     command_queue_capacity: usize,
-    logger: impl TokioSchedulerLogger<Action = TAction, Task = TTask> + Send,
+    logger: impl TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
     instrumentation: TInstrumentation,
 ) -> (
-    impl Future<Output = ()> + Send,
-    impl Future<Output = ()> + Send,
-    impl Future<Output = ()> + Send,
+    impl Future<Output = ()> + Send + 'static,
+    impl Future<Output = ()> + Send + 'static,
+    impl Future<Output = ()> + Send + 'static,
     TokioEventChannel<TAction, TTask, TInstrumentation>,
 )
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TTask::Actor: Send + Sync + 'static,
-    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
-    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
-    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
     TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
         + Sync
         + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
     let (commands_tx, mut commands_rx) =
         mpsc::channel::<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>(command_queue_capacity);
     let event_channel = TokioEventChannel {
         sender: commands_tx,
+        max_capacity: command_queue_capacity,
         instrumentation: instrumentation.clone(),
     };
     let (async_task_pool, async_tasks_tx) = {
@@ -774,31 +891,41 @@ where
         let task_pool = blocking_tasks.create(ReceiverStream::new(requests_rx));
         (task_pool, requests_tx)
     };
-    let event_loop_task = {
-        let next_pid = Arc::new(AtomicUsize::new(next_pid.into()));
-        let init_processes: HashMap<ProcessId, TokioProcess<TAction, TTask>> = init_processes
-            .into_iter()
-            .flat_map(|(pid, actor)| {
-                let (process, extra) = spawn_worker_process(
-                    actor,
-                    pid,
-                    1024,
-                    &next_pid,
-                    &next_offset,
-                    &event_channel,
-                    &async_tasks_tx,
-                    &blocking_tasks_tx,
-                    instrumentation.clone(),
-                );
-                once((pid, process)).chain(extra)
-            })
-            .collect();
-        let enqueue_time = Instant::now();
-        let init_commands = init_commands
-            .into_iter()
-            .filter_map(|command| match command {
-                SchedulerCommand::Send(pid, message) => Some({
-                    let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
+    let next_pid = Arc::new(AtomicUsize::new(next_pid.into()));
+    let actor_processes = actors.into_iter().map(|(pid, actor)| {
+        let state = actor.init();
+        let instance = TokioActorInstance {
+            actor,
+            state,
+            subscribers: Default::default(),
+        };
+        let process = TokioProcess::Actor(instance);
+        (pid, process)
+    });
+    let worker_processes = workers.into_iter().flat_map(|(pid, actor)| {
+        let (process, extra) = spawn_worker_process(
+            actor,
+            pid,
+            1024,
+            &next_pid,
+            &next_offset,
+            &event_channel,
+            &async_tasks_tx,
+            &blocking_tasks_tx,
+            instrumentation.clone(),
+        );
+        once((pid, process)).chain(extra)
+    });
+    let init_commands = init_messages
+        .into_iter()
+        .map(|(pid, message)| {
+            let offset = MessageOffset::from(increment_atomic_counter(&next_offset));
+            (offset, pid, message)
+        })
+        .map({
+            let enqueue_time = Instant::now();
+            move |(offset, pid, message)| {
+                (
                     TokioCommand::Send {
                         pid,
                         message: AsyncMessage::Owned {
@@ -808,37 +935,32 @@ where
                             caller: None,
                             enqueue_time,
                         },
-                    }
-                }),
-                SchedulerCommand::Task(pid, factory) => Some(TokioCommand::Spawn {
-                    pid,
-                    factory,
-                    caller: None,
-                }),
-                SchedulerCommand::Kill(pid) => Some(TokioCommand::Kill { pid, caller: None }),
-                // TODO: Forbid forward commands in initial scheduler command batch
-                SchedulerCommand::Forward(_) => None,
-            });
+                    },
+                    enqueue_time,
+                )
+            }
+        })
+        .collect::<VecDeque<(TokioCommand<TAction, TTask>, Instant)>>();
+    let processes: HashMap<ProcessId, TokioProcess<TAction, TTask>> =
+        actor_processes.chain(worker_processes).collect();
+    let event_loop_task = {
         let async_commands = event_channel.clone();
         let mut logger = logger;
-        let mut queue = init_commands
-            .map({
-                let enqueue_time = Instant::now();
-                move |command| (command, enqueue_time)
-            })
-            .collect::<VecDeque<_>>();
+        let mut queue = init_commands;
         async move {
-            let mut processes = init_processes;
+            let mut processes = processes;
             instrumentation.record_scheduler_queue_capacity(command_queue_capacity);
-            instrumentation.record_scheduler_enqueue(queue.len());
+            if !queue.is_empty() {
+                instrumentation.record_scheduler_enqueue(queue.len());
+            }
             // Main runtime event loop
             loop {
                 // Process queued commands individually
                 while let Some((command, enqueue_time)) = queue.pop_front() {
                     instrumentation.record_scheduler_dequeue();
                     instrumentation.record_scheduler_state(TokioSchedulerState::Working {
-                        queue_size: command_queue_capacity - async_commands.capacity(),
-                        capacity: command_queue_capacity,
+                        queue_size: async_commands.num_queued_items(),
+                        capacity: async_commands.max_capacity(),
                     });
                     instrumentation
                         .record_scheduler_command_waiting_duration(enqueue_time.elapsed());
@@ -871,20 +993,73 @@ where
                         }
                         TokioCommand::Send { pid, message } => {
                             let (send_task, subscriptions) = if let Some(process) =
-                                processes.get(&pid)
+                                processes.get_mut(&pid)
                             {
                                 match process {
-                                    TokioProcess::Task(instance) => {
-                                        let send_task = instance.inbox.send(message);
-                                        let inbox_capacity = instance.inbox_capacity;
-                                        let inbox_queue_size = instance.inbox.capacity();
-                                        let subscriptions = None;
-                                        (
-                                            Some((send_task, inbox_capacity, inbox_queue_size)),
-                                            subscriptions,
-                                        )
-                                    }
                                     TokioProcess::Actor(instance) => {
+                                        let subscriptions = if let Some(offset) = message.offset() {
+                                            let is_accepted_message =
+                                                instance.actor.accept(&message);
+                                            let subscriptions = if instance.subscribers.is_empty() {
+                                                None
+                                            } else {
+                                                let subscriptions = instance
+                                                    .subscribers
+                                                    .values()
+                                                    .filter_map(|subscriber| {
+                                                        subscriber.emit(&message)
+                                                    })
+                                                    .collect::<Vec<_>>();
+                                                if subscriptions.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(subscriptions)
+                                                }
+                                            };
+                                            if is_accepted_message {
+                                                let metadata = get_message_metadata(
+                                                    offset,
+                                                    message.parent_offset(),
+                                                );
+                                                let mut context = TokioHandlerContext {
+                                                    pid,
+                                                    next_pid: Arc::clone(&next_pid),
+                                                };
+                                                let results = instance.actor.handle(
+                                                    &mut instance.state,
+                                                    &message,
+                                                    &metadata,
+                                                    &mut context,
+                                                );
+                                                if let Some(commands) = results {
+                                                    let existing_queue_size = queue.len();
+                                                    let enqueue_time = Instant::now();
+                                                    collect_handler_results(
+                                                        &mut queue,
+                                                        commands,
+                                                        message,
+                                                        offset,
+                                                        pid,
+                                                        enqueue_time,
+                                                        &next_offset,
+                                                    );
+                                                    let num_added_commands =
+                                                        queue.len() - existing_queue_size;
+                                                    if num_added_commands > 0 {
+                                                        instrumentation.record_scheduler_enqueue(
+                                                            num_added_commands,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            subscriptions
+                                        } else {
+                                            None
+                                        };
+                                        let send_task = None;
+                                        (send_task, subscriptions)
+                                    }
+                                    TokioProcess::Worker(instance) => {
                                         let is_accepted_message = instance.actor.accept(&message);
                                         let subscriptions = if instance.subscribers.is_empty() {
                                             None
@@ -902,7 +1077,8 @@ where
                                         };
                                         let send_task = if is_accepted_message {
                                             let inbox_capacity = instance.inbox_capacity;
-                                            let inbox_queue_size = instance.inbox.capacity();
+                                            let inbox_queue_size =
+                                                inbox_capacity - instance.inbox.capacity();
                                             instrumentation.record_worker_action_enqueue(
                                                 pid,
                                                 &instance.actor,
@@ -914,6 +1090,17 @@ where
                                             None
                                         };
                                         (send_task, subscriptions)
+                                    }
+                                    TokioProcess::Task(instance) => {
+                                        let send_task = instance.inbox.send(message);
+                                        let inbox_capacity = instance.inbox_capacity;
+                                        let inbox_queue_size =
+                                            inbox_capacity - instance.inbox.capacity();
+                                        let subscriptions = None;
+                                        (
+                                            Some((send_task, inbox_capacity, inbox_queue_size)),
+                                            subscriptions,
+                                        )
                                     }
                                 }
                             } else {
@@ -938,32 +1125,48 @@ where
                             }
                         }
                         TokioCommand::Kill { pid, caller: _ } => {
-                            if let Some(process) = processes.remove(&pid) {
-                                let actor_instance = match process {
-                                    TokioProcess::Actor(instance) => instance,
+                            let mut removed_process =
+                                processes.remove(&pid).map(|process| (process, pid));
+                            while let Some((process, pid)) = removed_process.take() {
+                                match process {
+                                    TokioProcess::Actor(instance) => {
+                                        let actor = &instance.actor;
+                                        instrumentation.record_actor_kill(pid, actor);
+                                    }
+                                    TokioProcess::Worker(instance) => {
+                                        let actor = &instance.actor;
+                                        let inbox_capacity = instance.inbox_capacity;
+                                        let inbox_size = inbox_capacity - instance.inbox.capacity();
+                                        instrumentation.record_worker_kill(
+                                            pid,
+                                            actor,
+                                            inbox_capacity,
+                                            inbox_size,
+                                        );
+                                    }
                                     TokioProcess::Task(mut task) => {
                                         let actor_pid = task.actor_pid;
-                                        tokio::spawn(instrumentation.instrument_dispose_task(
-                                            async move { task.abort().await },
-                                        ));
-                                        let actor_instance = processes
-                                            .remove(&actor_pid)
+                                        if let Some(actor_instance) = processes
+                                            .get(&actor_pid)
                                             .and_then(|process| match process {
-                                                TokioProcess::Actor(instance) => Some(instance),
-                                                TokioProcess::Task(_) => None,
+                                                TokioProcess::Worker(worker) => Some(worker),
+                                                _ => None,
                                             })
-                                            .expect("Invalid task actor process");
-                                        actor_instance
+                                        {
+                                            instrumentation
+                                                .record_task_kill(pid, &actor_instance.actor);
+                                        }
+                                        if let Some(dispose) = task.dispose() {
+                                            tokio::spawn(
+                                                instrumentation.instrument_dispose_task(dispose),
+                                            );
+                                        }
+                                        // Remove associated task actor
+                                        if let Some(actor_process) = processes.remove(&actor_pid) {
+                                            removed_process.replace((actor_process, actor_pid));
+                                        }
                                     }
-                                };
-                                let inbox_capacity = actor_instance.inbox_capacity;
-                                let inbox_size = inbox_capacity - actor_instance.inbox.capacity();
-                                instrumentation.record_worker_kill(
-                                    pid,
-                                    &actor_instance.actor,
-                                    inbox_capacity,
-                                    inbox_size,
-                                );
+                                }
                             }
                         }
                         TokioCommand::Subscribe {
@@ -971,17 +1174,21 @@ where
                             pid,
                             subscriber,
                         } => {
-                            if let Some(entry) = processes
-                                .get_mut(&pid)
-                                .and_then(|process| match process {
-                                    TokioProcess::Actor(instance) => Some(instance),
-                                    TokioProcess::Task(_) => None,
-                                })
-                                .and_then(|instance| {
-                                    match instance.subscribers.entry(subscription_id) {
-                                        Entry::Occupied(_) => None,
-                                        Entry::Vacant(entry) => Some(entry),
+                            if let Some(entry) =
+                                processes.get_mut(&pid).and_then(|process| match process {
+                                    TokioProcess::Actor(instance) => {
+                                        match instance.subscribers.entry(subscription_id) {
+                                            Entry::Occupied(_) => None,
+                                            Entry::Vacant(entry) => Some(entry),
+                                        }
                                     }
+                                    TokioProcess::Worker(instance) => {
+                                        match instance.subscribers.entry(subscription_id) {
+                                            Entry::Occupied(_) => None,
+                                            Entry::Vacant(entry) => Some(entry),
+                                        }
+                                    }
+                                    TokioProcess::Task(_) => None,
                                 })
                             {
                                 entry.insert(subscriber);
@@ -991,7 +1198,7 @@ where
                             subscription_id,
                             pid,
                         } => {
-                            if let Some(TokioProcess::Actor(instance)) = processes.get_mut(&pid) {
+                            if let Some(TokioProcess::Worker(instance)) = processes.get_mut(&pid) {
                                 instance.subscribers.remove(&subscription_id);
                             }
                         }
@@ -1053,7 +1260,6 @@ where
 {
     let state = actor.init();
     let (inbox_tx, inbox) = create_worker_inbox(inbox_capacity);
-    instrumentation.record_worker_spawn(pid, &actor, inbox_capacity);
     match actor.events(inbox) {
         ActorEvents::Sync(inbox) => {
             let actor = Arc::new(actor);
@@ -1064,6 +1270,7 @@ where
                 inbox_tx,
                 inbox_capacity,
                 pid,
+                pid,
                 next_pid,
                 next_offset,
                 results,
@@ -1071,7 +1278,7 @@ where
                 blocking_tasks,
                 instrumentation,
             );
-            (TokioProcess::Actor(instance), None)
+            (TokioProcess::Worker(instance), None)
         }
         ActorEvents::Async(events, dispose) => {
             let actor = Arc::new(actor);
@@ -1094,7 +1301,7 @@ where
             );
             (
                 TokioProcess::Task(events),
-                Some((actor_pid, TokioProcess::Actor(instance))),
+                Some((actor_pid, TokioProcess::Worker(instance))),
             )
         }
     }
@@ -1121,7 +1328,7 @@ fn spawn_async_worker<TAction, TTask, TInstrumentation>(
     instrumentation: TInstrumentation,
 ) -> (
     TokioTask<TAction, TTask>,
-    TokioActorInstance<TAction, TTask>,
+    TokioWorkerInstance<TAction, TTask>,
 )
 where
     TAction: Action + Send + Sync + 'static,
@@ -1136,6 +1343,7 @@ where
         + Sync
         + 'static,
 {
+    instrumentation.record_task_spawn(task_pid, &actor);
     let inbox_capacity = 64;
     let (actor_inbox_tx, actor_inbox) = create_worker_inbox(inbox_capacity);
     let inbox_task =
@@ -1147,6 +1355,7 @@ where
         actor_inbox_tx,
         inbox_capacity,
         task_pid,
+        actor_pid,
         next_pid,
         next_offset,
         results,
@@ -1158,8 +1367,10 @@ where
         inbox: inbox_tx,
         inbox_capacity,
         actor_pid,
-        // TODO: Panic main scheduler thread when worker task panics
-        handle: tokio::spawn(instrumentation.instrument_task_thread(inbox_task)),
+        handle: {
+            // TODO: Panic main scheduler thread when worker task panics
+            tokio::spawn(instrumentation.instrument_task_thread(inbox_task))
+        },
         dispose,
     };
     (task_process, actor_process)
@@ -1260,14 +1471,15 @@ fn spawn_worker_actor_process<TAction, TTask, TInstrumentation>(
     inbox: TokioInbox<TAction>,
     inbox_tx: mpsc::Sender<AsyncMessage<TAction>>,
     inbox_capacity: usize,
-    pid: ProcessId,
+    inbox_pid: ProcessId,
+    actor_pid: ProcessId,
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &TokioEventChannel<TAction, TTask, TInstrumentation>,
     async_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
     blocking_tasks: &mpsc::Sender<TokioThreadPoolRequest<TAction, TTask>>,
     instrumentation: TInstrumentation,
-) -> TokioActorInstance<TAction, TTask>
+) -> TokioWorkerInstance<TAction, TTask>
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
@@ -1279,11 +1491,13 @@ where
         + Sync
         + 'static,
 {
+    instrumentation.record_worker_spawn(actor_pid, &actor, inbox_capacity);
     let task = create_worker_actor_task(
         actor.clone(),
         state,
         inbox,
-        pid,
+        inbox_pid,
+        actor_pid,
         next_pid,
         next_offset,
         results,
@@ -1291,12 +1505,14 @@ where
         blocking_tasks,
         instrumentation.clone(),
     );
-    TokioActorInstance {
+    TokioWorkerInstance {
         inbox: inbox_tx,
         inbox_capacity,
         actor,
-        // TODO: Panic main scheduler thread when worker task panics
-        handle: tokio::spawn(instrumentation.instrument_worker_thread(task)),
+        handle: {
+            // TODO: Panic main scheduler thread when worker task panics
+            tokio::spawn(instrumentation.instrument_worker_thread(task))
+        },
         subscribers: Default::default(),
     }
 }
@@ -1305,7 +1521,8 @@ fn create_worker_actor_task<TAction, TTask, TInstrumentation>(
     actor: Arc<TTask::Actor>,
     state: <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State,
     inbox: TokioInbox<TAction>,
-    pid: ProcessId,
+    inbox_pid: ProcessId,
+    actor_pid: ProcessId,
     next_pid: &Arc<AtomicUsize>,
     next_offset: &Arc<AtomicUsize>,
     results: &TokioEventChannel<TAction, TTask, TInstrumentation>,
@@ -1326,23 +1543,23 @@ where
 {
     let mut actor_state = Some(state);
     let mut inbox = inbox;
-    let context = get_handler_context(pid, next_pid);
+    let context = get_handler_context(inbox_pid, next_pid);
     let next_offset = next_offset.clone();
     let results = results.clone();
     let async_tasks = async_tasks.clone();
     let blocking_tasks = blocking_tasks.clone();
     async move {
         while let Some(message) = {
-            instrumentation.record_worker_state(pid, &actor, TokioWorkerState::Waiting);
+            instrumentation.record_worker_state(actor_pid, &actor, TokioWorkerState::Waiting);
             inbox.next()
         }
         .await
         {
-            instrumentation.record_worker_action_dequeue(pid, &actor, &message);
-            instrumentation.record_worker_state(pid, &actor, TokioWorkerState::Working);
+            instrumentation.record_worker_action_dequeue(actor_pid, &actor, &message);
+            instrumentation.record_worker_state(actor_pid, &actor, TokioWorkerState::Working);
             if let Some(enqueue_time) = message.enqueue_time() {
                 instrumentation.record_worker_action_waiting_duration(
-                    pid,
+                    actor_pid,
                     &actor,
                     &message,
                     enqueue_time.elapsed(),
@@ -1372,7 +1589,7 @@ where
                                 context: context.clone(),
                                 response: response_tx,
                             };
-                            instrumentation.record_worker_state(pid, &actor, {
+                            instrumentation.record_worker_state(actor_pid, &actor, {
                                 let target_capacity = async_tasks.max_capacity();
                                 let target_queue_size = target_capacity - async_tasks.capacity();
                                 TokioWorkerState::Sending {
@@ -1384,7 +1601,7 @@ where
                                 Err(_err) => break,
                                 Ok(_) => {
                                     instrumentation.record_worker_state(
-                                        pid,
+                                        actor_pid,
                                         &actor,
                                         TokioWorkerState::Awaiting,
                                     );
@@ -1405,7 +1622,7 @@ where
                                 context: context.clone(),
                                 response: response_tx,
                             };
-                            instrumentation.record_worker_state(pid, &actor, {
+                            instrumentation.record_worker_state(actor_pid, &actor, {
                                 let target_capacity = blocking_tasks.max_capacity();
                                 let target_queue_size = target_capacity - blocking_tasks.capacity();
                                 TokioWorkerState::Sending {
@@ -1417,7 +1634,7 @@ where
                                 Err(_err) => break,
                                 Ok(_) => {
                                     instrumentation.record_worker_state(
-                                        pid,
+                                        actor_pid,
                                         &actor,
                                         TokioWorkerState::Awaiting,
                                     );
@@ -1431,7 +1648,7 @@ where
                     };
                     actor_state.replace(state);
                     instrumentation.record_worker_action_working_duration(
-                        pid,
+                        actor_pid,
                         &actor,
                         &message,
                         handler_start_time.elapsed(),
@@ -1444,18 +1661,20 @@ where
                             commands,
                             message,
                             offset,
-                            pid,
+                            actor_pid,
                             enqueue_time,
                             &next_offset,
                         );
-                        instrumentation.record_worker_state(pid, &actor, {
-                            TokioWorkerState::Dispatching {
-                                num_commands: queue.len(),
-                                target_queue_size: results.queue_size(),
-                                target_capacity: results.capacity(),
-                            }
-                        });
-                        let _ = results.send(queue).await;
+                        if !queue.is_empty() {
+                            instrumentation.record_worker_state(actor_pid, &actor, {
+                                TokioWorkerState::Dispatching {
+                                    num_commands: queue.len(),
+                                    target_queue_size: results.num_queued_items(),
+                                    target_capacity: results.max_capacity(),
+                                }
+                            });
+                            let _ = results.send(queue).await;
+                        }
                     }
                 }
             }
@@ -1463,7 +1682,7 @@ where
     }
 }
 
-fn collect_handler_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
+fn collect_handler_results<TAction, TTask>(
     queue: &mut VecDeque<(TokioCommand<TAction, TTask>, Instant)>,
     commands: SchedulerTransition<TAction, TTask>,
     message: AsyncMessage<TAction>,
@@ -1471,7 +1690,10 @@ fn collect_handler_results<TAction: Action, TTask: TaskFactory<TAction, TTask>>(
     pid: ProcessId,
     enqueue_time: Instant,
     next_offset: &Arc<AtomicUsize>,
-) {
+) where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
     let redispatched_from = message.redispatched_from();
     let caller = Some((offset, pid));
     // Redispatches are handled specially in order to minimise unnecessary sharing/allocations for situations where the
@@ -1833,6 +2055,18 @@ where
     fn record_scheduler_state(&self, _state: TokioSchedulerState) {}
     fn record_scheduler_command_waiting_duration(&self, _value: Duration) {}
     fn record_scheduler_command_working_duration(&self, _value: Duration) {}
+    fn record_actor_spawn(
+        &self,
+        _pid: ProcessId,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+    ) {
+    }
+    fn record_actor_kill(
+        &self,
+        _pid: ProcessId,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+    ) {
+    }
     fn record_worker_spawn(&self, _pid: ProcessId, _actor: &TTask::Actor, _inbox_capacity: usize) {}
     fn record_worker_kill(
         &self,
@@ -1840,6 +2074,18 @@ where
         _actor: &TTask::Actor,
         _inbox_capacity: usize,
         _inbox_size: usize,
+    ) {
+    }
+    fn record_task_spawn(
+        &self,
+        _pid: ProcessId,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+    ) {
+    }
+    fn record_task_kill(
+        &self,
+        _pid: ProcessId,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
     ) {
     }
     fn record_worker_action_enqueue(

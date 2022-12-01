@@ -12,6 +12,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
+use reflex_dispatcher::HandlerContext;
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     default_handler_actors,
@@ -39,7 +40,7 @@ use reflex_server::{
         NoopServerMetricsSchedulerQueueInstrumentation, ServerMetricsInstrumentation,
     },
     server::{utils::EitherTracer, NoopWebSocketGraphQlServerQueryTransform},
-    GraphQlWebServerMetricNames,
+    GraphQlWebServerActorFactory, GraphQlWebServerMetricNames,
 };
 use reflex_server::{
     cli::reflex_server::OpenTelemetryConfig,
@@ -182,23 +183,23 @@ async fn main() -> Result<()> {
         &factory,
         &allocator,
     )?;
-    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _, _, _>(
+    cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _>(
         args.into(),
         graph_root,
         schema,
-        |context, main_pid| {
+        GraphQlWebServerActorFactory::new(|context| {
             default_handler_actors::<TAction, TTask, T, TFactory, TAllocator, TConnect, TReconnect>(
                 https_client,
                 &factory,
                 &allocator,
                 NoopReconnectTimeout,
                 DefaultHandlerMetricNames::default(),
-                main_pid,
+                context.pid(),
             )
             .into_iter()
             .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
             .collect::<Vec<_>>()
-        },
+        }),
         &factory,
         &allocator,
         NoopGraphQlQueryTransform,

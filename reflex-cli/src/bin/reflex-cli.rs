@@ -29,8 +29,8 @@ use reflex::{
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
     Action, Actor, ActorEvents, AsyncScheduler, Handler, HandlerContext, Matcher, MessageData,
-    Named, Redispatcher, SchedulerCommand, SchedulerMode, SchedulerTransition, SerializableAction,
-    SerializedAction, TaskFactory, TaskInbox, Worker,
+    Named, Redispatcher, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
+    TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::{
     action::{
@@ -89,7 +89,8 @@ use reflex_runtime::{
 use reflex_scheduler::{
     threadpool::AsyncTokioThreadPoolFactory,
     tokio::{
-        NoopTokioSchedulerInstrumentation, TokioCommand, TokioScheduler, TokioSchedulerLogger,
+        NoopTokioSchedulerInstrumentation, TokioCommand, TokioSchedulerBuilder,
+        TokioSchedulerLogger,
     },
 };
 use reflex_utils::reconnect::{NoopReconnectTimeout, ReconnectTimeout};
@@ -232,66 +233,67 @@ pub async fn main() -> Result<()> {
                 let instrumentation = NoopTokioSchedulerInstrumentation::default();
                 let async_tasks = AsyncTokioThreadPoolFactory::default();
                 let blocking_tasks = AsyncTokioThreadPoolFactory::default();
-                let (scheduler, main_pid) = TokioScheduler::<TAction, TTask, TInstrumentation>::new(
-                    |context| {
-                        let main_pid = context.generate_pid();
-                        let mut actors = {
-                            runtime_actors(
-                                factory.clone(),
-                                allocator.clone(),
-                                RuntimeMetricNames::default(),
-                                main_pid,
-                            )
-                            .into_iter()
-                            .map(CliActor::Runtime)
-                        }
-                        .chain(once(CliActor::BytecodeInterpreter(
-                            BytecodeInterpreter::new(
-                                (CompiledProgram::default(), InstructionPointer::default()),
-                                compiler_options,
-                                interpreter_options,
-                                factory.clone(),
-                                allocator.clone(),
-                                BytecodeInterpreterMetricNames::default(),
-                                CliMetricLabels,
-                                main_pid,
-                            ),
-                        )))
-                        .chain(
-                            default_handler_actors::<
-                                TAction,
-                                TTask,
-                                T,
-                                TFactory,
-                                TAllocator,
-                                TConnect,
-                                TReconnect,
-                            >(
-                                https_client,
-                                &factory,
-                                &allocator,
-                                NoopReconnectTimeout,
-                                DefaultHandlerMetricNames::default(),
-                                main_pid,
-                            )
-                            .into_iter()
-                            .map(|actor| CliActor::Handler(actor)),
-                        )
-                        .map(|actor| (context.generate_pid(), actor))
-                        .collect::<Vec<_>>();
-                        let actor_pids = actors.iter().map(|(pid, _)| *pid);
-                        actors.push((main_pid, CliActor::Main(Redispatcher::new(actor_pids))));
-                        let init_commands = SchedulerTransition::new([SchedulerCommand::Send(
+                let (scheduler, main_pid) = {
+                    let mut builder = TokioSchedulerBuilder::<TAction, TTask, _, _, _, _>::new(
+                        logger,
+                        instrumentation,
+                        async_tasks,
+                        blocking_tasks,
+                    );
+                    let main_pid = builder.generate_pid();
+                    let actors = {
+                        runtime_actors(
+                            factory.clone(),
+                            allocator.clone(),
+                            RuntimeMetricNames::default(),
                             main_pid,
-                            TAction::from(subscribe_action),
-                        )]);
-                        (actors, init_commands, main_pid)
-                    },
-                    logger,
-                    instrumentation,
-                    async_tasks,
-                    blocking_tasks,
-                );
+                        )
+                        .into_iter()
+                        .map(CliActor::Runtime)
+                    }
+                    .chain(once(CliActor::BytecodeInterpreter(
+                        BytecodeInterpreter::new(
+                            (CompiledProgram::default(), InstructionPointer::default()),
+                            compiler_options,
+                            interpreter_options,
+                            factory.clone(),
+                            allocator.clone(),
+                            BytecodeInterpreterMetricNames::default(),
+                            CliMetricLabels,
+                            main_pid,
+                        ),
+                    )))
+                    .chain(
+                        default_handler_actors::<
+                            TAction,
+                            TTask,
+                            T,
+                            TFactory,
+                            TAllocator,
+                            TConnect,
+                            TReconnect,
+                        >(
+                            https_client,
+                            &factory,
+                            &allocator,
+                            NoopReconnectTimeout,
+                            DefaultHandlerMetricNames::default(),
+                            main_pid,
+                        )
+                        .into_iter()
+                        .map(|actor| CliActor::Handler(actor)),
+                    )
+                    .map(|actor| (builder.generate_pid(), actor))
+                    .collect::<Vec<_>>();
+                    let actor_pids = actors.iter().map(|(pid, _)| *pid);
+                    builder.actor(main_pid, CliActor::Main(Redispatcher::new(actor_pids)));
+                    for (pid, actor) in actors {
+                        builder.worker(pid, actor);
+                    }
+                    builder.send(main_pid, TAction::from(subscribe_action));
+                    let runtime = builder.build();
+                    (runtime, main_pid)
+                };
                 let mut results_stream = tokio::spawn(scheduler.subscribe(main_pid, {
                     let factory = factory.clone();
                     move |action: &CliActions<CachedSharedTerm<CliBuiltins>>| {

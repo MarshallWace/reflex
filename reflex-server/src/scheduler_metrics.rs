@@ -26,6 +26,7 @@ pub struct ServerSchedulerMetricNames {
     pub scheduler_command_waiting_duration_micros: &'static str,
     pub scheduler_command_working_duration_micros: &'static str,
     pub worker_count: &'static str,
+    pub task_count: &'static str,
     pub worker_inbox_capacity: &'static str,
     pub worker_inbox_current_size: &'static str,
     pub worker_action_waiting_duration_micros: &'static str,
@@ -41,6 +42,7 @@ impl Default for ServerSchedulerMetricNames {
             scheduler_command_waiting_duration_micros: "scheduler_command_waiting_duration_micros",
             scheduler_command_working_duration_micros: "scheduler_command_working_duration_micros",
             worker_count: "worker_count",
+            task_count: "task_count",
             worker_inbox_capacity: "worker_inbox_capacity",
             worker_inbox_current_size: "worker_inbox_current_size",
             worker_action_waiting_duration_micros: "worker_action_waiting_duration_micros",
@@ -367,6 +369,12 @@ where
             value.as_micros() as f64,
         );
     }
+    fn record_actor_spawn(&self, pid: ProcessId, actor: &TTask::Actor) {
+        self.record_worker_spawn(pid, actor, 0);
+    }
+    fn record_actor_kill(&self, pid: ProcessId, actor: &TTask::Actor) {
+        self.record_worker_kill(pid, actor, 0, 0);
+    }
     fn record_worker_spawn(&self, _pid: ProcessId, actor: &TTask::Actor, inbox_capacity: usize) {
         increment_gauge!(
             self.metric_names.worker_count,
@@ -398,6 +406,20 @@ where
         );
         decrement_gauge!(
             self.metric_names.worker_count,
+            1.0,
+            "actor" => actor.name(),
+        );
+    }
+    fn record_task_spawn(&self, _pid: ProcessId, actor: &TTask::Actor) {
+        increment_gauge!(
+            self.metric_names.task_count,
+            1.0,
+            "actor" => actor.name(),
+        );
+    }
+    fn record_task_kill(&self, _pid: ProcessId, actor: &TTask::Actor) {
+        decrement_gauge!(
+            self.metric_names.task_count,
             1.0,
             "actor" => actor.name(),
         );

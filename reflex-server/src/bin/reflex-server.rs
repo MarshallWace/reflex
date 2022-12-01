@@ -16,7 +16,7 @@ use clap::Parser;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
-use reflex_dispatcher::Action;
+use reflex_dispatcher::{Action, HandlerContext};
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     default_handler_actors,
@@ -49,7 +49,7 @@ use reflex_server::{
         InitGraphRootAction, InitHttpServerAction, InitOpenTelemetryAction,
         InitPrometheusMetricsAction,
     },
-    GraphQlWebServerMetricNames,
+    GraphQlWebServerActorFactory, GraphQlWebServerMetricNames,
 };
 use reflex_server::{
     server::utils::EitherTracer, tokio_runtime_metrics_export::TokioRuntimeMonitorMetricNames,
@@ -236,52 +236,61 @@ pub async fn main() -> Result<()> {
             address: config.address,
         }),
     );
-    let server = cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _>(
-        config,
-        graph_root,
-        schema,
-        |context, main_pid| {
-            default_handler_actors::<TAction, TTask, T, TFactory, TAllocator, TConnect, TReconnect>(
-                https_client,
-                &factory,
-                &allocator,
-                FibonacciReconnectTimeout {
-                    units: Duration::from_secs(1),
-                    max_timeout: Duration::from_secs(30),
-                },
-                DefaultHandlerMetricNames::default(),
-                main_pid,
-            )
-            .into_iter()
-            .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
-            .collect::<Vec<_>>()
-        },
-        &factory,
-        &allocator,
-        compiler_options,
-        interpreter_options,
-        NoopGraphQlQueryTransform,
-        NoopGraphQlQueryTransform,
-        GraphQlWebServerMetricNames::default(),
-        TokioRuntimeMonitorMetricNames::default(),
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        GraphQlWebServerMetricLabels,
-        match tracer {
-            None => EitherTracer::Left(NoopTracer::default()),
-            Some(tracer) => EitherTracer::Right(tracer),
-        },
-        logger,
-        ServerMetricsInstrumentation::new(
-            NoopServerMetricsSchedulerQueueInstrumentation::default(),
-            metric_names,
-        ),
-        AsyncTokioThreadPoolFactory::default(),
-        AsyncTokioThreadPoolFactory::default(),
-    )
-    .with_context(|| anyhow!("Server startup failed"))?;
+    let server =
+        cli::<TAction, TTask, T, TFactory, TAllocator, _, _, _, _, _, _, _, _, _, _, _, _, _, _>(
+            config,
+            graph_root,
+            schema,
+            GraphQlWebServerActorFactory::new(|context| {
+                default_handler_actors::<
+                    TAction,
+                    TTask,
+                    T,
+                    TFactory,
+                    TAllocator,
+                    TConnect,
+                    TReconnect,
+                >(
+                    https_client,
+                    &factory,
+                    &allocator,
+                    FibonacciReconnectTimeout {
+                        units: Duration::from_secs(1),
+                        max_timeout: Duration::from_secs(30),
+                    },
+                    DefaultHandlerMetricNames::default(),
+                    context.pid(),
+                )
+                .into_iter()
+                .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
+                .collect::<Vec<_>>()
+            }),
+            &factory,
+            &allocator,
+            compiler_options,
+            interpreter_options,
+            NoopGraphQlQueryTransform,
+            NoopGraphQlQueryTransform,
+            GraphQlWebServerMetricNames::default(),
+            TokioRuntimeMonitorMetricNames::default(),
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            GraphQlWebServerMetricLabels,
+            match tracer {
+                None => EitherTracer::Left(NoopTracer::default()),
+                Some(tracer) => EitherTracer::Right(tracer),
+            },
+            logger,
+            ServerMetricsInstrumentation::new(
+                NoopServerMetricsSchedulerQueueInstrumentation::default(),
+                metric_names,
+            ),
+            AsyncTokioThreadPoolFactory::default(),
+            AsyncTokioThreadPoolFactory::default(),
+        )
+        .with_context(|| anyhow!("Server startup failed"))?;
     server.await.with_context(|| anyhow!("Server error"))
 }
 

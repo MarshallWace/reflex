@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{convert::Infallible, iter::once, sync::Arc};
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+use std::{convert::Infallible, iter::once, marker::PhantomData, sync::Arc};
 
 use futures::{future, stream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
@@ -23,7 +23,7 @@ use reflex::core::{
 };
 use reflex_dispatcher::{
     utils::take_until_final_item::TakeUntilFinalItem, Action, Actor, AsyncScheduler, Handler,
-    Matcher, ProcessId, Redispatcher, SchedulerTransition, TaskFactory,
+    HandlerContext, Matcher, ProcessId, Redispatcher, SchedulerTransition, TaskFactory,
 };
 use reflex_graphql::{
     create_json_error_object,
@@ -50,7 +50,7 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_scheduler::tokio::{
-    TokioInbox, TokioInitContext, TokioScheduler, TokioSchedulerInstrumentation,
+    TokioInbox, TokioScheduler, TokioSchedulerBuilder, TokioSchedulerInstrumentation,
     TokioSchedulerLogger, TokioThreadPoolFactory,
 };
 use reflex_stdlib::Stdlib;
@@ -247,6 +247,189 @@ pub trait GraphQlWebServerInstrumentation: TokioSchedulerInstrumentation {
     ) -> Self::InstrumentedTask<T>;
 }
 
+pub struct GraphQlWebServerActorFactory<
+    TAction,
+    TTask,
+    TLogger,
+    TInstrumentation,
+    TAsyncTasks,
+    TBlockingTasks,
+    TFn,
+    TActors,
+> where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+    TFn: for<'a> FnOnce(
+        &'a mut GraphQlWebServerInitContext<
+            'a,
+            TAction,
+            TTask,
+            TLogger,
+            TInstrumentation,
+            TAsyncTasks,
+            TBlockingTasks,
+        >,
+    ) -> TActors,
+    TActors: IntoIterator<Item = (ProcessId, TTask::Actor)> + 'static,
+{
+    factory: TFn,
+    _action: PhantomData<TAction>,
+    _task: PhantomData<TTask>,
+    _logger: PhantomData<TLogger>,
+    _instrumentation: PhantomData<TInstrumentation>,
+    _async_tasks: PhantomData<TAsyncTasks>,
+    _blocking_tasks: PhantomData<TBlockingTasks>,
+    _actors: PhantomData<TActors>,
+}
+
+impl<TAction, TTask, TLogger, TInstrumentation, TAsyncTasks, TBlockingTasks, TFn, TActors>
+    GraphQlWebServerActorFactory<
+        TAction,
+        TTask,
+        TLogger,
+        TInstrumentation,
+        TAsyncTasks,
+        TBlockingTasks,
+        TFn,
+        TActors,
+    >
+where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TFn: for<'a> FnOnce(
+        &'a mut GraphQlWebServerInitContext<
+            'a,
+            TAction,
+            TTask,
+            TLogger,
+            TInstrumentation,
+            TAsyncTasks,
+            TBlockingTasks,
+        >,
+    ) -> TActors,
+    TActors: IntoIterator<Item = (ProcessId, TTask::Actor)> + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+{
+    pub fn new(factory: TFn) -> Self {
+        Self {
+            factory,
+            _action: PhantomData,
+            _task: PhantomData,
+            _logger: PhantomData,
+            _instrumentation: PhantomData,
+            _async_tasks: PhantomData,
+            _blocking_tasks: PhantomData,
+            _actors: PhantomData,
+        }
+    }
+    fn create<'a>(
+        self,
+        context: &'a mut GraphQlWebServerInitContext<
+            'a,
+            TAction,
+            TTask,
+            TLogger,
+            TInstrumentation,
+            TAsyncTasks,
+            TBlockingTasks,
+        >,
+    ) -> TActors {
+        let Self { factory, .. } = self;
+        factory(context)
+    }
+}
+
+pub struct GraphQlWebServerInitContext<
+    'a,
+    TAction,
+    TTask,
+    TLogger,
+    TInstrumentation,
+    TAsyncTasks,
+    TBlockingTasks,
+> where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+{
+    builder: &'a mut TokioSchedulerBuilder<
+        TAction,
+        TTask,
+        TLogger,
+        TInstrumentation,
+        TAsyncTasks,
+        TBlockingTasks,
+    >,
+    main_pid: ProcessId,
+}
+impl<'a, TAction, TTask, TLogger, TInstrumentation, TAsyncTasks, TBlockingTasks> HandlerContext
+    for GraphQlWebServerInitContext<
+        'a,
+        TAction,
+        TTask,
+        TLogger,
+        TInstrumentation,
+        TAsyncTasks,
+        TBlockingTasks,
+    >
+where
+    TAction: Action + Send + Sync + 'static,
+    TTask: TaskFactory<TAction, TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
+{
+    fn pid(&self) -> ProcessId {
+        self.main_pid
+    }
+    fn generate_pid(&mut self) -> ProcessId {
+        self.builder.generate_pid()
+    }
+}
+
 pub struct GraphQlWebServer<TAction, TTask, TInstrumentation>
 where
     TAction: Action + Send + 'static,
@@ -272,6 +455,7 @@ where
         T,
         TFactory,
         TAllocator,
+        TActorFactory,
         TActors,
         TTransformHttp,
         TTransformWs,
@@ -282,10 +466,21 @@ where
         TWorkerMetricLabels,
         TTracer,
         TLogger,
+        TAsyncTasks,
+        TBlockingTasks,
     >(
         graph_root: (CompiledProgram, InstructionPointer),
         schema: Option<GraphQlSchema>,
-        custom_actors: impl FnOnce(&mut TokioInitContext, ProcessId) -> TActors,
+        custom_actors: GraphQlWebServerActorFactory<
+            TAction,
+            TTask,
+            TLogger,
+            TInstrumentation,
+            TAsyncTasks,
+            TBlockingTasks,
+            TActorFactory,
+            TActors,
+        >,
         compiler_options: CompilerOptions,
         interpreter_options: InterpreterOptions,
         factory: TFactory,
@@ -301,8 +496,8 @@ where
         tracer: TTracer,
         logger: TLogger,
         instrumentation: TInstrumentation,
-        async_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
-        blocking_tasks: impl TokioThreadPoolFactory<TAction, TTask> + 'static,
+        async_tasks: TAsyncTasks,
+        blocking_tasks: TBlockingTasks,
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -315,7 +510,18 @@ where
         T::Builtin: From<Stdlib> + From<GraphQlStdlib> + 'static,
         TFactory: AsyncExpressionFactory<T> + Default,
         TAllocator: AsyncHeapAllocator<T> + Default,
-        TActors: IntoIterator<Item = (ProcessId, TTask::Actor)>,
+        TActorFactory: for<'a> FnOnce(
+            &'a mut GraphQlWebServerInitContext<
+                'a,
+                TAction,
+                TTask,
+                TLogger,
+                TInstrumentation,
+                TAsyncTasks,
+                TBlockingTasks,
+            >,
+        ) -> TActors,
+        TActors: IntoIterator<Item = (ProcessId, TTask::Actor)> + 'static,
         TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
         TTransformWs: WebSocketGraphQlServerQueryTransform + Send + 'static,
         TGraphQlQueryLabel: GraphQlServerQueryLabel + Send + 'static,
@@ -326,6 +532,8 @@ where
         TTracer: Tracer + Send + 'static,
         TTracer::Span: Span + Send + Sync + 'static,
         TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+        TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
+        TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
         TAction: Action + GraphQlWebServerAction<T> + Send + Sync + 'static,
         TTask: RuntimeTask<T, TFactory, TAllocator> + WebSocketGraphQlServerTask + Send + 'static,
         TTask::Actor: From<
@@ -352,53 +560,63 @@ where
             Send + 'static,
     {
         let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
-        let (runtime, main_pid) = TokioScheduler::<TAction, TTask, TInstrumentation>::new(
-            move |context| {
-                let main_pid = context.generate_pid();
-                let mut actors = {
-                    server_actors(
-                        schema_types,
-                        factory.clone(),
-                        allocator.clone(),
-                        transform_http,
-                        transform_ws,
-                        metric_names.server,
-                        get_graphql_query_label,
-                        get_http_query_metric_labels,
-                        get_websocket_connection_metric_labels,
-                        get_operation_metric_labels,
-                        tracer,
-                        main_pid,
-                    )
-                    .into_iter()
-                    .map(TTask::Actor::from)
-                }
-                .chain(
-                    once(BytecodeInterpreter::new(
-                        graph_root,
-                        compiler_options,
-                        interpreter_options,
-                        factory,
-                        allocator,
-                        metric_names.interpreter,
-                        get_worker_metric_labels,
-                        main_pid,
-                    ))
-                    .map(TTask::Actor::from),
+        let (runtime, main_pid) = {
+            let mut builder =
+                TokioSchedulerBuilder::new(logger, instrumentation, async_tasks, blocking_tasks);
+            let main_pid = builder.generate_pid();
+            // Construct a set of core worker actors with corresponding autogenerated PIDs
+            let core_workers = {
+                server_actors(
+                    schema_types,
+                    factory.clone(),
+                    allocator.clone(),
+                    transform_http,
+                    transform_ws,
+                    metric_names.server,
+                    get_graphql_query_label,
+                    get_http_query_metric_labels,
+                    get_websocket_connection_metric_labels,
+                    get_operation_metric_labels,
+                    tracer,
+                    main_pid,
                 )
-                .map(|actor| (context.generate_pid(), actor))
+                .into_iter()
+                .map(TTask::Actor::from)
+            }
+            .chain(
+                once(BytecodeInterpreter::new(
+                    graph_root,
+                    compiler_options,
+                    interpreter_options,
+                    factory,
+                    allocator,
+                    metric_names.interpreter,
+                    get_worker_metric_labels,
+                    main_pid,
+                ))
+                .map(TTask::Actor::from),
+            )
+            .map(|actor| (builder.generate_pid(), actor))
+            .collect::<Vec<_>>();
+            let workers = core_workers
+                .into_iter()
+                .chain(custom_actors.create(&mut GraphQlWebServerInitContext {
+                    builder: &mut builder,
+                    main_pid,
+                }))
                 .collect::<Vec<_>>();
-                actors.extend(custom_actors(context, main_pid));
-                let actor_pids = actors.iter().map(|(pid, _)| *pid);
-                actors.push((main_pid, TTask::Actor::from(Redispatcher::new(actor_pids))));
-                let init_commands = SchedulerTransition::default();
-                (actors, init_commands, main_pid)
-            },
-            logger,
-            instrumentation,
-            async_tasks,
-            blocking_tasks,
-        );
+            // Register a top-level redispatcher actor to allow broadcasting messages to all core workers
+            let worker_pids = workers.iter().map(|(pid, _)| *pid);
+            let main_actor = TTask::Actor::from(Redispatcher::new(worker_pids));
+            builder.actor(main_pid, main_actor);
+            // Register the core workers at their respective PIDs
+            for (pid, worker) in workers {
+                builder.worker(pid, worker);
+            }
+            // Fire up the runtime
+            let runtime = builder.build();
+            (runtime, main_pid)
+        };
         Ok(Self { runtime, main_pid })
     }
     pub fn handle_graphql_http_request(

@@ -213,11 +213,14 @@ impl<T> HandlerTransition<T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    pub fn append(self, other: HandlerTransition<T>) -> HandlerTransition<T> {
-        let Self(mut operations) = self;
+    pub fn extend(&mut self, other: HandlerTransition<T>) {
+        let Self(operations) = self;
         let Self(other_operations) = other;
         operations.extend(other_operations);
-        Self(operations)
+    }
+    pub fn append(mut self, other: HandlerTransition<T>) -> HandlerTransition<T> {
+        self.extend(other);
+        self
     }
     pub fn into_inner(self) -> Vec<T> {
         let Self(operations) = self;
