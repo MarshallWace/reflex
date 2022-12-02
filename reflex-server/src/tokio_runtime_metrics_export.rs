@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::time::Duration;
 
-use metrics::{describe_gauge, gauge, Unit};
+use metrics::{counter, describe_gauge, gauge, Unit};
 
 #[derive(Clone, Copy, Debug)]
 pub struct TokioRuntimeMonitorMetricNames {
@@ -236,7 +236,6 @@ pub fn start_runtime_monitoring(
 }
 
 struct PerWorkerMetrics {
-    interval_start_busy_durations: Vec<Duration>,
     labels: Vec<[(String, String); 2]>,
 }
 
@@ -245,21 +244,15 @@ impl PerWorkerMetrics {
         tokio_runtime_metrics: &tokio::runtime::RuntimeMetrics,
         threadpool_name: &'static str,
     ) -> Self {
-        let (durations, labels) = (0..tokio_runtime_metrics.num_workers())
+        let labels = (0..tokio_runtime_metrics.num_workers())
             .map(|worker| {
-                (
-                    tokio_runtime_metrics.worker_total_busy_duration(worker),
-                    [
-                        ("threadpool".to_string(), threadpool_name.to_string()),
-                        ("worker".to_string(), worker.to_string()),
-                    ],
-                )
+                [
+                    ("threadpool".to_string(), threadpool_name.to_string()),
+                    ("worker".to_string(), worker.to_string()),
+                ]
             })
-            .unzip();
-        Self {
-            interval_start_busy_durations: durations,
-            labels,
-        }
+            .collect();
+        Self { labels }
     }
 
     fn record_metrics(
@@ -267,16 +260,14 @@ impl PerWorkerMetrics {
         tokio_runtime_metrics: tokio::runtime::RuntimeMetrics,
         metric_names: &TokioRuntimeMonitorMetricNames,
     ) {
-        let num_workers = self.interval_start_busy_durations.len();
+        let num_workers = self.labels.len();
         for worker in 0..num_workers {
             let current_duration = tokio_runtime_metrics.worker_total_busy_duration(worker);
-            let previous_duration = self.interval_start_busy_durations[worker];
             gauge!(
                 metric_names.tokio_runtime_worker_busy_duration_micros,
-                (current_duration - previous_duration).as_micros() as f64,
+                current_duration.as_micros() as f64,
                 &self.labels[worker]
             );
-            self.interval_start_busy_durations[worker] = current_duration;
         }
     }
 }
