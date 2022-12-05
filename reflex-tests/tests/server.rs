@@ -10,7 +10,7 @@ use std::{
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex_dispatcher::HandlerContext;
 use reflex_handlers::actor::HandlerActor;
-use reflex_scheduler::threadpool::AsyncTokioThreadPoolFactory;
+use reflex_scheduler::threadpool::{AsyncTokioThreadPoolFactory, TokioRuntimeThreadPoolFactory};
 use reflex_server::{
     cli::{
         execute_query::GraphQlWebServerMetricLabels,
@@ -116,8 +116,8 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         NoopServerMetricsSchedulerQueueInstrumentation::default(),
         Default::default(),
     );
-    let async_tasks = AsyncTokioThreadPoolFactory::default();
-    let blocking_tasks = AsyncTokioThreadPoolFactory::default();
+    let async_tasks = TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current());
+    let blocking_tasks = TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current());
     let app = GraphQlWebServer::<TAction, TTask, TInstrumentation>::new(
         graph_root,
         None,

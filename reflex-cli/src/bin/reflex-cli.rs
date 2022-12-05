@@ -86,12 +86,9 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
 };
-use reflex_scheduler::{
-    threadpool::AsyncTokioThreadPoolFactory,
-    tokio::{
-        NoopTokioSchedulerInstrumentation, TokioCommand, TokioSchedulerBuilder,
-        TokioSchedulerLogger,
-    },
+use reflex_scheduler::threadpool::TokioRuntimeThreadPoolFactory;
+use reflex_scheduler::tokio::{
+    NoopTokioSchedulerInstrumentation, TokioCommand, TokioSchedulerBuilder, TokioSchedulerLogger,
 };
 use reflex_utils::reconnect::{NoopReconnectTimeout, ReconnectTimeout};
 
@@ -231,8 +228,10 @@ pub async fn main() -> Result<()> {
                     None
                 };
                 let instrumentation = NoopTokioSchedulerInstrumentation::default();
-                let async_tasks = AsyncTokioThreadPoolFactory::default();
-                let blocking_tasks = AsyncTokioThreadPoolFactory::default();
+                let async_tasks =
+                    TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current());
+                let blocking_tasks =
+                    TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current());
                 let (scheduler, main_pid) = {
                     let mut builder = TokioSchedulerBuilder::<TAction, TTask, _, _, _, _>::new(
                         logger,
