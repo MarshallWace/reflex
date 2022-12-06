@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref, time::Instant};
 
 use metrics::{describe_counter, increment_counter, Unit};
-use reflex_dispatcher::{Action, Named, TaskFactory};
-use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
+use reflex_dispatcher::{Action, Named, ProcessId, TaskFactory};
+use reflex_scheduler::tokio::{AsyncMessage, TokioCommand, TokioSchedulerLogger};
 
 use crate::logger::ActionLogger;
 
@@ -68,10 +68,27 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<TAction, TTask>) {
-        // FIXME: Prevent double-counting redispatched messages in Prometheus logger
-        if let TokioCommand::Send { message, .. } = command {
-            PrometheusLogger::log(self, message);
+    fn log_scheduler_command(
+        &mut self,
+        command: &TokioCommand<Self::Action, Self::Task>,
+        _enqueue_time: Instant,
+    ) {
+        match command {
+            TokioCommand::Send { pid: _, message } => {
+                if message.redispatched_from().is_none() {
+                    let action = message.deref();
+                    PrometheusLogger::log(self, action)
+                }
+            }
+            _ => {}
         }
     }
+    fn log_worker_message(
+        &mut self,
+        _message: &AsyncMessage<Self::Action>,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        _pid: ProcessId,
+    ) {
+    }
+    fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
 }

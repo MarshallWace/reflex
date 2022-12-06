@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::{marker::PhantomData, ops::Deref};
 
-use reflex_dispatcher::{Action, TaskFactory};
-use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
+use reflex_dispatcher::{Action, ProcessId, TaskFactory};
+use reflex_scheduler::tokio::{AsyncMessage, TokioCommand, TokioSchedulerLogger};
 
 pub trait ActionRecorder {
     type Action: Action;
@@ -44,10 +44,20 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
-        match command {
-            TokioCommand::Send { pid: _, message } => self.recorder.record(message.deref()),
-            _ => {}
-        }
+    fn log_scheduler_command(
+        &mut self,
+        _command: &TokioCommand<Self::Action, Self::Task>,
+        _enqueue_time: std::time::Instant,
+    ) {
     }
+    fn log_worker_message(
+        &mut self,
+        message: &AsyncMessage<Self::Action>,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        _pid: ProcessId,
+    ) {
+        let action = message.deref();
+        self.recorder.record(action)
+    }
+    fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
 }

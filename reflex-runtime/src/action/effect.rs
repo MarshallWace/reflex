@@ -210,22 +210,8 @@ impl<T: Expression> SerializableAction for EffectEmitAction<T> {
                                 JsonValue::String(batch.effect_type.to_string()),
                             ),
                             (
-                                String::from("updates"),
-                                JsonValue::from(
-                                    batch
-                                        .updates
-                                        .iter()
-                                        .map(|(state_token, value)| {
-                                            JsonValue::Object(JsonMap::from_iter([
-                                                (String::from("id"), JsonValue::from(*state_token)),
-                                                (
-                                                    String::from("value"),
-                                                    JsonValue::from(value.id()),
-                                                ),
-                                            ]))
-                                        })
-                                        .collect::<Vec<_>>(),
-                                ),
+                                String::from("num_updates"),
+                                JsonValue::from(batch.updates.len()),
                             ),
                         ]))
                     })

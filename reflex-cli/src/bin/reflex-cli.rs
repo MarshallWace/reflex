@@ -10,6 +10,7 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     pin::Pin,
+    time::Instant,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -29,8 +30,8 @@ use reflex::{
 use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
 use reflex_dispatcher::{
     Action, Actor, ActorEvents, AsyncScheduler, Handler, HandlerContext, Matcher, MessageData,
-    Named, Redispatcher, SchedulerMode, SchedulerTransition, SerializableAction, SerializedAction,
-    TaskFactory, TaskInbox, Worker,
+    Named, ProcessId, Redispatcher, SchedulerMode, SchedulerTransition, SerializableAction,
+    SerializedAction, TaskFactory, TaskInbox, Worker,
 };
 use reflex_handlers::{
     action::{
@@ -88,7 +89,8 @@ use reflex_runtime::{
 };
 use reflex_scheduler::threadpool::TokioRuntimeThreadPoolFactory;
 use reflex_scheduler::tokio::{
-    NoopTokioSchedulerInstrumentation, TokioCommand, TokioSchedulerBuilder, TokioSchedulerLogger,
+    AsyncMessage, NoopTokioSchedulerInstrumentation, TokioCommand, TokioSchedulerBuilder,
+    TokioSchedulerLogger,
 };
 use reflex_utils::reconnect::{NoopReconnectTimeout, ReconnectTimeout};
 
@@ -285,7 +287,7 @@ pub async fn main() -> Result<()> {
                     .map(|actor| (builder.generate_pid(), actor))
                     .collect::<Vec<_>>();
                     let actor_pids = actors.iter().map(|(pid, _)| *pid);
-                    builder.actor(main_pid, CliActor::Main(Redispatcher::new(actor_pids)));
+                    builder.worker(main_pid, CliActor::Main(Redispatcher::new(actor_pids)));
                     for (pid, actor) in actors {
                         builder.worker(pid, actor);
                     }
@@ -360,7 +362,11 @@ impl BytecodeInterpreterMetricLabels for CliMetricLabels {
     }
 }
 
-struct CliActionLogger<TOut: std::io::Write, TAction: Action, TTask: TaskFactory<TAction, TTask>> {
+pub struct CliActionLogger<
+    TOut: std::io::Write,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+> {
     output: TOut,
     _action: PhantomData<TAction>,
     _task: PhantomData<TTask>,
@@ -392,6 +398,27 @@ impl<TAction: Action, TTask: TaskFactory<TAction, TTask>>
         Self::new(std::io::stderr())
     }
 }
+impl<TAction: Action, TTask: TaskFactory<TAction, TTask>> Clone
+    for CliActionLogger<std::io::Stderr, TAction, TTask>
+{
+    fn clone(&self) -> Self {
+        Self::new(std::io::stderr())
+    }
+}
+impl<TAction: Action, TTask: TaskFactory<TAction, TTask>>
+    CliActionLogger<std::io::Stdout, TAction, TTask>
+{
+    pub fn stdout() -> Self {
+        Self::new(std::io::stdout())
+    }
+}
+impl<TAction: Action, TTask: TaskFactory<TAction, TTask>> Clone
+    for CliActionLogger<std::io::Stdout, TAction, TTask>
+{
+    fn clone(&self) -> Self {
+        Self::new(std::io::stdout())
+    }
+}
 impl<TOut: std::io::Write, TAction: Action, TTask: TaskFactory<TAction, TTask>> TokioSchedulerLogger
     for CliActionLogger<TOut, TAction, TTask>
 where
@@ -399,15 +426,22 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<TAction, TTask>) {
-        match command {
-            TokioCommand::Send { message, .. } => {
-                let action = message.deref();
-                self.log(action);
-            }
-            _ => {}
-        }
+    fn log_scheduler_command(
+        &mut self,
+        _command: &TokioCommand<Self::Action, Self::Task>,
+        _enqueue_time: Instant,
+    ) {
     }
+    fn log_worker_message(
+        &mut self,
+        message: &AsyncMessage<Self::Action>,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        _pid: ProcessId,
+    ) {
+        let action = message.deref();
+        self.log(action);
+    }
+    fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
 }
 
 fn format_signal_errors<'a, T: Expression>(

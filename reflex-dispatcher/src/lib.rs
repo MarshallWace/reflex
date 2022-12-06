@@ -305,6 +305,6 @@ pub trait AsyncScheduler {
     fn actions(&self, pid: ProcessId) -> Self::Sink;
     fn subscribe<F, V>(&self, pid: ProcessId, selector: F) -> Self::Subscription<F, V>
     where
-        F: Fn(&Self::Action) -> Option<V> + Send + 'static,
-        V: Send + 'static;
+        F: Fn(&Self::Action) -> Option<V> + Send + Sync + 'static,
+        V: Send + Sync + 'static;
 }

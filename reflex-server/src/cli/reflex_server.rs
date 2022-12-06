@@ -466,7 +466,7 @@ where
     TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TTracer: Tracer + Send + 'static,
     TTracer::Span: Span + Send + Sync + 'static,
-    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone + Send + Sync + 'static,
     TInstrumentation: GraphQlWebServerInstrumentation
         + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
@@ -498,7 +498,7 @@ where
         + Sync
         + 'static,
     <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
-    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + Sync + 'static,
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
     start_runtime_monitoring(

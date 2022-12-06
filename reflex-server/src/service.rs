@@ -259,7 +259,7 @@ pub struct GraphQlWebServerActorFactory<
 > where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone + Send + Sync + 'static,
     TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
@@ -308,7 +308,7 @@ impl<TAction, TTask, TLogger, TInstrumentation, TAsyncTasks, TBlockingTasks, TFn
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone + Send + Sync + 'static,
     TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
@@ -373,7 +373,7 @@ pub struct GraphQlWebServerInitContext<
 > where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone + Send + Sync + 'static,
     TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
@@ -409,7 +409,7 @@ impl<'a, TAction, TTask, TLogger, TInstrumentation, TAsyncTasks, TBlockingTasks>
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+    TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone + Send + Sync + 'static,
     TInstrumentation: TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
         + Clone
         + Send
@@ -419,7 +419,7 @@ where
     TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
     TTask::Actor: Send + Sync + 'static,
     <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
-    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + Sync + 'static,
     <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
     fn pid(&self) -> ProcessId {
@@ -430,26 +430,18 @@ where
     }
 }
 
-pub struct GraphQlWebServer<TAction, TTask, TInstrumentation>
+pub struct GraphQlWebServer<TAction, TTask>
 where
     TAction: Action + Send + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TInstrumentation:
-        TokioSchedulerInstrumentation<Action = TAction, Task = TTask> + Send + 'static,
 {
-    runtime: TokioScheduler<TAction, TTask, TInstrumentation>,
+    runtime: TokioScheduler<TAction, TTask>,
     main_pid: ProcessId,
 }
-impl<TAction, TTask, TInstrumentation> GraphQlWebServer<TAction, TTask, TInstrumentation>
+impl<TAction, TTask> GraphQlWebServer<TAction, TTask>
 where
     TAction: Action + Send + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TInstrumentation: GraphQlWebServerInstrumentation
-        + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
 {
     pub fn new<
         T,
@@ -466,6 +458,7 @@ where
         TWorkerMetricLabels,
         TTracer,
         TLogger,
+        TInstrumentation,
         TAsyncTasks,
         TBlockingTasks,
     >(
@@ -531,7 +524,14 @@ where
         TWorkerMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
         TTracer: Tracer + Send + 'static,
         TTracer::Span: Span + Send + Sync + 'static,
-        TLogger: TokioSchedulerLogger<Action = TAction, Task = TTask> + Send + 'static,
+        TLogger:
+            TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone + Send + Sync + 'static,
+        TInstrumentation: GraphQlWebServerInstrumentation
+            + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         TAsyncTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
         TBlockingTasks: TokioThreadPoolFactory<TAction, TTask> + 'static,
         TAction: Action + GraphQlWebServerAction<T> + Send + Sync + 'static,
@@ -550,12 +550,10 @@ where
                     TTracer,
                 >,
             > + From<BytecodeInterpreter<T, TFactory, TAllocator, TWorkerMetricLabels>>
-            + From<Redispatcher>
-            + Send
-            + Sync
-            + 'static,
+            + From<Redispatcher>,
+        TTask::Actor: Send + Sync + 'static,
         <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
-        <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + 'static,
+        <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + Sync + 'static,
         <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State:
             Send + 'static,
     {
@@ -608,7 +606,7 @@ where
             // Register a top-level redispatcher actor to allow broadcasting messages to all core workers
             let worker_pids = workers.iter().map(|(pid, _)| *pid);
             let main_actor = TTask::Actor::from(Redispatcher::new(worker_pids));
-            builder.actor(main_pid, main_actor);
+            builder.worker(main_pid, main_actor);
             // Register the core workers at their respective PIDs
             for (pid, worker) in workers {
                 builder.worker(pid, worker);
@@ -632,6 +630,11 @@ where
             + Sync
             + 'static,
         TTask: TaskFactory<TAction, TTask> + Send + 'static,
+        TTask::Actor: Send + Sync + 'static,
+        <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+        <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + Sync + 'static,
+        <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State:
+            Send + 'static,
     {
         handle_graphql_http_request(request, &self.runtime, self.main_pid)
     }
@@ -640,25 +643,22 @@ where
     }
 }
 
-impl<TAction, TTask, TInstrumentation> AsyncScheduler
-    for GraphQlWebServer<TAction, TTask, TInstrumentation>
+impl<TAction, TTask> AsyncScheduler for GraphQlWebServer<TAction, TTask>
 where
     TAction: Action + Send + Sync + 'static,
     TTask: TaskFactory<TAction, TTask> + Send + 'static,
-    TInstrumentation: GraphQlWebServerInstrumentation
-        + TokioSchedulerInstrumentation<Action = TAction, Task = TTask>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    TTask::Actor: Send + Sync + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Events<TokioInbox<TAction>>: Send + 'static,
+    <TTask::Actor as Actor<TAction, TTask>>::Dispose: Send + Sync + 'static,
+    <TTask::Actor as Handler<TAction, SchedulerTransition<TAction, TTask>>>::State: Send + 'static,
 {
-    type Action = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::Action;
-    type Sink = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::Sink;
-    type Subscription<F, V> = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::Subscription<F, V>
+    type Action = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Action;
+    type Sink = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Sink;
+    type Subscription<F, V> = <TokioScheduler<TAction, TTask> as AsyncScheduler>::Subscription<F, V>
         where
             F: Fn(&Self::Action) -> Option<V>,
             V: Send + 'static;
-    type SubscriptionResults<F, V> = <TokioScheduler<TAction, TTask, TInstrumentation> as AsyncScheduler>::SubscriptionResults<F, V>
+    type SubscriptionResults<F, V> = <TokioScheduler<TAction, TTask> as AsyncScheduler>::SubscriptionResults<F, V>
         where
             F: Fn(&Self::Action) -> Option<V>,
             V: Send + 'static;
@@ -667,8 +667,8 @@ where
     }
     fn subscribe<F, V>(&self, pid: ProcessId, selector: F) -> Self::Subscription<F, V>
     where
-        F: Fn(&Self::Action) -> Option<V> + Send + 'static,
-        V: Send + 'static,
+        F: Fn(&Self::Action) -> Option<V> + Send + Sync + 'static,
+        V: Send + Sync + 'static,
     {
         self.runtime.subscribe(pid, selector)
     }

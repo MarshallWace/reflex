@@ -6,7 +6,7 @@ use std::{marker::PhantomData, ops::Deref, time::Instant};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use reflex_dispatcher::{Action, MessageOffset, ProcessId, SerializableAction, TaskFactory};
 use reflex_json::{JsonMap, JsonValue};
-use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
+use reflex_scheduler::tokio::{AsyncMessage, TokioCommand, TokioSchedulerLogger};
 
 use crate::{logger::ActionLogger, utils::sanitize::sanitize_json_value};
 
@@ -143,7 +143,19 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
+    fn log_worker_message(
+        &mut self,
+        _message: &AsyncMessage<Self::Action>,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        _pid: ProcessId,
+    ) {
+    }
+    fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
+    fn log_scheduler_command(
+        &mut self,
+        command: &TokioCommand<Self::Action, Self::Task>,
+        _enqueue_time: Instant,
+    ) {
         match command {
             TokioCommand::Send { pid, message } => {
                 let caller = message.caller().and_then(|caller| caller);

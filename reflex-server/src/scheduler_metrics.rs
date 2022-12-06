@@ -9,8 +9,7 @@ use metrics::{
 };
 use reflex_dispatcher::{Action, Named, ProcessId, SchedulerMode, TaskFactory};
 use reflex_scheduler::tokio::{
-    metrics::TokioTaskMetricNames, TokioSchedulerInstrumentation, TokioSchedulerState,
-    TokioWorkerState,
+    metrics::TokioTaskMetricNames, TokioSchedulerInstrumentation, TokioWorkerState,
 };
 use tokio::task::JoinHandle;
 use tokio_metrics::{Instrumented, TaskMonitor};
@@ -109,7 +108,6 @@ where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    fn record_scheduler_state(&self, state: TokioSchedulerState);
     fn record_worker_state(&self, pid: ProcessId, actor: &TTask::Actor, state: TokioWorkerState);
 }
 
@@ -119,12 +117,6 @@ where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    fn record_scheduler_state(&self, state: TokioSchedulerState) {
-        match self {
-            Some(inner) => inner.record_scheduler_state(state),
-            None => {}
-        }
-    }
     fn record_worker_state(&self, pid: ProcessId, actor: &TTask::Actor, state: TokioWorkerState) {
         match self {
             Some(inner) => inner.record_worker_state(pid, actor, state),
@@ -160,7 +152,6 @@ where
     TAction: Action,
     TTask: TaskFactory<TAction, TTask>,
 {
-    fn record_scheduler_state(&self, _state: TokioSchedulerState) {}
     fn record_worker_state(
         &self,
         _pid: ProcessId,
@@ -179,7 +170,7 @@ where
 {
     metric_names: ServerSchedulerMetricNames,
     queue_instrumentation: TQueue,
-    scheduler_task_monitor: TaskMonitor,
+    init_commands_task_monitor: TaskMonitor,
     async_task_monitor: TaskMonitor,
     blocking_task_monitor: TaskMonitor,
     worker_task_monitor: TaskMonitor,
@@ -203,7 +194,7 @@ where
         Self {
             metric_names: self.metric_names.clone(),
             queue_instrumentation: self.queue_instrumentation.clone(),
-            scheduler_task_monitor: self.scheduler_task_monitor.clone(),
+            init_commands_task_monitor: self.init_commands_task_monitor.clone(),
             async_task_monitor: self.async_task_monitor.clone(),
             blocking_task_monitor: self.blocking_task_monitor.clone(),
             worker_task_monitor: self.worker_task_monitor.clone(),
@@ -239,8 +230,8 @@ where
     TQueue: ServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
 {
     pub fn new(queue_instrumentation: TQueue, metric_names: ServerSchedulerMetricNames) -> Self {
-        let (scheduler_task_monitor, scheduler_task_monitor_poll_task) =
-            create_named_task_monitor("scheduler", &metric_names.tokio_task_metric_names);
+        let (init_commands_task_monitor, init_commands_task_monitor_poll_task) =
+            create_named_task_monitor("init_commands", &metric_names.tokio_task_metric_names);
         let (async_task_monitor, async_task_monitor_poll_task) =
             create_named_task_monitor("async", &metric_names.tokio_task_metric_names);
         let (blocking_task_monitor, blocking_task_monitor_poll_task) =
@@ -260,7 +251,7 @@ where
         Self {
             metric_names: metric_names.init(),
             queue_instrumentation,
-            scheduler_task_monitor,
+            init_commands_task_monitor,
             async_task_monitor,
             blocking_task_monitor,
             worker_task_monitor,
@@ -270,7 +261,7 @@ where
             unsubscribe_task_monitor,
             graphql_connection_task_monitor,
             task_monitor_poll_handles: Arc::new([
-                tokio::spawn(scheduler_task_monitor_poll_task),
+                tokio::spawn(init_commands_task_monitor_poll_task),
                 tokio::spawn(async_task_monitor_poll_task),
                 tokio::spawn(blocking_task_monitor_poll_task),
                 tokio::spawn(worker_task_monitor_poll_task),
@@ -298,11 +289,11 @@ where
     type Task = TTask;
     type InstrumentedTask<T: Future + Send + 'static> = Instrumented<T>;
 
-    fn instrument_main_thread<T: Future + Send + 'static>(
+    fn instrument_init_commands<T: Future + Send + 'static>(
         &self,
         task: T,
     ) -> Self::InstrumentedTask<T> {
-        self.scheduler_task_monitor.instrument(task)
+        self.init_commands_task_monitor.instrument(task)
     }
     fn instrument_async_task_pool<T: Future + Send + 'static>(
         &self,
@@ -347,45 +338,6 @@ where
         self.unsubscribe_task_monitor.instrument(task)
     }
 
-    fn record_scheduler_event_bus_capacity(&self, value: usize) {
-        gauge!(self.metric_names.scheduler_event_bus_capacity, value as f64,);
-    }
-    fn record_scheduler_event_bus_enqueue(&self, num_batches: usize) {
-        increment_gauge!(
-            self.metric_names.scheduler_event_bus_queued_messages,
-            num_batches as f64,
-        );
-    }
-    fn record_scheduler_event_bus_dequeue(&self, num_batches: usize) {
-        decrement_gauge!(
-            self.metric_names.scheduler_event_bus_queued_messages,
-            num_batches as f64
-        );
-    }
-    fn record_scheduler_enqueue_commands(&self, num_commands: usize) {
-        increment_gauge!(
-            self.metric_names.scheduler_command_queue_size,
-            num_commands as f64,
-        );
-    }
-    fn record_scheduler_dequeue_commands(&self, num_commands: usize) {
-        decrement_gauge!(
-            self.metric_names.scheduler_command_queue_size,
-            num_commands as f64,
-        );
-    }
-    fn record_scheduler_command_waiting_duration(&self, value: Duration) {
-        histogram!(
-            self.metric_names.scheduler_command_waiting_duration_micros,
-            value.as_micros() as f64,
-        );
-    }
-    fn record_scheduler_command_working_duration(&self, value: Duration) {
-        histogram!(
-            self.metric_names.scheduler_command_working_duration_micros,
-            value.as_micros() as f64,
-        );
-    }
     fn record_actor_spawn(&self, pid: ProcessId, actor: &TTask::Actor) {
         self.record_worker_spawn(pid, actor, 0);
     }
@@ -498,9 +450,6 @@ where
                 SchedulerMode::Blocking => "blocking",
             }
         );
-    }
-    fn record_scheduler_state(&self, state: TokioSchedulerState) {
-        self.queue_instrumentation.record_scheduler_state(state)
     }
     fn record_worker_state(&self, pid: ProcessId, actor: &TTask::Actor, state: TokioWorkerState) {
         self.queue_instrumentation

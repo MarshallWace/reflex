@@ -16,7 +16,7 @@ pub fn handle_http_request<TAction>(
     server_pid: ProcessId,
     create_request: impl Fn(Uuid, Request<Bytes>) -> TAction + 'static,
     create_response: impl Fn(Uuid, Response<Bytes>) -> TAction + 'static,
-    match_result: impl for<'a> Fn(Uuid, &'a TAction) -> Option<Response<Bytes>> + Send + 'static,
+    match_result: impl for<'a> Fn(Uuid, &'a TAction) -> Option<Response<Bytes>> + Send + Sync + 'static,
 ) -> impl Future<Output = Response<Body>> + 'static
 where
     TAction: Action + Send + Sync + 'static,

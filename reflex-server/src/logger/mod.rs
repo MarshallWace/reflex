@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 
-use reflex_dispatcher::{Action, TaskFactory};
-use reflex_scheduler::tokio::{TokioCommand, TokioSchedulerLogger};
+use reflex_dispatcher::{Action, ProcessId, TaskFactory};
+use reflex_scheduler::tokio::{AsyncMessage, TokioCommand, TokioSchedulerLogger};
 
 pub mod formatted;
 pub mod formatter;
@@ -65,7 +65,20 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, _command: &TokioCommand<TAction, TTask>) {}
+    fn log_scheduler_command(
+        &mut self,
+        _command: &TokioCommand<Self::Action, Self::Task>,
+        _enqueue_time: Instant,
+    ) {
+    }
+    fn log_worker_message(
+        &mut self,
+        _message: &AsyncMessage<Self::Action>,
+        _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        _pid: ProcessId,
+    ) {
+    }
+    fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
 }
 
 impl<T, TAction> ActionLogger for Option<T>
@@ -121,10 +134,31 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<TAction, TTask>) {
+    fn log_scheduler_command(
+        &mut self,
+        command: &TokioCommand<Self::Action, Self::Task>,
+        enqueue_time: Instant,
+    ) {
         match self {
-            Self::Left(inner) => inner.log(command),
-            Self::Right(inner) => inner.log(command),
+            Self::Left(inner) => inner.log_scheduler_command(command, enqueue_time),
+            Self::Right(inner) => inner.log_scheduler_command(command, enqueue_time),
+        }
+    }
+    fn log_worker_message(
+        &mut self,
+        message: &AsyncMessage<Self::Action>,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        pid: ProcessId,
+    ) {
+        match self {
+            Self::Left(inner) => inner.log_worker_message(message, actor, pid),
+            Self::Right(inner) => inner.log_worker_message(message, actor, pid),
+        }
+    }
+    fn log_task_message(&mut self, message: &AsyncMessage<Self::Action>, pid: ProcessId) {
+        match self {
+            Self::Left(inner) => inner.log_task_message(message, pid),
+            Self::Right(inner) => inner.log_task_message(message, pid),
         }
     }
 }
@@ -172,24 +206,38 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<TAction, TTask>) {
-        self.left.log(command);
-        self.right.log(command);
+    fn log_scheduler_command(
+        &mut self,
+        command: &TokioCommand<Self::Action, Self::Task>,
+        enqueue_time: Instant,
+    ) {
+        self.left.log_scheduler_command(command, enqueue_time);
+        self.right.log_scheduler_command(command, enqueue_time);
+    }
+    fn log_worker_message(
+        &mut self,
+        message: &AsyncMessage<Self::Action>,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        pid: ProcessId,
+    ) {
+        self.left.log_worker_message(message, actor, pid);
+        self.right.log_worker_message(message, actor, pid);
+    }
+    fn log_task_message(&mut self, message: &AsyncMessage<Self::Action>, pid: ProcessId) {
+        self.left.log_task_message(message, pid);
+        self.right.log_task_message(message, pid);
     }
 }
 
 pub trait FilteredLoggerPredicate<TAction: Action, TTask: TaskFactory<TAction, TTask>> {
-    fn accept(&self, command: &TokioCommand<TAction, TTask>) -> bool;
-}
-impl<T, TAction, TTask> FilteredLoggerPredicate<TAction, TTask> for T
-where
-    TAction: Action,
-    TTask: TaskFactory<TAction, TTask>,
-    Self: Fn(&TokioCommand<TAction, TTask>) -> bool,
-{
-    fn accept(&self, command: &TokioCommand<TAction, TTask>) -> bool {
-        (self)(command)
-    }
+    fn accept_scheduler_command(&self, command: &TokioCommand<TAction, TTask>) -> bool;
+    fn accept_worker_message(
+        &self,
+        message: &AsyncMessage<TAction>,
+        actor: &TTask::Actor,
+        pid: ProcessId,
+    ) -> bool;
+    fn accept_task_message(&self, message: &AsyncMessage<TAction>, pid: ProcessId) -> bool;
 }
 
 pub struct FilteredLogger<T, TPredicate, TAction, TTask>
@@ -201,6 +249,20 @@ where
 {
     inner: T,
     predicate: TPredicate,
+}
+impl<T, TPredicate, TAction, TTask> Clone for FilteredLogger<T, TPredicate, TAction, TTask>
+where
+    T: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone,
+    TPredicate: FilteredLoggerPredicate<TAction, TTask> + Clone,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            predicate: self.predicate.clone(),
+        }
+    }
 }
 impl<T, TPredicate, TAction, TTask> FilteredLogger<T, TPredicate, TAction, TTask>
 where
@@ -223,9 +285,28 @@ where
 {
     type Action = TAction;
     type Task = TTask;
-    fn log(&mut self, command: &TokioCommand<Self::Action, Self::Task>) {
-        if self.predicate.accept(command) {
-            self.inner.log(command)
+    fn log_scheduler_command(
+        &mut self,
+        command: &TokioCommand<Self::Action, Self::Task>,
+        enqueue_time: Instant,
+    ) {
+        if self.predicate.accept_scheduler_command(command) {
+            self.inner.log_scheduler_command(command, enqueue_time);
+        }
+    }
+    fn log_worker_message(
+        &mut self,
+        message: &AsyncMessage<Self::Action>,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        pid: ProcessId,
+    ) {
+        if self.predicate.accept_worker_message(message, actor, pid) {
+            self.inner.log_worker_message(message, actor, pid);
+        }
+    }
+    fn log_task_message(&mut self, message: &AsyncMessage<Self::Action>, pid: ProcessId) {
+        if self.predicate.accept_task_message(message, pid) {
+            self.inner.log_task_message(message, pid);
         }
     }
 }
