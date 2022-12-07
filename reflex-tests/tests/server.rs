@@ -10,7 +10,7 @@ use std::{
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex_dispatcher::HandlerContext;
 use reflex_handlers::actor::HandlerActor;
-use reflex_scheduler::threadpool::{AsyncTokioThreadPoolFactory, TokioRuntimeThreadPoolFactory};
+use reflex_scheduler::threadpool::TokioRuntimeThreadPoolFactory;
 use reflex_server::{
     cli::{
         execute_query::GraphQlWebServerMetricLabels,
@@ -105,11 +105,6 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         GraphQlWebServerMetricLabels,
         TTracer,
     >;
-    type TInstrumentation = ServerMetricsInstrumentation<
-        TAction,
-        TTask,
-        NoopServerMetricsSchedulerQueueInstrumentation<TAction, TTask>,
-    >;
     let tracer = NoopTracer::default();
     let logger = NoopLogger::default();
     let instrumentation = ServerMetricsInstrumentation::new(
@@ -118,7 +113,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
     );
     let async_tasks = TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current());
     let blocking_tasks = TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current());
-    let app = GraphQlWebServer::<TAction, TTask, TInstrumentation>::new(
+    let app = GraphQlWebServer::<TAction, TTask>::new(
         graph_root,
         None,
         {
@@ -155,6 +150,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         instrumentation.clone(),
         async_tasks,
         blocking_tasks,
+        None,
     )
     .unwrap();
     let socket_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
