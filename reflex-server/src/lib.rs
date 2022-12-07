@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     sync::{Arc, Mutex},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use actor::ServerActor;
@@ -88,6 +88,7 @@ pub fn server_actors<
     allocator: TAllocator,
     transform_http: TTransformHttp,
     transform_ws: TTransformWs,
+    effect_throttle: Option<Duration>,
     metric_names: ServerMetricNames,
     get_graphql_query_label: TGraphQlQueryLabel,
     get_http_query_metric_labels: THttpMetricLabels,
@@ -128,6 +129,7 @@ where
         runtime_actors(
             factory.clone(),
             allocator.clone(),
+            effect_throttle,
             metric_names.runtime,
             main_pid,
         )

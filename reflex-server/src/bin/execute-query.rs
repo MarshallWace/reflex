@@ -6,6 +6,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -69,6 +70,9 @@ pub struct Args {
     /// Path to custom TLS certificate
     #[clap(long)]
     tls_cert: Option<PathBuf>,
+    /// Throttle stateful effect updates
+    #[clap(long)]
+    effect_throttle_ms: Option<u64>,
     /// Log runtime actions
     #[clap(long)]
     log: Option<Option<LogFormat>>,
@@ -88,6 +92,7 @@ impl Into<ExecuteQueryCliOptions> for Args {
             query: self.query,
             variables: self.variables,
             headers: None,
+            effect_throttle: self.effect_throttle_ms.map(Duration::from_millis),
             debug_compiler: self.debug_compiler,
             debug_interpreter: self.debug_interpreter,
             debug_stack: self.debug_stack,

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::time::Duration;
+
 use actor::{
     evaluate_handler::EvaluateHandler, query_manager::QueryManager, RuntimeActor,
     RuntimeMetricNames,
@@ -94,6 +96,7 @@ impl QueryInvalidationStrategy {
 pub fn runtime_actors<T, TFactory, TAllocator>(
     factory: TFactory,
     allocator: TAllocator,
+    effect_throttle: Option<Duration>,
     metric_names: RuntimeMetricNames,
     main_pid: ProcessId,
 ) -> impl IntoIterator<Item = RuntimeActor<T, TFactory, TAllocator>>
@@ -112,6 +115,7 @@ where
         RuntimeActor::EvaluateHandler(EvaluateHandler::new(
             factory,
             allocator,
+            effect_throttle,
             metric_names.evaluate_handler,
             main_pid,
         )),

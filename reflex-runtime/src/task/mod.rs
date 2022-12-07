@@ -10,18 +10,27 @@ use reflex_interpreter::compiler::Compile;
 use reflex_macros::{blanket_trait, task_factory_enum, Matcher};
 
 use crate::{
-    task::bytecode_worker::{BytecodeWorkerAction, BytecodeWorkerTask, BytecodeWorkerTaskFactory},
+    task::{
+        bytecode_worker::{BytecodeWorkerAction, BytecodeWorkerTask, BytecodeWorkerTaskFactory},
+        evaluate_handler::EffectThrottleTaskFactory,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
+use self::evaluate_handler::{EvaluateHandlerTask, EvaluateHandlerTaskAction};
+
 pub mod bytecode_worker;
+pub mod evaluate_handler;
 
 blanket_trait!(
-    pub trait RuntimeTaskAction<T: Expression>: BytecodeWorkerAction<T> {}
+    pub trait RuntimeTaskAction<T: Expression>:
+        BytecodeWorkerAction<T> + EvaluateHandlerTaskAction
+    {
+    }
 );
 blanket_trait!(
     pub trait RuntimeTask<T, TFactory, TAllocator>:
-        BytecodeWorkerTask<T, TFactory, TAllocator>
+        EvaluateHandlerTask + BytecodeWorkerTask<T, TFactory, TAllocator>
     where
         T: Expression,
         TFactory: ExpressionFactory<T>,
@@ -40,6 +49,7 @@ task_factory_enum!({
         TAllocator: HeapAllocator<T>,
     {
         BytecodeWorker(BytecodeWorkerTaskFactory<T, TFactory, TAllocator>),
+        EvaluateHandler(EffectThrottleTaskFactory),
     }
     impl<T, TFactory, TAllocator, TAction, TTask> TaskFactory<TAction, TTask>
         for RuntimeTaskFactory<T, TFactory, TAllocator>
@@ -47,7 +57,7 @@ task_factory_enum!({
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
         TFactory: AsyncExpressionFactory<T> + Default,
         TAllocator: AsyncHeapAllocator<T> + Default,
-        TAction: Action + RuntimeTaskAction<T> + Send + 'static,
+        TAction: Action + RuntimeTaskAction<T> + EvaluateHandlerTaskAction + Send + 'static,
         TTask: TaskFactory<TAction, TTask>,
     {
     }

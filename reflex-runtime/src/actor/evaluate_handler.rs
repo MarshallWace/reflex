@@ -7,7 +7,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter::once,
     marker::PhantomData,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use metrics::{
@@ -21,7 +21,7 @@ use reflex::{
         SignalTermType, SignalType, StateCache, StateToken, StringTermType, StringValue,
         SymbolTermType,
     },
-    hash::HashId,
+    hash::{IntMap, IntSet},
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
@@ -33,12 +33,14 @@ use reflex_utils::partition_results;
 use crate::{
     action::{
         effect::{
-            EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
+            EffectEmitAction, EffectSubscribeAction, EffectThrottleEmitAction,
+            EffectUnsubscribeAction, EffectUpdateBatch,
         },
         evaluate::{
             EvaluateResultAction, EvaluateStartAction, EvaluateStopAction, EvaluateUpdateAction,
         },
     },
+    task::evaluate_handler::EffectThrottleTaskFactory,
     QueryEvaluationMode, QueryInvalidationStrategy,
 };
 
@@ -154,10 +156,6 @@ pub fn create_evaluate_effect<T: Expression>(
     )
 }
 
-pub fn get_evaluate_effect_cache_key<V: ConditionType<T>, T: Expression>(effect: &V) -> HashId {
-    effect.id()
-}
-
 pub fn parse_evaluate_effect_query<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
@@ -240,6 +238,7 @@ where
 {
     factory: TFactory,
     allocator: TAllocator,
+    throttle: Option<Duration>,
     metric_names: EvaluateHandlerMetricNames,
     main_pid: ProcessId,
     _expression: PhantomData<T>,
@@ -253,12 +252,14 @@ where
     pub(crate) fn new(
         factory: TFactory,
         allocator: TAllocator,
+        throttle: Option<Duration>,
         metric_names: EvaluateHandlerMetricNames,
         main_pid: ProcessId,
     ) -> Self {
         Self {
             factory,
             allocator,
+            throttle,
             metric_names: metric_names.init(),
             main_pid,
             _expression: Default::default(),
@@ -268,10 +269,14 @@ where
 
 pub struct EvaluateHandlerState<T: Expression> {
     // TODO: Use newtypes for state hashmap keys
-    workers: HashMap<StateToken, WorkerState<T>>,
+    workers: IntMap<StateToken, WorkerState<T>>,
     // TODO: Use expressions as state tokens, removing need to map state tokens back to originating effects
-    effects: HashMap<StateToken, T::Signal<T>>,
+    effects: IntMap<StateToken, T::Signal<T>>,
     state_cache: GlobalStateCache<T>,
+    /// Whitelist to keep track of effects that must be processed immediately to ensure exactly-once processing guarantees (non-whitelisted effect updates are eligible for throttling)
+    immediate_effects: IntSet<StateToken>,
+    /// Accumulated set of pending deferred updates, to be applied at the next throttle timeout
+    deferred_updates: Option<IntMap<StateToken, T>>,
 }
 impl<T: Expression> Default for EvaluateHandlerState<T> {
     fn default() -> Self {
@@ -279,6 +284,8 @@ impl<T: Expression> Default for EvaluateHandlerState<T> {
             workers: Default::default(),
             effects: Default::default(),
             state_cache: Default::default(),
+            immediate_effects: Default::default(),
+            deferred_updates: Default::default(),
         }
     }
 }
@@ -293,6 +300,8 @@ struct WorkerState<T: Expression> {
 struct GlobalStateCache<T: Expression> {
     state_index: Option<MessageOffset>,
     combined_state: StateCache<T>,
+    /// Queued updates waiting to be sent to query evaluation workers
+    /// Batches are removed from the queue at the point at which all workers have been sent the update
     update_batches: VecDeque<(MessageOffset, Vec<(StateToken, T)>)>,
 }
 impl<T: Expression> Default for GlobalStateCache<T> {
@@ -319,6 +328,64 @@ enum WorkerResultStatus {
     Blocked,
 }
 impl<T: Expression> EvaluateHandlerState<T> {
+    fn apply_batch<TAction, TTask>(
+        &mut self,
+        state_index: MessageOffset,
+        updates: Vec<(StateToken, T)>,
+        main_pid: ProcessId,
+        metric_names: EvaluateHandlerMetricNames,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action + From<EvaluateUpdateAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let updated_state_tokens = updates
+            .iter()
+            .map(|(state_token, _)| *state_token)
+            .collect::<IntSet<_>>();
+        self.state_cache.state_index = Some(state_index);
+        self.state_cache
+            .update_batches
+            .push_back((state_index, updates));
+        self.state_cache.update_state_cache_metrics(metric_names);
+        let invalidated_workers = self
+            .workers
+            .values_mut()
+            .filter_map(|worker| match &mut worker.status {
+                WorkerStatus::Idle {
+                    latest_result: (_, result),
+                } => {
+                    let has_invalidated_dependencies = result
+                        .dependencies()
+                        .iter()
+                        .any(|state_token| updated_state_tokens.contains(&state_token));
+                    if has_invalidated_dependencies {
+                        Some(worker)
+                    } else {
+                        worker.state_index = Some(state_index);
+                        None
+                    }
+                }
+                _ => None,
+            });
+        let worker_update_actions = invalidated_workers
+            .filter_map(|worker| {
+                update_worker_state(
+                    worker,
+                    WorkerStateUpdateType::DependencyUpdate,
+                    &mut self.state_cache,
+                    metric_names,
+                )
+                .map(|action| SchedulerCommand::Send(main_pid, TAction::from(action)))
+            })
+            .collect::<Vec<_>>();
+        self.gc_worker_state_history(metric_names);
+        if worker_update_actions.is_empty() {
+            None
+        } else {
+            Some(SchedulerTransition::new(worker_update_actions))
+        }
+    }
     fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a T::Signal<T>> + 'a {
         self.workers.values().flat_map(|worker| {
             once(&worker.effect).into_iter().chain(
@@ -445,19 +512,6 @@ impl<T: Expression> WorkerState<T> {
     }
 }
 impl<T: Expression> GlobalStateCache<T> {
-    fn apply_batch(
-        &mut self,
-        state_index: MessageOffset,
-        updates: Vec<(StateToken, T)>,
-        metric_names: EvaluateHandlerMetricNames,
-    ) {
-        self.state_index = Some(state_index);
-        for (key, value) in updates.iter() {
-            self.combined_state.set(*key, value.clone());
-        }
-        self.update_batches.push_back((state_index, updates));
-        self.update_state_cache_metrics(metric_names);
-    }
     fn get_current_value(&self, state_token: StateToken) -> Option<(StateToken, T)> {
         self.combined_state
             .get(&state_token)
@@ -540,6 +594,7 @@ dispatcher!({
         Inbox(EffectUnsubscribeAction<T>),
         Inbox(EvaluateResultAction<T>),
         Inbox(EffectEmitAction<T>),
+        Inbox(EffectThrottleEmitAction),
 
         Outbox(EffectSubscribeAction<T>),
         Outbox(EffectUnsubscribeAction<T>),
@@ -556,7 +611,7 @@ dispatcher!({
         TFactory: ExpressionFactory<T>,
         TAllocator: HeapAllocator<T>,
         TAction: Action,
-        TTask: TaskFactory<TAction, TTask>,
+        TTask: TaskFactory<TAction, TTask> + From<EffectThrottleTaskFactory>,
     {
         type State = EvaluateHandlerState<T>;
         type Events<TInbox: TaskInbox<TAction>> = TInbox;
@@ -651,6 +706,26 @@ dispatcher!({
         ) -> Option<SchedulerTransition<TAction, TTask>> {
             self.handle_effect_emit(state, action, metadata, context)
         }
+
+        fn accept(&self, _action: &EffectThrottleEmitAction) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectThrottleEmitAction,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectThrottleEmitAction,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_throttle_emit(state, action, metadata, context)
+        }
     }
 });
 
@@ -695,8 +770,13 @@ where
         let (evaluate_start_actions, existing_results): (Vec<_>, Vec<_>) =
             partition_results(queries.filter_map(
                 |(effect, (label, query, evaluation_mode, invalidation_strategy))| {
-                    let cache_key = get_evaluate_effect_cache_key(effect);
-                    match state.workers.entry(cache_key) {
+                    let state_token = effect.id();
+                    // Certain queries guarantee that every update is processed individually.
+                    // These need to be whitelisted to skip being batched by throttling.
+                    if let QueryInvalidationStrategy::Exact = invalidation_strategy {
+                        state.immediate_effects.insert(state_token);
+                    }
+                    match state.workers.entry(state_token) {
                         // For any queries that are already subscribed, re-emit the latest cached value if one exists
                         // (this is necessary because the caller that triggered this action might be expecting a result)
                         Entry::Occupied(mut entry) => {
@@ -705,7 +785,7 @@ where
                             worker
                                 .latest_result()
                                 .filter(|result| !is_unresolved_result(result, &self.factory))
-                                .map(|result| Err((cache_key, result.result().clone())))
+                                .map(|result| Err((state_token, result.result().clone())))
                         }
                         // For any queries that are not yet subscribed, kick off evaluation of that query
                         Entry::Vacant(entry) => {
@@ -729,7 +809,7 @@ where
                             Some(Ok(SchedulerCommand::Send(
                                 self.main_pid,
                                 EvaluateStartAction {
-                                    cache_id: cache_key,
+                                    cache_id: state_token,
                                     query,
                                     label,
                                     evaluation_mode,
@@ -783,8 +863,8 @@ where
         let unsubscribed_workers = effects
             .iter()
             .flat_map(|effect| {
-                let cache_key = get_evaluate_effect_cache_key(effect);
-                let mut existing_entry = match state.workers.entry(cache_key) {
+                let state_token = effect.id();
+                let mut existing_entry = match state.workers.entry(state_token) {
                     Entry::Occupied(entry) => Some(entry),
                     _ => None,
                 }?;
@@ -794,6 +874,10 @@ where
                     worker.subscription_count
                 };
                 if updated_subscription_count == 0 {
+                    state.immediate_effects.remove(&state_token);
+                    if let Some(pending_updates) = state.deferred_updates.as_mut() {
+                        pending_updates.remove(&state_token);
+                    }
                     let (_, subscription) = existing_entry.remove_entry();
                     decrement_gauge!(self.metric_names.active_query_worker_count, 1.0);
                     gauge!(
@@ -801,7 +885,7 @@ where
                         0.0,
                         &subscription.metric_labels,
                     );
-                    Some((cache_key, subscription))
+                    Some((state_token, subscription))
                 } else {
                     None
                 }
@@ -1000,18 +1084,18 @@ where
         state: &mut EvaluateHandlerState<T>,
         action: &EffectEmitAction<T>,
         metadata: &MessageData,
-        _context: &mut impl HandlerContext,
+        context: &mut impl HandlerContext,
     ) -> Option<SchedulerTransition<TAction, TTask>>
     where
         TAction: Action + From<EvaluateUpdateAction<T>>,
-        TTask: TaskFactory<TAction, TTask>,
+        TTask: TaskFactory<TAction, TTask> + From<EffectThrottleTaskFactory>,
     {
         let EffectEmitAction { effect_types } = action;
-        let (updated_state_tokens, updates) = if effect_types.is_empty() {
-            (HashSet::<StateToken>::default(), Vec::default())
+        let updates = if effect_types.is_empty() {
+            Vec::default()
         } else {
             let existing_state = &state.state_cache.combined_state;
-            let updates = effect_types
+            effect_types
                 .iter()
                 .flat_map(|batch| {
                     let metric_names = match &batch.effect_type {
@@ -1044,52 +1128,100 @@ where
                     } else {
                         Some((*state_token, update.clone()))
                     }
-                });
-            let (updated_state_tokens, updates) = updates
-                .map(|(state_token, update)| (state_token, (state_token, update)))
-                .unzip();
-            (updated_state_tokens, updates)
+                })
+                .collect()
         };
-        if updated_state_tokens.is_empty() {
+        if updates.is_empty() {
             return None;
         }
-        let state_index = metadata.offset;
-        state
-            .state_cache
-            .apply_batch(state_index, updates, self.metric_names);
-        let invalidated_workers = state
-            .workers
-            .values_mut()
-            .filter_map(|worker| match &mut worker.status {
-                WorkerStatus::Idle {
-                    latest_result: (_, result),
-                } => {
-                    let has_invalidated_dependencies = result
-                        .dependencies()
-                        .iter()
-                        .any(|state_token| updated_state_tokens.contains(&state_token));
-                    if has_invalidated_dependencies {
-                        Some(worker)
-                    } else {
-                        worker.state_index = Some(state_index);
-                        None
-                    }
-                }
-                _ => None,
-            });
-        let worker_update_actions = invalidated_workers
-            .filter_map(|worker| {
-                update_worker_state(
-                    worker,
-                    WorkerStateUpdateType::DependencyUpdate,
-                    &mut state.state_cache,
-                    self.metric_names,
-                )
-                .map(|action| SchedulerCommand::Send(self.main_pid, TAction::from(action)))
-            })
-            .collect::<Vec<_>>();
-        state.gc_worker_state_history(self.metric_names);
-        Some(SchedulerTransition::new(worker_update_actions))
+        let (immediate_updates, throttle_operation) = match self.throttle {
+            None => (updates, None),
+            Some(throttle_duration) => {
+                let (immediate_updates, deferred_updates): (Vec<_>, Vec<_>) =
+                    partition_results(updates.into_iter().map(|(state_token, value)| {
+                        let is_immediate_update = state.immediate_effects.contains(&state_token)
+                            || match state.state_cache.combined_state.get(&state_token) {
+                                None => true,
+                                Some(existing_value) => {
+                                    self.factory.match_signal_term(existing_value).is_some()
+                                }
+                            };
+                        state
+                            .state_cache
+                            .combined_state
+                            .set(state_token, value.clone());
+                        if is_immediate_update {
+                            Ok((state_token, value))
+                        } else {
+                            Err((state_token, value))
+                        }
+                    }));
+                let throttle_operation = if deferred_updates.is_empty() {
+                    None
+                } else if let Some(pending_updates) = &mut state.deferred_updates {
+                    pending_updates.extend(deferred_updates);
+                    None
+                } else {
+                    state.deferred_updates = Some(deferred_updates.into_iter().collect());
+                    let task_pid = context.generate_pid();
+                    Some(SchedulerCommand::Task(
+                        task_pid,
+                        TTask::from(EffectThrottleTaskFactory {
+                            timeout: throttle_duration,
+                            caller_pid: context.pid(),
+                        }),
+                    ))
+                };
+                (immediate_updates, throttle_operation)
+            }
+        };
+        let update_actions = if immediate_updates.is_empty() {
+            None
+        } else {
+            let state_index = metadata.offset;
+            state.apply_batch(
+                state_index,
+                immediate_updates,
+                self.main_pid,
+                self.metric_names,
+            )
+        };
+        match (update_actions, throttle_operation) {
+            (Some(update_actions), Some(throttle_operation)) => {
+                let mut combined_actions = update_actions;
+                combined_actions.push(throttle_operation);
+                Some(combined_actions)
+            }
+            (Some(update_actions), None) => Some(update_actions),
+            (None, Some(throttle_operation)) => {
+                Some(SchedulerTransition::new([throttle_operation]))
+            }
+            (None, None) => None,
+        }
+    }
+    fn handle_effect_throttle_emit<TAction, TTask>(
+        &self,
+        state: &mut EvaluateHandlerState<T>,
+        _action: &EffectThrottleEmitAction,
+        metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action + From<EvaluateUpdateAction<T>>,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let updates = state.deferred_updates.take()?;
+        if updates.is_empty() {
+            None
+        } else {
+            let state_index = metadata.offset;
+            state.apply_batch(
+                state_index,
+                updates.into_iter().collect(),
+                self.main_pid,
+                self.metric_names,
+            )
+        }
     }
 }
 

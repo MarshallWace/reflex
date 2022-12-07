@@ -19,16 +19,8 @@ use reflex_runtime::action::{
 use serde::{Deserialize, Serialize};
 
 use crate::server::action::{
-    graphql_server::*,
-    http_server::*,
-    init::*,
-    opentelemetry::*,
-    query_inspector_server::{
-        QueryInspectorServerActions, QueryInspectorServerHttpRequestAction,
-        QueryInspectorServerHttpResponseAction,
-    },
-    telemetry::*,
-    websocket_server::*,
+    graphql_server::*, http_server::*, init::*, opentelemetry::*, query_inspector_server::*,
+    telemetry::*, websocket_server::*,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -463,6 +455,22 @@ impl<T: Expression> From<ServerCliAction<T>> for Option<EffectEmitAction<T>> {
     }
 }
 impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EffectEmitAction<T>> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EffectThrottleEmitAction> for ServerCliAction<T> {
+    fn from(value: EffectThrottleEmitAction) -> Self {
+        EffectActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<EffectThrottleEmitAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a EffectThrottleEmitAction> {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
     }

@@ -14,6 +14,7 @@ use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, validate::ValidateQueryGra
 use reflex_macros::blanket_trait;
 use reflex_runtime::{
     actor::{RuntimeAction, RuntimeActor, RuntimeActorState},
+    task::evaluate_handler::EvaluateHandlerTask,
     AsyncExpression,
 };
 use reflex_stdlib::Stdlib;
@@ -182,7 +183,7 @@ where
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     type Actor = Self;
 
@@ -242,7 +243,7 @@ where
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     type Events<TInbox: TaskInbox<TAction>> = ServerActorEvents<
         T,
@@ -418,7 +419,7 @@ pub enum ServerActorEvents<
     TTracer::Span: Send + Sync + 'static,
     TInbox: TaskInbox<TAction>,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     Runtime(
         #[pin] <RuntimeActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Events<TInbox>,
@@ -504,7 +505,7 @@ where
     TTracer::Span: Send + Sync + 'static,
     TInbox: TaskInbox<TAction>,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     type Item = TInbox::Message;
     fn poll_next(
@@ -556,7 +557,7 @@ pub enum ServerActorDispose<
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     Runtime(#[pin] <RuntimeActor<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Dispose),
     GraphQlServer(
@@ -637,7 +638,7 @@ where
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     type Output = ();
     fn poll(
@@ -693,7 +694,7 @@ where
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     fn accept(&self, message: &TAction) -> bool {
         match self {
@@ -829,7 +830,7 @@ where
     TTracer: Tracer,
     TTracer::Span: Send + Sync + 'static,
     TAction: Action + ServerAction<T>,
-    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask,
+    TTask: TaskFactory<TAction, TTask> + WebSocketGraphQlServerTask + EvaluateHandlerTask,
 {
     type State = ServerActorState<T, TTracer::Span>;
     fn handle(

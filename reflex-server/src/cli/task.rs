@@ -24,7 +24,10 @@ use reflex_runtime::{
     actor::bytecode_interpreter::{
         BytecodeInterpreter, BytecodeInterpreterAction, BytecodeInterpreterMetricLabels,
     },
-    task::{bytecode_worker::BytecodeWorkerTaskFactory, RuntimeTaskFactory},
+    task::{
+        bytecode_worker::BytecodeWorkerTaskFactory, evaluate_handler::EffectThrottleTaskFactory,
+        RuntimeTask, RuntimeTaskFactory,
+    },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 use reflex_stdlib::Stdlib;
@@ -53,7 +56,8 @@ blanket_trait!(
 
 blanket_trait!(
     pub trait ServerCliTask<T, TFactory, TAllocator, TConnect>:
-        ServerTask<T, TFactory, TAllocator, TConnect>
+        RuntimeTask<T, TFactory, TAllocator>
+        + ServerTask<T, TFactory, TAllocator, TConnect>
         + GraphQlWebServerTask<T, TFactory, TAllocator>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -109,6 +113,7 @@ task_factory_enum!({
         TTracer: Tracer,
         TTracer::Span: Send + Sync + 'static,
     {
+        Runtime(EffectThrottleTaskFactory),
         ServerTask(ServerTaskFactory<T, TFactory, TAllocator, TConnect>),
         Server(
             ServerActor<

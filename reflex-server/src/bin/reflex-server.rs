@@ -76,6 +76,9 @@ struct Args {
     /// Path to custom TLS certificate
     #[clap(long)]
     tls_cert: Option<PathBuf>,
+    /// Throttle stateful effect updates
+    #[clap(long)]
+    effect_throttle_ms: Option<u64>,
     /// Log runtime actions
     #[clap(long)]
     log: Option<LogFormat>,
@@ -170,6 +173,7 @@ pub async fn main() -> Result<()> {
     } else {
         None
     };
+    let effect_throttle = args.effect_throttle_ms.map(Duration::from_millis);
     let mut logger = {
         let prometheus_logger = args
             .metrics_port
@@ -289,6 +293,7 @@ pub async fn main() -> Result<()> {
             ),
             TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current()),
             TokioRuntimeThreadPoolFactory::new(tokio::runtime::Handle::current()),
+            effect_throttle,
         )
         .with_context(|| anyhow!("Server startup failed"))?;
     server.await.with_context(|| anyhow!("Server error"))

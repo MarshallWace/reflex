@@ -12,6 +12,7 @@ use std::{
     path::Path,
     str::FromStr,
     sync::Arc,
+    time::Duration,
 };
 
 use metrics::SharedString;
@@ -428,6 +429,7 @@ pub fn cli<
     instrumentation: TInstrumentation,
     async_tasks: TAsyncTasks,
     blocking_tasks: TBlockingTasks,
+    effect_throttle: Option<Duration>,
 ) -> Result<impl Future<Output = Result<(), hyper::Error>>>
 where
     T: AsyncExpression
@@ -527,6 +529,7 @@ where
         instrumentation.clone(),
         async_tasks,
         blocking_tasks,
+        effect_throttle,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

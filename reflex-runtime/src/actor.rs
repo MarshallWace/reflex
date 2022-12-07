@@ -15,6 +15,8 @@ pub mod evaluate_handler;
 pub mod query_inspector;
 pub mod query_manager;
 
+use crate::task::evaluate_handler::EvaluateHandlerTask;
+
 use self::evaluate_handler::*;
 use self::query_manager::*;
 
@@ -61,7 +63,7 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     type Events<TInbox: TaskInbox<TAction>> =
         RuntimeActorEvents<T, TFactory, TAllocator, TInbox, TAction, TTask>;
@@ -125,7 +127,7 @@ where
     TAllocator: HeapAllocator<T>,
     TInbox: TaskInbox<TAction>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     QueryManager(
         #[pin] <QueryManager<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Events<TInbox>,
@@ -142,7 +144,7 @@ where
     TAllocator: HeapAllocator<T>,
     TInbox: TaskInbox<TAction>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     type Item = TInbox::Message;
     fn poll_next(
@@ -169,7 +171,7 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     QueryManager(#[pin] <QueryManager<T, TFactory, TAllocator> as Actor<TAction, TTask>>::Dispose),
     EvaluateHandler(
@@ -183,7 +185,7 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     type Output = ();
     fn poll(
@@ -204,7 +206,7 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     fn accept(&self, message: &TAction) -> bool {
         match self {
@@ -244,7 +246,7 @@ where
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TAction: Action + RuntimeAction<T>,
-    TTask: TaskFactory<TAction, TTask>,
+    TTask: TaskFactory<TAction, TTask> + EvaluateHandlerTask,
 {
     type State = RuntimeActorState<T>;
     fn handle(

@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::{convert::Infallible, iter::once, marker::PhantomData, sync::Arc};
+use std::{convert::Infallible, iter::once, marker::PhantomData, sync::Arc, time::Duration};
 
 use futures::{future, stream, Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
@@ -491,6 +491,7 @@ where
         instrumentation: TInstrumentation,
         async_tasks: TAsyncTasks,
         blocking_tasks: TBlockingTasks,
+        effect_throttle: Option<Duration>,
     ) -> Result<Self, String>
     where
         T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
@@ -570,6 +571,7 @@ where
                     allocator.clone(),
                     transform_http,
                     transform_ws,
+                    effect_throttle,
                     metric_names.server,
                     get_graphql_query_label,
                     get_http_query_metric_labels,

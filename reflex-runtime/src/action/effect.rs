@@ -18,6 +18,7 @@ pub enum EffectActions<T: Expression> {
     Subscribe(EffectSubscribeAction<T>),
     Unsubscribe(EffectUnsubscribeAction<T>),
     Emit(EffectEmitAction<T>),
+    ThrottleEmit(EffectThrottleEmitAction),
 }
 impl<T: Expression> Named for EffectActions<T> {
     fn name(&self) -> &'static str {
@@ -25,6 +26,7 @@ impl<T: Expression> Named for EffectActions<T> {
             Self::Subscribe(action) => action.name(),
             Self::Unsubscribe(action) => action.name(),
             Self::Emit(action) => action.name(),
+            Self::ThrottleEmit(action) => action.name(),
         }
     }
 }
@@ -35,6 +37,7 @@ impl<T: Expression> SerializableAction for EffectActions<T> {
             Self::Subscribe(action) => action.to_json(),
             Self::Unsubscribe(action) => action.to_json(),
             Self::Emit(action) => action.to_json(),
+            Self::ThrottleEmit(action) => action.to_json(),
         }
     }
 }
@@ -100,6 +103,28 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectEmitActi
     fn from(value: &'a EffectActions<T>) -> Self {
         match value {
             EffectActions::Emit(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<EffectThrottleEmitAction> for EffectActions<T> {
+    fn from(value: EffectThrottleEmitAction) -> Self {
+        Self::ThrottleEmit(value)
+    }
+}
+impl<T: Expression> From<EffectActions<T>> for Option<EffectThrottleEmitAction> {
+    fn from(value: EffectActions<T>) -> Self {
+        match value {
+            EffectActions::ThrottleEmit(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectThrottleEmitAction> {
+    fn from(value: &'a EffectActions<T>) -> Self {
+        match value {
+            EffectActions::ThrottleEmit(value) => Some(value),
             _ => None,
         }
     }
@@ -218,6 +243,15 @@ impl<T: Expression> SerializableAction for EffectEmitAction<T> {
                     .collect::<Vec<_>>(),
             ),
         )])
+    }
+}
+
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+pub struct EffectThrottleEmitAction;
+impl Action for EffectThrottleEmitAction {}
+impl SerializableAction for EffectThrottleEmitAction {
+    fn to_json(&self) -> SerializedAction {
+        SerializedAction::from_iter([])
     }
 }
 

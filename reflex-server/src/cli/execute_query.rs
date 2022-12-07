@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+use std::time::Duration;
+
 use anyhow::{anyhow, Context, Result};
 use futures::{future, Future, FutureExt};
 use http::{header, HeaderMap, Request, Response};
@@ -47,6 +49,7 @@ pub struct ExecuteQueryCliOptions {
     pub query: String,
     pub variables: Option<String>,
     pub headers: Option<HeaderMap>,
+    pub effect_throttle: Option<Duration>,
     pub debug_compiler: bool,
     pub debug_interpreter: bool,
     pub debug_stack: bool,
@@ -203,6 +206,7 @@ where
         Some(variables) => serde_json::from_str(&variables)
             .with_context(|| anyhow!("Invalid query parameters: {}", variables))?,
     };
+    let effect_throttle = options.effect_throttle;
     let request = {
         let request = Request::builder()
             .method("POST")
@@ -245,6 +249,7 @@ where
         instrumentation,
         async_tasks,
         blocking_tasks,
+        effect_throttle,
     )
     .map_err(|err| anyhow!(err))
     .context("Failed to initialize server")?;

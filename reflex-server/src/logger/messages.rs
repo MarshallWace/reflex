@@ -13,7 +13,9 @@ use reflex_handlers::action::graphql::{
 };
 use reflex_macros::blanket_trait;
 use reflex_runtime::{
-    action::effect::{EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction},
+    action::effect::{
+        EffectEmitAction, EffectSubscribeAction, EffectThrottleEmitAction, EffectUnsubscribeAction,
+    },
     actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
 };
 
@@ -42,6 +44,7 @@ blanket_trait!(
         + Matcher<EffectSubscribeAction<T>>
         + Matcher<EffectUnsubscribeAction<T>>
         + Matcher<EffectEmitAction<T>>
+        + Matcher<EffectThrottleEmitAction>
         + Matcher<GraphQlHandlerWebSocketConnectSuccessAction>
         + Matcher<GraphQlHandlerWebSocketConnectionErrorAction>
         + Matcher<GrpcHandlerConnectSuccessAction>
@@ -152,6 +155,8 @@ where
             }
         } else if let Option::<&EffectEmitAction<T>>::Some(action) = message.match_type() {
             Some(DefaultActionFormatWriter::EffectEmit(action))
+        } else if let Option::<&EffectThrottleEmitAction>::Some(action) = message.match_type() {
+            Some(DefaultActionFormatWriter::EffectThrottleEmit(action))
         } else {
             None
         }
@@ -176,6 +181,7 @@ where
     EffectSubscribe(&'a EffectSubscribeAction<T>),
     EffectUnsubscribe(&'a EffectUnsubscribeAction<T>),
     EffectEmit(&'a EffectEmitAction<T>),
+    EffectThrottleEmit(&'a EffectThrottleEmitAction),
 }
 impl<'a, T> LogWriter for DefaultActionFormatWriter<'a, T>
 where
@@ -197,6 +203,7 @@ where
             Self::EffectSubscribe(inner) => inner.write(f),
             Self::EffectUnsubscribe(inner) => inner.write(f),
             Self::EffectEmit(inner) => inner.write(f),
+            Self::EffectThrottleEmit(inner) => inner.write(f),
         }
     }
 }
@@ -344,5 +351,11 @@ impl<T: Expression> LogWriter for EffectEmitAction<T> {
         } else {
             Ok(())
         }
+    }
+}
+
+impl LogWriter for EffectThrottleEmitAction {
+    fn write(&self, f: &mut impl std::io::Write) -> std::io::Result<()> {
+        write!(f, "Emitting throttled effects")
     }
 }

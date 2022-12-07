@@ -10,7 +10,7 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     pin::Pin,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -81,8 +81,8 @@ use reflex_runtime::{
     },
     runtime_actors,
     task::{
-        bytecode_worker::BytecodeWorkerTaskFactory, RuntimeTask, RuntimeTaskAction,
-        RuntimeTaskFactory,
+        bytecode_worker::BytecodeWorkerTaskFactory, evaluate_handler::EffectThrottleTaskFactory,
+        RuntimeTask, RuntimeTaskAction, RuntimeTaskFactory,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
@@ -105,6 +105,9 @@ struct Args {
     /// Path to custom TLS certificate
     #[clap(long)]
     tls_cert: Option<PathBuf>,
+    /// Throttle stateful effect updates
+    #[clap(long)]
+    effect_throttle_ms: Option<u64>,
     /// Log runtime actions
     #[clap(long)]
     log: bool,
@@ -140,6 +143,7 @@ pub async fn main() -> Result<()> {
     let debug_compiler = args.debug_compiler;
     let debug_interpreter = args.debug_interpreter;
     let debug_stack = args.debug_stack;
+    let effect_throttle = args.effect_throttle_ms.map(Duration::from_millis);
     let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
     let allocator: TAllocator = DefaultAllocator::default();
     let input_path = args.entry_point;
@@ -246,6 +250,7 @@ pub async fn main() -> Result<()> {
                         runtime_actors(
                             factory.clone(),
                             allocator.clone(),
+                            effect_throttle,
                             RuntimeMetricNames::default(),
                             main_pid,
                         )
@@ -1191,6 +1196,27 @@ where
     }
 }
 
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> From<EffectThrottleTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal<T>: Send,
+    T::SignalList<T>: Send,
+    T::StructPrototype<T>: Send,
+    T::ExpressionList<T>: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+{
+    fn from(value: EffectThrottleTaskFactory) -> Self {
+        Self::from(CliTaskFactory::Runtime(RuntimeTaskFactory::from(value)))
+    }
+}
+
 impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
     From<BytecodeWorkerTaskFactory<T, TFactory, TAllocator>>
     for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
@@ -1522,6 +1548,22 @@ impl<T: Expression> From<CliActions<T>> for Option<EffectEmitAction<T>> {
     }
 }
 impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EffectEmitAction<T>> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<EffectThrottleEmitAction> for CliActions<T> {
+    fn from(value: EffectThrottleEmitAction) -> Self {
+        EffectActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<EffectThrottleEmitAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<EffectActions<T>>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a EffectThrottleEmitAction> {
     fn from(value: &'a CliActions<T>) -> Self {
         Option::<&'a EffectActions<T>>::from(value).and_then(|value| value.into())
     }
