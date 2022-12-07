@@ -14,8 +14,6 @@ use reflex_dispatcher::{
 };
 use reflex_macros::{dispatcher, Named};
 use serde::{Deserialize, Serialize};
-use tokio::time::interval_at;
-use tokio_stream::wrappers::IntervalStream;
 
 use crate::action::timestamp::TimestampHandlerUpdateAction;
 
@@ -107,7 +105,7 @@ dispatcher!({
 });
 
 impl TimestampHandlerTaskActor {
-    fn events<TInbox, TAction>(&self, _inbox: TInbox) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action + From<TimestampHandlerUpdateAction>,
@@ -116,7 +114,8 @@ impl TimestampHandlerTaskActor {
         let operation_id = self.operation_id;
         let now = Instant::now();
         let first_update = now.checked_add(interval).unwrap_or(now);
-        IntervalStream::new(interval_at(first_update.into(), interval))
+        inbox
+            .interval(first_update, interval)
             .map(move |_| {
                 TAction::from(TimestampHandlerUpdateAction {
                     operation_id,

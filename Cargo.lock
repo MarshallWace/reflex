@@ -2131,7 +2131,6 @@ dependencies = [
  "strum_macros",
  "tokio",
  "tokio-native-tls",
- "tokio-stream",
  "tokio-tungstenite",
  "uuid",
 ]

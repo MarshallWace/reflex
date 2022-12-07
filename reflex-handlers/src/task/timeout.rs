@@ -102,14 +102,15 @@ dispatcher!({
 });
 
 impl TimeoutHandlerTaskActor {
-    fn events<TInbox, TAction>(&self, _inbox: TInbox) -> impl Stream<Item = TInbox::Message>
+    fn events<TInbox, TAction>(&self, inbox: TInbox) -> impl Stream<Item = TInbox::Message>
     where
         TInbox: TaskInbox<TAction>,
         TAction: Action + From<TimeoutHandlerTimeoutAction>,
     {
         let duration = self.duration;
         let operation_id = self.operation_id;
-        tokio::time::sleep(duration)
+        inbox
+            .sleep(duration)
             .map(move |_| TAction::from(TimeoutHandlerTimeoutAction { operation_id }))
             .map(|action| TInbox::Message::from(action))
             .into_stream()

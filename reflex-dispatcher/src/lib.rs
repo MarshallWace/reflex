@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{ops::Deref, pin::Pin};
+use std::{
+    ops::Deref,
+    pin::Pin,
+    time::{Duration, Instant},
+};
 
 use futures::{future::AbortHandle, Future, Sink, Stream};
 use serde::{Deserialize, Serialize};
@@ -127,6 +131,11 @@ pub trait TaskInbox<TAction: Action>:
     Stream<Item = Self::Message> + Unpin + Send + 'static
 {
     type Message: TaskMessage<TAction> + Send;
+    type Sleep: Future<Output = ()> + Send + 'static;
+    type Interval: Stream<Item = Instant> + Send + 'static;
+    fn sleep(&self, duration: Duration) -> Self::Sleep;
+    fn sleep_until(&self, deadline: Instant) -> Self::Sleep;
+    fn interval(&self, start: Instant, period: Duration) -> Self::Interval;
 }
 
 pub trait TaskMessage<TAction: Action>: From<TAction> + Deref<Target = TAction> {}
@@ -212,6 +221,10 @@ impl<T> HandlerTransition<T> {
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+    pub fn push(&mut self, operation: T) {
+        let Self(operations) = self;
+        operations.push(operation);
     }
     pub fn extend(&mut self, other: HandlerTransition<T>) {
         let Self(operations) = self;

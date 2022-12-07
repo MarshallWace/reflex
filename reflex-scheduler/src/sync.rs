@@ -6,9 +6,11 @@ use std::{
     marker::PhantomData,
     ops::Deref,
     rc::Rc,
+    time::{Duration, Instant},
 };
 
 use futures::{
+    future::{self, Ready},
     stream::{self, Empty},
     Stream,
 };
@@ -59,6 +61,17 @@ where
     TAction: Action + Send + 'static,
 {
     type Message = TMessage;
+    type Sleep = Ready<()>;
+    type Interval = stream::Iter<std::array::IntoIter<Instant, 1>>;
+    fn sleep(&self, _duration: Duration) -> Self::Sleep {
+        future::ready(())
+    }
+    fn sleep_until(&self, _deadline: Instant) -> Self::Sleep {
+        future::ready(())
+    }
+    fn interval(&self, start: Instant, _period: Duration) -> Self::Interval {
+        stream::iter([start])
+    }
 }
 impl<TMessage, TAction> Stream for NoopTaskEvents<TMessage, TAction>
 where

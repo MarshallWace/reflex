@@ -16,15 +16,19 @@ use std::{
 
 use futures::{
     future::{self, Ready},
+    ready,
     sink::With,
+    task::{Context, Poll},
     Future, SinkExt, Stream, StreamExt,
 };
+use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
+    time::Sleep,
 };
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::{IntervalStream, ReceiverStream};
 use tokio_util::sync::{PollSendError, PollSender};
 
 use reflex_dispatcher::{
@@ -381,12 +385,41 @@ where
     }
 }
 
+#[pin_project]
+pub struct TokioIntervalStream(#[pin] IntervalStream);
+impl Stream for TokioIntervalStream {
+    type Item = Instant;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let res = ready!(this.0.poll_next(cx));
+        Poll::Ready(res.map(Instant::from))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
 pub struct TokioInbox<TAction: Action>(ReceiverStream<AsyncMessage<TAction>>);
 impl<TAction> TaskInbox<TAction> for TokioInbox<TAction>
 where
     TAction: Action + Send + Sync + 'static,
 {
     type Message = AsyncMessage<TAction>;
+    type Sleep = Sleep;
+    type Interval = TokioIntervalStream;
+
+    fn sleep(&self, duration: Duration) -> Self::Sleep {
+        tokio::time::sleep(duration)
+    }
+    fn sleep_until(&self, deadline: Instant) -> Self::Sleep {
+        tokio::time::sleep_until(deadline.into())
+    }
+    fn interval(&self, start: Instant, period: Duration) -> Self::Interval {
+        TokioIntervalStream(IntervalStream::new(tokio::time::interval_at(
+            start.into(),
+            period,
+        )))
+    }
 }
 impl<TAction> Stream for TokioInbox<TAction>
 where

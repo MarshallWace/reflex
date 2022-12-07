@@ -30,6 +30,5 @@ serde = { version = "1.0", features = ["derive"] }
 strum = "0.22"
 strum_macros = "0.22"
 tokio = { version = "1", features = ["full", "tracing"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.17.1" }
 uuid = { version = "1.0.0-alpha.1", features = ["v4", "fast-rng"] }
