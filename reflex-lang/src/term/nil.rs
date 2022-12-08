@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use reflex::core::{
     DependencyList, Eagerness, GraphNode, Internable, NilTermType, SerializeJson, StackOffset,
@@ -60,7 +62,11 @@ impl std::fmt::Debug for NilTerm {
     }
 }
 impl SerializeJson for NilTerm {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
-        Ok(serde_json::Value::Null)
+    fn to_json(&self) -> Result<JsonValue, String> {
+        Ok(JsonValue::Null)
+    }
+
+    fn patch(&self, _target: &Self) -> Result<Option<JsonValue>, String> {
+        Ok(None)
     }
 }

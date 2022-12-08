@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
-// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+use serde_json::Value as JsonValue;
 use std::{collections::HashSet, sync::Arc};
 
 use reflex::{
@@ -301,8 +303,11 @@ impl<T: Expression> std::fmt::Debug for CachedExpression<T> {
     }
 }
 impl<T: Expression> SerializeJson for CachedExpression<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         self.value().to_json()
+    }
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        self.value().patch(target.value())
     }
 }
 impl<T: Expression + serde::Serialize> serde::Serialize for CachedExpression<T> {
@@ -543,7 +548,11 @@ impl<T: Expression> std::fmt::Debug for SharedExpression<T> {
     }
 }
 impl<T: Expression> SerializeJson for SharedExpression<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         (*self.value).to_json()
+    }
+
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        (*self.value).patch(target.value())
     }
 }

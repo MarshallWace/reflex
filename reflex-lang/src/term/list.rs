@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, iter::once};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
@@ -12,6 +14,7 @@ use reflex::core::{
     GraphNode, HeapAllocator, Internable, ListTermType, RefType, Rewritable, SerializeJson,
     StackOffset, Substitutions,
 };
+use reflex_utils::json;
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ListTerm<T: Expression> {
@@ -175,13 +178,48 @@ impl<T: Expression> std::fmt::Display for ListTerm<T> {
     }
 }
 
-impl<T: Expression> SerializeJson for ListTerm<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+impl<T: Expression + SerializeJson + Clone> SerializeJson for ListTerm<T> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         self.items
             .iter()
             .map(|item| item.as_deref())
             .map(|key| key.to_json())
             .collect::<Result<Vec<_>, String>>()
-            .map(|values| serde_json::Value::Array(values))
+            .map(|values| JsonValue::Array(values))
+    }
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        let updates = target
+            .items
+            .iter()
+            .map(|item| item.as_deref())
+            .zip(self.items.iter().map(|item| item.as_deref()))
+            .map(|(current, previous)| previous.patch(current))
+            .chain(
+                target
+                    .items
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .skip(self.items.len())
+                    .map(|item| item.to_json().map(Some)),
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let updates = reflex_utils::json::json_object(
+            updates
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, item)| item.map(|value| (index.to_string(), value)))
+                .chain(if target.items.len() != self.items.len() {
+                    Some((String::from("length"), JsonValue::from(target.items.len())))
+                } else {
+                    None
+                }),
+        );
+
+        if json::is_empty_json_object(&updates) {
+            Ok(None)
+        } else {
+            Ok(Some(updates))
+        }
     }
 }

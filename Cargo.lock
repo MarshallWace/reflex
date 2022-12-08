@@ -2075,6 +2075,7 @@ dependencies = [
  "reflex-json",
  "reflex-lang",
  "reflex-stdlib",
+ "reflex-utils",
  "serde",
  "strum",
  "strum_macros",
@@ -2187,6 +2188,7 @@ version = "0.1.0"
 dependencies = [
  "reflex",
  "reflex-stdlib",
+ "reflex-utils",
  "rmp-serde 0.15.5",
  "serde",
  "serde_json",
@@ -2767,9 +2769,9 @@ dependencies = [
 
 [[package]]
 name = "swc_common"
-version = "0.29.16"
+version = "0.29.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876ef0da27185c6b263ad6353a0314f10a3c077f9197d3e3dd71f8e07d2f0fae"
+checksum = "90e2328ba5e7c8f83ff8273b352c890f981d80d215ee29cddcbe19aa789d3592"
 dependencies = [
  "ahash",
  "ast_node",
@@ -2811,9 +2813,9 @@ dependencies = [
 
 [[package]]
 name = "swc_ecma_parser"
-version = "0.122.31"
+version = "0.122.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2676e6a964ea14e900024db687aabe9c2162a756338e3ba9d331e2ef44534f4"
+checksum = "3d96fdbe0817bb029318a064e5543840ab38c0616122b31b910b3a5cda250cf2"
 dependencies = [
  "either",
  "enum_kind",

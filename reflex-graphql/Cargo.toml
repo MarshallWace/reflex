@@ -9,6 +9,7 @@ edition = "2021"
 
 [dependencies]
 reflex = { path = "../reflex" }
+reflex-utils = { path = "../reflex-utils" }
 reflex-json = { path = "../reflex-json" }
 reflex-stdlib = { path = "../reflex-stdlib" }
 graphql-parser = "0.4.0"

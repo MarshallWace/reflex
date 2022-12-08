@@ -8,7 +8,7 @@ use reflex::core::{
     create_record, ConditionListType, ConditionType, Expression, ExpressionFactory,
     ExpressionListType, HeapAllocator, RefType, SignalTermType, SignalType,
 };
-use reflex_json::{json_object, sanitize, JsonMap, JsonValue};
+use reflex_json::{sanitize, JsonMap, JsonValue};
 use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,8 @@ pub use graphql_parser;
 pub mod ast;
 mod operation;
 pub use operation::{graphql_variables_are_equal, GraphQlOperation};
+use reflex_utils::json::json_object;
+
 pub mod stdlib;
 pub mod subscriptions;
 pub mod transform;

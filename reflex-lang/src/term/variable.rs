@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::HashSet,
     iter::{once, FromIterator},
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use reflex::core::{
     DependencyList, DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
@@ -111,7 +113,13 @@ impl std::fmt::Display for VariableTerm {
     }
 }
 impl SerializeJson for VariableTerm {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<Value, String> {
         Err(format!("Unable to serialize term: {}", self))
+    }
+    fn patch(&self, target: &Self) -> Result<Option<Value>, String> {
+        Err(format!(
+            "Unable to create patch for terms: {}, {}",
+            self, target
+        ))
     }
 }

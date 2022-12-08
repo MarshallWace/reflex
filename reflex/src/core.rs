@@ -508,6 +508,8 @@ pub trait Internable {
 
 pub trait SerializeJson {
     fn to_json(&self) -> Result<serde_json::Value, String>;
+    /// Generate a JSON diff object that describes the changes needed for `self` to match `target` (both objects must be the same shape).
+    fn patch(&self, target: &Self) -> Result<Option<serde_json::Value>, String>;
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]

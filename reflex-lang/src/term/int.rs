@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use reflex::core::{
     DependencyList, Eagerness, GraphNode, IntTermType, IntValue, Internable, SerializeJson,
@@ -72,7 +74,14 @@ impl std::fmt::Debug for IntTerm {
     }
 }
 impl SerializeJson for IntTerm {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
-        Ok(serde_json::Value::Number(self.value.into()))
+    fn to_json(&self) -> Result<JsonValue, String> {
+        Ok(JsonValue::Number(self.value.into()))
+    }
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        if self.value == target.value {
+            Ok(None)
+        } else {
+            target.to_json().map(Some)
+        }
     }
 }

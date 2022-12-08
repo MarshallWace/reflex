@@ -15,6 +15,7 @@ use reflex::{
     hash::HashId,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
 
@@ -550,8 +551,12 @@ impl<TBuiltin: Builtin> std::fmt::Display for CachedSharedTerm<TBuiltin> {
     }
 }
 impl<TBuiltin: Builtin> SerializeJson for CachedSharedTerm<TBuiltin> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         SerializeJson::to_json(&self.value)
+    }
+
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        self.value.patch(&target.value)
     }
 }
 impl<TBuiltin: Builtin> serde::Serialize for CachedSharedTerm<TBuiltin> {

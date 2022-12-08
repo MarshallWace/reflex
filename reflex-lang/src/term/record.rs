@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
@@ -12,6 +14,7 @@ use reflex::core::{
     GraphNode, HeapAllocator, Internable, RecordTermType, RefType, Rewritable, SerializeJson,
     StackOffset, StructPrototypeType, Substitutions,
 };
+use reflex_utils::json::is_empty_json_object;
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct RecordTerm<T: Expression> {
@@ -214,23 +217,62 @@ impl<T: Expression> std::fmt::Display for RecordTerm<T> {
     }
 }
 impl<T: Expression> SerializeJson for RecordTerm<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         let fields = self
-            .prototype
-            .keys()
-            .as_deref()
-            .iter()
-            .map(|item| item.as_deref())
-            .zip(self.values.iter().map(|item| item.as_deref()))
+            .entries()
+            .into_iter()
             .map(|(key, value)| {
                 let key = key.to_json()?;
                 let value = value.to_json()?;
                 match key {
-                    serde_json::Value::String(key) => Ok((key, value)),
+                    JsonValue::String(key) => Ok((key, value)),
                     _ => Err(format!("Invalid JSON object key: {}", key.to_string())),
                 }
             })
-            .collect::<Result<serde_json::Map<_, _>, _>>()?;
-        Ok(serde_json::Value::Object(fields))
+            .collect::<Result<JsonMap<_, _>, String>>()?;
+        Ok(JsonValue::Object(fields))
+    }
+
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        if self.prototype.keys().as_deref().len() != target.prototype.keys().as_deref().len() {
+            return Err(format!(
+                "Prototype has changed from {} to {}",
+                self.prototype, target.prototype
+            ));
+        }
+        let updates = JsonValue::Object(
+            target
+                .entries()
+                .into_iter()
+                .map(|(key, new_value)| {
+                    let previous_value = self
+                        .get(&key)
+                        .ok_or_else(|| {
+                            format!(
+                                "Prototype has changed, key {} not present in {}",
+                                key.to_string(),
+                                self.prototype
+                            )
+                        })?
+                        .as_deref();
+                    Ok(previous_value
+                        .patch(new_value)?
+                        .map(|value_patch| (key, value_patch)))
+                })
+                .filter_map(|entry| entry.transpose()) // Filter out unchanged fields
+                .map(|entry| {
+                    entry.and_then(|(key, value)| match key.to_json()? {
+                        JsonValue::String(key) => Ok((key, value)),
+                        _ => Err(format!("Invalid JSON object key: {}", key.to_string())),
+                    })
+                })
+                .collect::<Result<JsonMap<_, _>, _>>()?,
+        );
+
+        if is_empty_json_object(&updates) {
+            Ok(None)
+        } else {
+            Ok(Some(updates))
+        }
     }
 }

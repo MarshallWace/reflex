@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use reflex::core::{
     ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, RefType,
@@ -89,7 +91,13 @@ impl<T: Expression> std::fmt::Display for SignalTerm<T> {
 }
 
 impl<T: Expression> SerializeJson for SignalTerm<T> {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         Err(format!("Unable to serialize term: {}", self))
+    }
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        Err(format!(
+            "Unable to create patch for terms: {}, {}",
+            self, target
+        ))
     }
 }

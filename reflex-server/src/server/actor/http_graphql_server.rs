@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
@@ -29,8 +30,9 @@ use reflex_graphql::{
     serialize_graphql_result_payload, validate::validate_graphql_result, GraphQlOperation,
     GraphQlOperationPayload, GraphQlQuery, GraphQlQueryTransform, GraphQlSchemaTypes,
 };
-use reflex_json::{json_object, JsonValue};
+use reflex_json::JsonValue;
 use reflex_macros::{dispatcher, Named};
+use reflex_utils::json::json_object;
 
 use crate::{
     server::{

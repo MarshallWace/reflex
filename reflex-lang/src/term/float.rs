@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use reflex::core::{
     as_integer, DependencyList, Eagerness, FloatTermType, FloatValue, GraphNode, Internable,
@@ -81,13 +83,21 @@ impl std::fmt::Debug for FloatTerm {
     }
 }
 impl SerializeJson for FloatTerm {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         match serde_json::Number::from_f64(self.value) {
-            Some(number) => Ok(serde_json::Value::Number(number)),
+            Some(number) => Ok(JsonValue::Number(number)),
             None => Err(format!(
                 "Unable to serialize float non-finite float as JSON value: {}",
                 self
             )),
+        }
+    }
+
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        if self.value == target.value {
+            Ok(None)
+        } else {
+            target.to_json().map(Some)
         }
     }
 }

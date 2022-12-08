@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, hash::Hash};
 
 use reflex::hash::hash_object;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
 
@@ -683,11 +685,12 @@ where
         }
     }
 }
-impl<T: Expression> SerializeJson for Term<T>
+
+impl<T: Expression + Applicable<T> + Hash> SerializeJson for Term<T>
 where
     T::String: Hash,
 {
-    fn to_json(&self) -> Result<serde_json::Value, String> {
+    fn to_json(&self) -> Result<JsonValue, String> {
         match self {
             Self::Nil(term) => term.to_json(),
             Self::Boolean(term) => term.to_json(),
@@ -710,6 +713,36 @@ where
             Self::HashMap(term) => term.to_json(),
             Self::HashSet(term) => term.to_json(),
             Self::Signal(term) => term.to_json(),
+        }
+    }
+
+    fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        if self.id() == target.id() {
+            return Ok(None);
+        }
+        match (self, target) {
+            (Self::Nil(term), Self::Nil(other)) => term.patch(other),
+            (Self::Boolean(term), Self::Boolean(other)) => term.patch(other),
+            (Self::Int(term), Self::Int(other)) => term.patch(other),
+            (Self::Float(term), Self::Float(other)) => term.patch(other),
+            (Self::String(term), Self::String(other)) => term.patch(other),
+            (Self::Symbol(term), Self::Symbol(other)) => term.patch(other),
+            (Self::Variable(term), Self::Variable(other)) => term.patch(other),
+            (Self::Effect(term), Self::Effect(other)) => term.patch(other),
+            (Self::Let(term), Self::Let(other)) => term.patch(other),
+            (Self::Lambda(term), Self::Lambda(other)) => term.patch(other),
+            (Self::Application(term), Self::Application(other)) => term.patch(other),
+            (Self::PartialApplication(term), Self::PartialApplication(other)) => term.patch(other),
+            (Self::Recursive(term), Self::Recursive(other)) => term.patch(other),
+            (Self::CompiledFunction(term), Self::CompiledFunction(other)) => term.patch(other),
+            (Self::Builtin(term), Self::Builtin(other)) => term.patch(other),
+            (Self::Record(term), Self::Record(other)) => term.patch(other),
+            (Self::Constructor(term), Self::Constructor(other)) => term.patch(other),
+            (Self::List(term), Self::List(other)) => term.patch(other),
+            (Self::HashMap(term), Self::HashMap(other)) => term.patch(other),
+            (Self::HashSet(term), Self::HashSet(other)) => term.patch(other),
+            (Self::Signal(term), Self::Signal(other)) => term.patch(other),
+            _ => target.to_json().map(Some),
         }
     }
 }

@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     collections::{hash_map::Entry, HashMap},
-    iter::{empty, once},
+    iter::once,
     marker::PhantomData,
     time::{Duration, Instant},
 };
@@ -28,8 +28,9 @@ use reflex_graphql::{
     GraphQlOperation, GraphQlOperationType, GraphQlQuery, GraphQlQueryTransform,
     GraphQlSchemaTypes,
 };
-use reflex_json::{json_object, JsonMap, JsonNumber, JsonValue};
+use reflex_json::{JsonNumber, JsonValue};
 use reflex_macros::{dispatcher, Named};
+use reflex_utils::json::json_object;
 
 use crate::server::{
     actor::graphql_server::GraphQlQueryStatus,
@@ -297,7 +298,7 @@ struct WebSocketGraphQlOperation<T: Expression> {
     // Only necessary if validating query results against a schema
     query: Option<GraphQlQuery>,
     /// Previous result payload if this is a diff stream (empty before first result emitted)
-    diff_result: Option<Option<(T, JsonValue)>>,
+    diff_result: Option<Option<T>>,
     /// Throttle duration and active throttle state if this is a throttled stream
     throttle: Option<(Duration, Option<ThrottleState<T>>)>,
     error_metric_tracker: QueryErrorStateTracker,
@@ -1047,7 +1048,7 @@ where
             .diff_result
             .as_ref()
             .and_then(|previous_result| previous_result.as_ref())
-            .map(|(existing, _)| existing.id() == result.id())
+            .map(|existing| existing.id() == result.id())
             .unwrap_or(false);
         if is_unchanged {
             return None;
@@ -1159,48 +1160,43 @@ fn get_subscription_result_payload<T: Expression>(
     operation_id: &OperationId,
     query: Option<&GraphQlQuery>,
     schema_types: Option<&GraphQlSchemaTypes<'static, String>>,
-    diff_result: Option<&mut Option<(T, JsonValue)>>,
+    previous_result: Option<&mut Option<T>>,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<GraphQlSubscriptionServerMessage> {
-    let result_payload =
-        serialize_graphql_result_payload(result, factory).and_then(|payload| {
-            match (query, schema_types) {
-                (Some(query), Some(schema_types)) => {
-                    validate_graphql_result(&payload, query, schema_types).map(|_| payload)
-                }
-                _ => Ok(payload),
-            }
-        });
-    // TODO: perform diff on unserialized result payloads to allow fast dirty-checking of branches
-    let previous_result_payload = if let Some(previous_result) = diff_result {
-        std::mem::replace(
-            previous_result,
-            result_payload
-                .as_ref()
-                .ok()
-                // TODO: avoid unnecessary cloning of websocket JSON payload for diff results
-                .map(|payload| (result.clone(), payload.clone())),
-        )
+    let previous_result = if let Some(previous_result) = previous_result {
+        std::mem::replace(previous_result, Some(result.clone()))
     } else {
         None
     };
-    match (result_payload, previous_result_payload) {
-        (Ok(result_payload), Some((_, previous_result_payload))) => {
-            Some(GraphQlSubscriptionServerMessage::Patch(
+    if let Some(previous_result) = previous_result {
+        match previous_result.patch(result) {
+            Err(message) => Some(GraphQlSubscriptionServerMessage::Data(
                 operation_id.clone(),
-                create_graphql_success_response(
-                    diff_results(&previous_result_payload, &result_payload)
-                        .unwrap_or_else(|| json_object(empty())),
-                ),
-            ))
+                create_graphql_error_response(once(JsonValue::String(message))),
+            )),
+            Ok(None) => None,
+            Ok(Some(patch)) => Some(GraphQlSubscriptionServerMessage::Patch(
+                operation_id.clone(),
+                create_graphql_success_response(patch),
+            )),
         }
-        (result_payload, _) => Some(GraphQlSubscriptionServerMessage::Data(
+    } else {
+        let result_payload =
+            serialize_graphql_result_payload(result, factory).and_then(|payload| {
+                match (query, schema_types) {
+                    (Some(query), Some(schema_types)) => {
+                        validate_graphql_result(&payload, query, schema_types).map(|_| payload)
+                    }
+                    _ => Ok(payload),
+                }
+            });
+        Some(GraphQlSubscriptionServerMessage::Data(
             operation_id.clone(),
             match result_payload {
                 Ok(result) => create_graphql_success_response(result),
                 Err(errors) => create_graphql_error_response(errors),
             },
-        )),
+        ))
     }
 }
 
@@ -1233,77 +1229,6 @@ fn parse_json_positive_integer(value: &JsonNumber) -> Option<u64> {
             Some(value) if value >= 1.0 => Some(value.trunc() as u64),
             _ => None,
         },
-    }
-}
-
-fn diff_results(previous: &JsonValue, current: &JsonValue) -> Option<JsonValue> {
-    if current == previous {
-        return None;
-    }
-    match previous {
-        JsonValue::Object(previous) => match current {
-            JsonValue::Object(current) => diff_objects(previous, current),
-            _ => Some(current.clone()),
-        },
-        JsonValue::Array(previous) => match current {
-            JsonValue::Array(current) => diff_arrays(previous, current),
-            _ => Some(current.clone()),
-        },
-        _ => Some(current.clone()),
-    }
-}
-
-fn diff_objects(
-    previous: &JsonMap<String, JsonValue>,
-    current: &JsonMap<String, JsonValue>,
-) -> Option<JsonValue> {
-    let previous_entries = previous.iter().collect::<HashMap<_, _>>();
-    let updates = json_object(current.iter().filter_map(|(key, current_value)| {
-        previous_entries.get(key).and_then(|previous_value| {
-            diff_results(previous_value, current_value).map(|value| (key.clone(), value))
-        })
-    }));
-    if is_empty_json_object(&updates) {
-        None
-    } else {
-        Some(updates)
-    }
-}
-
-fn diff_arrays(previous: &Vec<JsonValue>, current: &Vec<JsonValue>) -> Option<JsonValue> {
-    let updates = current
-        .iter()
-        .zip(previous.iter())
-        .map(|(current, previous)| diff_results(previous, current))
-        .chain(
-            current
-                .iter()
-                .skip(previous.len())
-                .map(|item| Some(item.clone())),
-        )
-        .collect::<Vec<_>>();
-    let updates = json_object(
-        updates
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, item)| item.map(|value| (index.to_string(), value)))
-            .chain(if current.len() != previous.len() {
-                Some((String::from("length"), JsonValue::from(current.len())))
-            } else {
-                None
-            }),
-    );
-    if is_empty_json_object(&updates) {
-        None
-    } else {
-        Some(updates)
-    }
-}
-
-fn is_empty_json_object(value: &JsonValue) -> bool {
-    match value {
-        JsonValue::Object(value) => value.is_empty(),
-        _ => false,
     }
 }
 
