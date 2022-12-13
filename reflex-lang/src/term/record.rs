@@ -67,7 +67,7 @@ impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
             .as_deref()
             .iter()
             .map(|item| item.as_deref())
-            .position(|field_name| field_name == key)?;
+            .position(|field_name| field_name.id() == key.id())?;
         self.values.get(index)
     }
 }

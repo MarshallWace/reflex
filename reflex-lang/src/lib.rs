@@ -456,7 +456,7 @@ impl<T: Expression> StructPrototype<T> {
             .map(|item| item.as_deref())
             .enumerate()
             .find_map(|(offset, existing_key)| {
-                if existing_key == key {
+                if existing_key.id() == key.id() {
                     Some(offset)
                 } else {
                     None

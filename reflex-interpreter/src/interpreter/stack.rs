@@ -20,7 +20,7 @@ struct StackEntry<T: Expression> {
     span: Option<tracing::span::EnteredSpan>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug)]
 pub(crate) enum StackFrame<T: Expression> {
     Expression {
         address: InstructionPointer,
@@ -184,7 +184,7 @@ impl<'src, T: Expression> CallStack<'src, T> {
         let is_application_arg = self
             .call_stack
             .last()
-            .map(|entry| &entry.context == &StackFrame::ApplicationArg)
+            .map(|entry| matches!(&entry.context, &StackFrame::ApplicationArg))
             .unwrap_or(false);
         if is_application_arg {
             self.pop_call_stack()

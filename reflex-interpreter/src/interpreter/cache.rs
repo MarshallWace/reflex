@@ -39,7 +39,6 @@ pub trait MutableInterpreterCache<T: Expression>: InterpreterCache<T> {
     fn extend(&mut self, entries: impl IntoIterator<Item = InterpreterCacheEntry<T>>);
 }
 
-#[derive(Eq)]
 pub struct InterpreterCacheEntry<T: Expression> {
     cache_key: HashId,
     result: EvaluationResult<T>,
@@ -47,14 +46,6 @@ pub struct InterpreterCacheEntry<T: Expression> {
     overall_state_hash: HashId,
     minimal_state_hash: HashId,
     children: Vec<HashId>,
-}
-impl<T: Expression> PartialEq for InterpreterCacheEntry<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.cache_key == other.cache_key
-            && self.result == other.result
-            && self.overall_state_hash == other.overall_state_hash
-            && self.minimal_state_hash == other.minimal_state_hash
-    }
 }
 impl<T: Expression> std::hash::Hash for InterpreterCacheEntry<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
