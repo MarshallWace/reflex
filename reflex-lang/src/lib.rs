@@ -9,9 +9,9 @@ use std::{
 
 use reflex::{
     core::{
-        ConditionListType, ConditionType, DependencyList, Expression, ExpressionListType,
-        GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset, StateToken,
-        StructPrototypeType,
+        ConditionListType, ConditionType, DependencyList, Expression, ExpressionListIter,
+        ExpressionListType, GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset,
+        StateToken, StructPrototypeType,
     },
     hash::{hash_iter, hash_object, FnvHasher, HashId},
 };
@@ -328,6 +328,10 @@ impl<T: Expression> PartialOrd for Signal<T> {
     }
 }
 impl<T: Expression> ConditionType<T> for Signal<T> {
+    type Args<'a> = ExpressionListIter<'a, T>
+    where
+        T: 'a,
+        Self: 'a;
     fn id(&self) -> StateToken {
         self.id
     }
@@ -335,12 +339,11 @@ impl<T: Expression> ConditionType<T> for Signal<T> {
         // FIXME: Prevent unnecessary cloning of signal type
         self.signal_type.clone()
     }
-    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    fn args<'a>(&'a self) -> Self::Args<'a>
     where
-        T::ExpressionList<T>: 'a,
         T: 'a,
     {
-        (&self.args).into()
+        self.args.iter()
     }
 }
 impl<T: Expression> std::fmt::Display for Signal<T> {

@@ -5,8 +5,8 @@
 use std::{borrow::Cow, collections::HashMap, iter::once};
 
 use reflex::core::{
-    create_record, ConditionListType, ConditionType, Expression, ExpressionFactory,
-    ExpressionListType, HeapAllocator, RefType, SignalTermType, SignalType,
+    create_record, ConditionListType, ConditionType, Expression, ExpressionFactory, HeapAllocator,
+    RefType, SignalTermType, SignalType,
 };
 use reflex_json::{sanitize, JsonMap, JsonValue};
 use reflex_stdlib::Stdlib;
@@ -465,8 +465,6 @@ pub fn serialize_json_signal_errors<TTerm: SignalTermType<T>, T: Expression>(
         .map(|signal| {
             signal
                 .args()
-                .as_deref()
-                .iter()
                 .map(|item| item.as_deref())
                 .next()
                 .and_then(|arg| sanitize(arg).ok())

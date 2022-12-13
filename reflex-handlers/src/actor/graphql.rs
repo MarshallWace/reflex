@@ -1378,21 +1378,21 @@ fn parse_graphql_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 7 {
         return Err(format!(
             "Invalid graphql signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
-    let mut remaining_args = args.iter().map(|item| item.as_deref());
-    let url = parse_string_arg(remaining_args.next().unwrap(), factory);
-    let query = parse_string_arg(remaining_args.next().unwrap(), factory);
-    let operation_name = parse_optional_string_arg(remaining_args.next().unwrap(), factory);
-    let variables = parse_optional_object_arg(remaining_args.next().unwrap(), factory)?;
-    let extensions = parse_optional_object_arg(remaining_args.next().unwrap(), factory)?;
-    let headers = parse_optional_object_arg(remaining_args.next().unwrap(), factory)?;
-    let _token = remaining_args.next().unwrap();
+    let mut args = args.map(|item| item.as_deref());
+    let url = parse_string_arg(args.next().unwrap(), factory);
+    let query = parse_string_arg(args.next().unwrap(), factory);
+    let operation_name = parse_optional_string_arg(args.next().unwrap(), factory);
+    let variables = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let extensions = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let headers = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let _token = args.next().unwrap();
     match (url, query, operation_name, variables, extensions, headers) {
         (
             Some(url),
@@ -1415,8 +1415,6 @@ fn parse_graphql_effect_args<T: Expression>(
             "Invalid graphql signal arguments: {}",
             effect
                 .args()
-                .as_deref()
-                .iter()
                 .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()

@@ -10,8 +10,8 @@ use std::{
 };
 
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, RefType, SignalType, StateToken, Uuid,
+    ConditionType, Expression, ExpressionFactory, FloatTermType, HeapAllocator, IntTermType,
+    RefType, SignalType, StateToken, Uuid,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -333,16 +333,16 @@ fn parse_timeout_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Option<Duration>, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 2 {
         return Err(format!(
             "Invalid timeout signal: Expected 2 arguments, received {}",
             args.len()
         ));
     }
-    let mut remaining_args = args.iter().map(|item| item.as_deref());
-    let duration = parse_duration_millis_arg(remaining_args.next().unwrap(), factory);
-    let _token = remaining_args.next().unwrap();
+    let mut args = args.map(|item| item.as_deref());
+    let duration = parse_duration_millis_arg(args.next().unwrap(), factory);
+    let _token = args.next().unwrap();
     match duration {
         Some(duration) if duration.as_millis() == 0 => Ok(None),
         Some(duration) => Ok(Some(duration.max(Duration::from_millis(1)))),
@@ -350,8 +350,6 @@ fn parse_timeout_effect_args<T: Expression>(
             "Invalid timeout signal arguments: {}",
             effect
                 .args()
-                .as_deref()
-                .iter()
                 .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()

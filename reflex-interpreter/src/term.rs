@@ -736,9 +736,10 @@ fn compile_signal<T: Expression + Compile<T>>(
     allocator: &impl HeapAllocator<T>,
     compiler: &mut Compiler,
 ) -> Result<Program, String> {
-    let args = signal.args().as_deref();
+    let args = signal.args().map(|item| item.as_deref());
+    let num_args = args.len();
     let compiled_args = compile_expressions(
-        args.iter().map(|item| item.as_deref()),
+        args,
         Eagerness::Lazy,
         stack_offset,
         factory,
@@ -748,7 +749,7 @@ fn compile_signal<T: Expression + Compile<T>>(
     let mut result = compiled_args;
     result.push(Instruction::ConstructCondition {
         signal_type: signal.signal_type().clone(),
-        num_args: args.len(),
+        num_args,
     });
     Ok(result)
 }

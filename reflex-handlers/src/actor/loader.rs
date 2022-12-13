@@ -787,13 +787,8 @@ fn prefix_error_message_effects<T: Expression>(
                         allocator.create_signal(
                             signal.signal_type().clone(),
                             allocator.create_list(
-                                signal
-                                    .args()
-                                    .as_deref()
-                                    .iter()
-                                    .map(|item| item.as_deref())
-                                    .enumerate()
-                                    .map(|(index, arg)| {
+                                signal.args().map(|item| item.as_deref()).enumerate().map(
+                                    |(index, arg)| {
                                         if index == 0 {
                                             factory.create_string_term(allocator.create_string(
                                                 format!("{}{}", prefix, message.as_str()),
@@ -801,7 +796,8 @@ fn prefix_error_message_effects<T: Expression>(
                                         } else {
                                             arg.clone()
                                         }
-                                    }),
+                                    },
+                                ),
                             ),
                         )
                     } else {
@@ -821,8 +817,6 @@ fn as_error_message_effect<'a, T: Expression + 'a>(
     }
     effect
         .args()
-        .as_deref()
-        .iter()
         .map(|item| item.as_deref())
         .next()
         .and_then(|arg| {
@@ -843,17 +837,17 @@ fn parse_loader_effect_args<T: Expression + Applicable<T>>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<LoaderEffectArgs<T>, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 3 {
         return Err(format!(
             "Invalid loader signal: Expected 3 arguments, received {}",
             args.len()
         ));
     }
-    let mut remaining_args = args.iter().map(|item| item.as_deref());
-    let name = remaining_args.next().unwrap();
-    let loader = remaining_args.next().unwrap();
-    let key = remaining_args.next().unwrap();
+    let mut args = args.map(|item| item.as_deref());
+    let name = args.next().unwrap();
+    let loader = args.next().unwrap();
+    let key = args.next().unwrap();
     let name = factory
         .match_string_term(name)
         .map(|term| term.value().as_deref().as_str())

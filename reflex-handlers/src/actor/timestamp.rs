@@ -10,8 +10,8 @@ use std::{
 };
 
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, RefType, SignalType, StateToken, Uuid,
+    ConditionType, Expression, ExpressionFactory, FloatTermType, HeapAllocator, IntTermType,
+    RefType, SignalType, StateToken, Uuid,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -335,23 +335,21 @@ fn parse_timestamp_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Duration, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 1 {
         return Err(format!(
             "Invalid timestamp signal: Expected 1 argument, received {}",
             args.len()
         ));
     }
-    let mut remaining_args = args.iter().map(|item| item.as_deref());
-    let interval = parse_duration_millis_arg(remaining_args.next().unwrap(), factory);
+    let mut args = args.map(|item| item.as_deref());
+    let interval = parse_duration_millis_arg(args.next().unwrap(), factory);
     match interval {
         Some(interval) if interval.as_millis() >= 1 => Ok(interval),
         _ => Err(format!(
             "Invalid timestamp signal arguments: {}",
             effect
                 .args()
-                .as_deref()
-                .iter()
                 .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()

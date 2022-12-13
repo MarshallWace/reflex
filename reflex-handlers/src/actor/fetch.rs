@@ -503,30 +503,18 @@ fn parse_fetch_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<FetchRequest, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 4 {
         return Err(format!(
             "Invalid fetch signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
-    let mut remaining_args = args.iter();
-    let url = parse_string_arg(
-        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
-        factory,
-    );
-    let method = parse_string_arg(
-        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
-        factory,
-    );
-    let headers = parse_key_values_arg(
-        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
-        factory,
-    );
-    let body = parse_optional_string_arg(
-        remaining_args.next().map(|iter| iter.as_deref()).unwrap(),
-        factory,
-    );
+    let mut args = args.map(|iter| iter.as_deref());
+    let url = parse_string_arg(args.next().unwrap(), factory);
+    let method = parse_string_arg(args.next().unwrap(), factory);
+    let headers = parse_key_values_arg(args.next().unwrap(), factory);
+    let body = parse_optional_string_arg(args.next().unwrap(), factory);
     match (method, url, headers, body) {
         (Some(method), Some(url), Some(headers), Some(body)) => {
             let headers = format_request_headers(headers)?;
@@ -541,8 +529,6 @@ fn parse_fetch_effect_args<T: Expression>(
             "Invalid fetch signal arguments: {}",
             effect
                 .args()
-                .as_deref()
-                .iter()
                 .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()

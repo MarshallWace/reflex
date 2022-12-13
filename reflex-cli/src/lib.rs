@@ -3,13 +3,13 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::{path::Path, str::FromStr};
+use std::{iter::once, path::Path, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use reflex::core::{
-    Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory,
-    ExpressionListType, HeapAllocator, InstructionPointer, Reducible, RefType, Rewritable,
-    SignalTermType, SignalType, StringTermType, StringValue,
+    Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory, HeapAllocator,
+    InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, SignalType, StringTermType,
+    StringValue,
 };
 use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
 use reflex_interpreter::compiler::{
@@ -169,41 +169,37 @@ fn format_signal<T: Expression>(
     match signal.signal_type() {
         SignalType::Error => {
             let (message, args) = {
-                let args = signal.args().as_deref();
-                let (message, remaining_args) =
-                    match args.get(0).map(|value| value.as_deref()).map(|arg| {
-                        match factory.match_string_term(arg) {
-                            Some(message) => {
-                                Some(String::from(message.value().as_deref().as_str()))
-                            }
-                            _ => None,
-                        }
-                    }) {
-                        Some(message) => (
-                            message,
-                            if args.len() > 1 {
-                                Some((Some(args.iter().map(|item| item.as_deref()).skip(1)), None))
-                            } else {
-                                None
-                            },
-                        ),
-                        _ => (
-                            None,
-                            if args.len() > 0 {
-                                Some((None, Some(args.iter().map(|item| item.as_deref()))))
-                            } else {
-                                None
-                            },
-                        ),
-                    };
+                let mut args = signal.args().map(|value| value.as_deref());
+                let (message, remaining_args, unused_args) = {
+                    let first_arg = args.next();
+                    let num_remaining_args = args.len();
+                    match first_arg {
+                        None => (None, None, None),
+                        Some(arg) => match factory.match_string_term(arg) {
+                            Some(message) => (
+                                Some(String::from(message.value().as_deref().as_str())),
+                                if num_remaining_args > 0 {
+                                    Some(args)
+                                } else {
+                                    None
+                                },
+                                None,
+                            ),
+                            None => (None, None, Some(once(arg).chain(args))),
+                        },
+                    }
+                };
                 (
                     message,
-                    remaining_args.map(|(remaining_args, original_args)| {
-                        remaining_args
-                            .into_iter()
-                            .flatten()
-                            .chain(original_args.into_iter().flatten())
-                    }),
+                    match (remaining_args, unused_args) {
+                        (None, None) => None,
+                        (remaining_args, unused_args) => Some(
+                            remaining_args
+                                .into_iter()
+                                .flatten()
+                                .chain(unused_args.into_iter().flatten()),
+                        ),
+                    },
                 )
             };
             format!(
@@ -230,8 +226,6 @@ fn format_signal<T: Expression>(
                 " {}",
                 signal
                     .args()
-                    .as_deref()
-                    .iter()
                     .map(|item| item.as_deref())
                     .map(|arg| format!("{}", arg))
                     .collect::<Vec<_>>()

@@ -21,9 +21,8 @@ use pin_project::pin_project;
 use reflex::{
     cache::SubstitutionCache,
     core::{
-        Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory,
-        ExpressionListType, HeapAllocator, InstructionPointer, Reducible, RefType, Rewritable,
-        SignalTermType, StateCache,
+        Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory, HeapAllocator,
+        InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, StateCache,
     },
     env::inject_env_vars,
 };
@@ -458,18 +457,12 @@ fn format_signal_errors<'a, T: Expression>(
         .as_deref()
         .iter()
         .map(|item| item.as_deref())
-        .map(|signal| {
-            match signal
-                .args()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .next()
-            {
+        .map(
+            |signal| match signal.args().map(|item| item.as_deref()).next() {
                 Some(payload) => format!("{}", payload),
                 None => format!("{}", factory.create_nil_term()),
-            }
-        })
+            },
+        )
 }
 
 fn load_tls_cert(path: &Path) -> Result<Certificate> {

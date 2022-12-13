@@ -209,11 +209,14 @@ pub trait SignalTermType<T: Expression> {
 pub trait ConditionType<T: Expression>:
     Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug
 {
+    type Args<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
+    where
+        T: 'a,
+        Self: 'a;
     fn id(&self) -> StateToken;
     fn signal_type(&self) -> SignalType;
-    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    fn args<'a>(&'a self) -> Self::Args<'a>
     where
-        T::ExpressionList<T>: 'a,
         T: 'a;
 }
 

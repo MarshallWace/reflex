@@ -9,7 +9,7 @@ use std::{
 
 use reflex::core::{
     ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
-    ExpressionFactory, ExpressionListType, RefType, SignalTermType, SignalType, StateToken,
+    ExpressionFactory, RefType, SignalTermType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, SchedulerMode,
@@ -198,15 +198,16 @@ fn serialize_effect<T: Expression>(effect: &impl ConditionType<T>) -> JsonValue 
             SignalType::Error => JsonValue::String(String::from("error")),
             SignalType::Pending => JsonValue::String(String::from("pending")),
         },
-        "args": serialize_json_list(effect.args().as_deref())
+        "args": serialize_json_list(effect.args().map(|item| item.as_deref()))
     })
 }
 
-fn serialize_json_list<T: Expression>(items: &impl ExpressionListType<T>) -> JsonValue {
+fn serialize_json_list<'a, T: Expression + 'a>(
+    items: impl IntoIterator<Item = &'a T>,
+) -> JsonValue {
     JsonValue::Array(
         items
-            .iter()
-            .map(|item| item.as_deref())
+            .into_iter()
             .map(|value| match reflex_json::sanitize(value) {
                 Ok(value) => value,
                 Err(_) => json!({}),

@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::borrow::Cow;
 
-use reflex::core::{ConditionType, Expression, ExpressionListType, RefType, StateToken};
+use reflex::core::{ConditionType, Expression, RefType, StateToken};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
 use reflex_macros::Named;
@@ -157,8 +157,6 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
                                     JsonValue::Array(
                                         signal
                                             .args()
-                                            .as_deref()
-                                            .iter()
                                             .map(|item| item.as_deref())
                                             .map(sanitize_expression)
                                             .collect(),
@@ -200,8 +198,6 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
                                     JsonValue::Array(
                                         signal
                                             .args()
-                                            .as_deref()
-                                            .iter()
                                             .map(|item| item.as_deref())
                                             .map(sanitize_expression)
                                             .collect(),

@@ -10,8 +10,8 @@ use std::{
 
 use metrics::{describe_counter, describe_gauge, gauge, increment_gauge, Unit};
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, RefType,
-    SignalType, StateToken, StringTermType, StringValue,
+    ConditionType, Expression, ExpressionFactory, HeapAllocator, RefType, SignalType, StateToken,
+    StringTermType, StringValue,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -569,14 +569,14 @@ fn parse_scan_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<ScanEffectArgs<T>, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 4 {
         return Err(format!(
             "Invalid scan signal: Expected 4 arguments, received {}",
             args.len()
         ));
     }
-    let mut remaining_args = args.iter().map(|item| item.as_deref());
+    let mut remaining_args = args.map(|item| item.as_deref());
     let name = remaining_args.next().unwrap();
     let target = remaining_args.next().unwrap();
     let seed = remaining_args.next().unwrap();

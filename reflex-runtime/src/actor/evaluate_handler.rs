@@ -160,15 +160,15 @@ pub fn parse_evaluate_effect_query<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 4 {
         return None;
     }
-    let mut remaining_args = args.iter();
-    let label = remaining_args.next().map(|value| value.as_deref()).unwrap();
-    let query = remaining_args.next().map(|value| value.as_deref()).unwrap();
-    let evaluation_mode = remaining_args.next().map(|value| value.as_deref()).unwrap();
-    let invalidation_strategy = remaining_args.next().map(|value| value.as_deref()).unwrap();
+    let mut args = args.map(|value| value.as_deref());
+    let label = args.next().unwrap();
+    let query = args.next().unwrap();
+    let evaluation_mode = args.next().unwrap();
+    let invalidation_strategy = args.next().unwrap();
     match (
         factory.match_string_term(label),
         QueryEvaluationMode::deserialize(evaluation_mode, factory),

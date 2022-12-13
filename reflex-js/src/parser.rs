@@ -2062,8 +2062,6 @@ mod tests {
                         signal
                             .as_deref()
                             .args()
-                            .as_deref()
-                            .iter()
                             .map(|item| item.as_deref())
                             .next()
                             .unwrap(),

@@ -19,8 +19,8 @@ use opentelemetry::{
 };
 use reflex::core::{
     ConditionListType, ConditionType, EvaluationResult, Expression, ExpressionFactory,
-    ExpressionListType, HeapAllocator, RecordTermType, RefType, SignalTermType, SignalType,
-    StringTermType, StringValue, Uuid,
+    HeapAllocator, RecordTermType, RefType, SignalTermType, SignalType, StringTermType,
+    StringValue, Uuid,
 };
 use reflex::hash::{HashId, IntMap};
 use reflex_dispatcher::{
@@ -1444,8 +1444,6 @@ fn parse_error_message<'a, T: Expression + 'a>(
 ) -> Option<&'a str> {
     error
         .args()
-        .as_deref()
-        .iter()
         .map(|item| item.as_deref())
         .next()
         .and_then(|arg| parse_error_payload_message(arg, factory, allocator))

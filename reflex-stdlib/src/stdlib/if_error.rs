@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, ConditionListType, ConditionType, EvaluationCache,
-    Expression, ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, RefType,
-    SignalTermType, SignalType, Uid, Uuid,
+    Expression, ExpressionFactory, FunctionArity, HeapAllocator, RefType, SignalTermType,
+    SignalType, Uid, Uuid,
 };
 
 pub struct IfError {}
@@ -69,8 +69,6 @@ impl<T: Expression> Applicable<T> for IfError {
                         error_signals.into_iter().map(|signal| {
                             signal
                                 .args()
-                                .as_deref()
-                                .iter()
                                 .map(|item| item.as_deref())
                                 .next()
                                 .cloned()

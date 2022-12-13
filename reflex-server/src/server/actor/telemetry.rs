@@ -10,8 +10,7 @@ use std::{
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
-        ExpressionFactory, ExpressionListType, HeapAllocator, RefType, SignalTermType, SignalType,
-        StateToken,
+        ExpressionFactory, HeapAllocator, RefType, SignalTermType, SignalType, StateToken,
     },
     hash::HashId,
 };
@@ -1024,8 +1023,6 @@ fn format_effect_attributes<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
             sanitize_json_value(JsonValue::Array(
                 effect
                     .args()
-                    .as_deref()
-                    .iter()
                     .map(|item| item.as_deref())
                     .map(|arg| {
                         reflex_json::sanitize(arg).unwrap_or_else(|_| {

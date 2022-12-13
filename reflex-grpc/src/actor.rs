@@ -1277,14 +1277,14 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
-    let args = effect.args().as_deref();
+    let args = effect.args();
     if args.len() != 7 {
         return Err(format!(
             "Invalid grpc signal: Expected 7 arguments, received {}",
             args.len()
         ));
     }
-    let mut args = args.iter().map(|item| item.as_deref());
+    let mut args = args.map(|item| item.as_deref());
     let proto_id = parse_symbol_arg(args.next().unwrap(), factory);
     let url = parse_string_arg(args.next().unwrap(), factory);
     let service = parse_string_arg(args.next().unwrap(), factory);
@@ -1319,8 +1319,6 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
             "Invalid grpc signal arguments: {}",
             effect
                 .args()
-                .as_deref()
-                .iter()
                 .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
