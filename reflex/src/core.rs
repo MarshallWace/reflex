@@ -438,7 +438,7 @@ where
     type HashsetTerm<T: Expression>: HashsetTermType<T>;
     type SignalTerm<T: Expression>: SignalTermType<T>;
 
-    type Ref<'a, TTarget>: RefType<'a, TTarget> + From<&'a TTarget>
+    type Ref<'a, TTarget>: RefType<'a, TTarget> + From<&'a TTarget> + Clone
     where
         TTarget: 'a,
         Self: 'a;

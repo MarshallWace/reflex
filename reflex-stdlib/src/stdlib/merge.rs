@@ -7,7 +7,7 @@ use std::{collections::hash_map::Entry, iter::once};
 use reflex::{
     core::{
         uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-        ExpressionListType, FunctionArity, HeapAllocator, RecordTermType, RefType,
+        ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RecordTermType, RefType,
         StructPrototypeType, Uid, Uuid,
     },
     hash::FnvHashMap,
@@ -19,7 +19,7 @@ impl Merge {
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
-        variadic: Some(ArgType::Strict),
+        variadic: None,
     };
     pub fn arity() -> Arity {
         Arity::from(&Self::ARITY)
@@ -44,141 +44,128 @@ impl<T: Expression> Applicable<T> for Merge {
         allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let target = args.next().unwrap();
-        let args = args.collect::<Vec<_>>();
-        let result = match factory.match_record_term(&target) {
-            None => Err((target, args)),
-            Some(base) => {
-                if args.is_empty() {
-                    Ok(target.clone())
-                } else {
-                    let records = args
-                        .iter()
-                        .map(|arg| match factory.match_record_term(arg) {
-                            Some(term) => Some(Some((
-                                term.prototype().as_deref(),
-                                term.values().as_deref(),
-                            ))),
-                            None => match factory.match_nil_term(arg) {
-                                Some(_) => Some(None),
-                                _ => None,
-                            },
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    match records {
-                        None => Err((target, args)),
-                        Some(records) => {
-                            let (keys, values): (Vec<_>, Vec<_>) =
-                                once((base.prototype().as_deref(), base.values().as_deref()))
-                                    .chain(records.into_iter().filter_map(|record| record))
-                                    .fold(
-                                        Vec::new(),
-                                        |mut combined_properties, (prototype, values)| {
-                                            combined_properties.extend(
-                                                prototype
-                                                    .keys()
-                                                    .as_deref()
-                                                    .iter()
-                                                    .map(|item| item.as_deref())
-                                                    .cloned()
-                                                    .zip(
-                                                        values
-                                                            .iter()
-                                                            .map(|item| item.as_deref())
-                                                            .cloned(),
-                                                    ),
-                                            );
-                                            combined_properties
-                                        },
-                                    )
-                                    .into_iter()
-                                    .unzip();
-                            let mut deduplicated_keys = keys.iter().enumerate().fold(
-                                {
-                                    let mut map = FnvHashMap::default();
-                                    map.reserve(keys.len());
-                                    map
-                                },
-                                |mut result, (index, key)| {
-                                    match result.entry(key.id()) {
-                                        Entry::Vacant(entry) => {
-                                            entry.insert(index);
-                                        }
-                                        Entry::Occupied(mut entry) => {
-                                            entry.insert(index);
-                                        }
-                                    }
-                                    result
-                                },
-                            );
-                            let base_prototype = base.prototype();
-                            let (prototype, values) = if deduplicated_keys.len()
-                                == base_prototype.as_deref().keys().as_deref().len()
-                            {
-                                let values = if keys.len() == deduplicated_keys.len() {
-                                    allocator.create_list(values)
-                                } else {
-                                    allocator.create_list(
-                                        base_prototype
+        let parsed_args = args.next().unwrap();
+        match factory.match_list_term(&parsed_args) {
+            Some(parsed_args) => {
+                let mut records = parsed_args
+                    .items()
+                    .as_deref()
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .filter_map(|arg| match factory.match_record_term(arg) {
+                        Some(term) => Some(Ok((term.prototype(), term.values().as_deref()))),
+                        None => match factory.match_nil_term(arg) {
+                            Some(_) => None,
+                            _ => Some(Err(format!("Expected <struct>, received {}", arg))),
+                        },
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter();
+                match records.next().map(|(base_prototype, base_values)| {
+                    (
+                        base_prototype.clone(),
+                        once((base_prototype, base_values)).chain(records),
+                    )
+                }) {
+                    None => Ok(factory.create_record_term(
+                        allocator.create_struct_prototype(allocator.create_empty_list()),
+                        allocator.create_empty_list(),
+                    )),
+                    Some((base_prototype, records)) => {
+                        let (keys, values): (Vec<_>, Vec<_>) = records
+                            .fold(
+                                Vec::new(),
+                                |mut combined_properties, (prototype, values)| {
+                                    combined_properties.extend(
+                                        prototype
                                             .as_deref()
                                             .keys()
                                             .as_deref()
                                             .iter()
                                             .map(|item| item.as_deref())
-                                            .map(|key| {
-                                                deduplicated_keys
-                                                    .remove(&key.id())
-                                                    .map(|index| {
-                                                        values.get(index).cloned().unwrap()
-                                                    })
-                                                    .unwrap()
-                                            }),
-                                    )
-                                };
-                                (allocator.clone_struct_prototype(base_prototype), values)
-                            } else if deduplicated_keys.len() == keys.len() {
-                                (
-                                    allocator.create_struct_prototype(allocator.create_list(keys)),
-                                    allocator.create_list(values),
-                                )
+                                            .cloned()
+                                            .zip(
+                                                values.iter().map(|item| item.as_deref()).cloned(),
+                                            ),
+                                    );
+                                    combined_properties
+                                },
+                            )
+                            .into_iter()
+                            .unzip();
+                        let mut deduplicated_keys = keys.iter().enumerate().fold(
+                            {
+                                let mut map = FnvHashMap::default();
+                                map.reserve(keys.len());
+                                map
+                            },
+                            |mut result, (index, key)| {
+                                match result.entry(key.id()) {
+                                    Entry::Vacant(entry) => {
+                                        entry.insert(index);
+                                    }
+                                    Entry::Occupied(mut entry) => {
+                                        entry.insert(index);
+                                    }
+                                }
+                                result
+                            },
+                        );
+                        let (prototype, values) = if deduplicated_keys.len()
+                            == base_prototype.as_deref().keys().as_deref().len()
+                        {
+                            let values = if keys.len() == deduplicated_keys.len() {
+                                allocator.create_list(values)
                             } else {
-                                let (keys, values): (Vec<_>, Vec<_>) = keys
-                                    .iter()
-                                    .fold(
-                                        Vec::with_capacity(deduplicated_keys.len()),
-                                        |mut results, key| match deduplicated_keys.remove(&key.id())
-                                        {
-                                            Some(index) => {
-                                                let value = values.get(index).unwrap();
-                                                results.push((key.clone(), value.clone()));
-                                                results
-                                            }
-                                            None => results,
-                                        },
-                                    )
-                                    .into_iter()
-                                    .unzip();
-                                (
-                                    allocator.create_struct_prototype(allocator.create_list(keys)),
-                                    allocator.create_list(values),
+                                allocator.create_list(
+                                    base_prototype
+                                        .as_deref()
+                                        .keys()
+                                        .as_deref()
+                                        .iter()
+                                        .map(|item| item.as_deref())
+                                        .map(|key| {
+                                            deduplicated_keys
+                                                .remove(&key.id())
+                                                .map(|index| values.get(index).cloned().unwrap())
+                                                .unwrap()
+                                        }),
                                 )
                             };
-                            Ok(factory.create_record_term(prototype, values))
-                        }
+                            (allocator.clone_struct_prototype(base_prototype), values)
+                        } else if deduplicated_keys.len() == keys.len() {
+                            (
+                                allocator.create_struct_prototype(allocator.create_list(keys)),
+                                allocator.create_list(values),
+                            )
+                        } else {
+                            let (keys, values): (Vec<_>, Vec<_>) = keys
+                                .iter()
+                                .fold(
+                                    Vec::with_capacity(deduplicated_keys.len()),
+                                    |mut results, key| match deduplicated_keys.remove(&key.id()) {
+                                        Some(index) => {
+                                            let value = values.get(index).unwrap();
+                                            results.push((key.clone(), value.clone()));
+                                            results
+                                        }
+                                        None => results,
+                                    },
+                                )
+                                .into_iter()
+                                .unzip();
+                            (
+                                allocator.create_struct_prototype(allocator.create_list(keys)),
+                                allocator.create_list(values),
+                            )
+                        };
+                        Ok(factory.create_record_term(prototype, values))
                     }
                 }
             }
-        };
-        match result {
-            Ok(result) => Ok(result),
-            Err((target, args)) => Err(format!(
-                "Expected (<struct>...), received ({})",
-                once(target)
-                    .chain(args)
-                    .into_iter()
-                    .map(|arg| format!("{}", arg))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            _ => Err(format!(
+                "Expected list of <struct>, received {}",
+                parsed_args
             )),
         }
     }

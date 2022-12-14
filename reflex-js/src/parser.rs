@@ -1087,7 +1087,7 @@ where
     Ok(if field_sets.len() >= 2 {
         factory.create_application_term(
             factory.create_builtin_term(Stdlib::Merge),
-            allocator.create_list(field_sets),
+            allocator.create_unit_list(factory.create_list_term(allocator.create_list(field_sets))),
         )
     } else {
         field_sets.into_iter().next().unwrap_or_else(|| {
@@ -2009,9 +2009,8 @@ mod tests {
         cache::SubstitutionCache,
         core::{
             create_record, evaluate, ConditionListType, ConditionType, DependencyList,
-            EvaluationResult, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-            InstructionPointer, RecordTermType, SignalTermType, SignalType, StateCache,
-            StringValue,
+            EvaluationResult, Expression, ExpressionFactory, HeapAllocator, InstructionPointer,
+            RecordTermType, SignalTermType, SignalType, StateCache, StringValue,
         },
         env::inject_env_vars,
     };
