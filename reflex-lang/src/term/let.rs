@@ -69,14 +69,16 @@ impl<T: Expression> GraphNode for LetTerm<T> {
             .collect()
     }
     fn count_variable_usages(&self, offset: StackOffset) -> usize {
-        self.body.count_variable_usages(offset + 1)
+        self.initializer.count_variable_usages(offset) + self.body.count_variable_usages(offset + 1)
     }
     fn dynamic_dependencies(&self, deep: bool) -> DependencyList {
+        // TODO: Verify shallow dynamic dependencies for Let term
         self.initializer
             .dynamic_dependencies(deep)
             .union(self.body.dynamic_dependencies(deep))
     }
     fn has_dynamic_dependencies(&self, deep: bool) -> bool {
+        // TODO: Verify shallow dynamic dependencies for Let term
         self.initializer.has_dynamic_dependencies(deep) || self.body.has_dynamic_dependencies(deep)
     }
     fn is_static(&self) -> bool {
