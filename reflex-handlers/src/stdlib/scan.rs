@@ -11,13 +11,8 @@ use crate::actor::scan::EFFECT_TYPE_SCAN;
 pub struct Scan {}
 impl Scan {
     pub(crate) const UUID: Uuid = uuid!("9c9f5a15-45a7-484d-a910-c6f114a8bced");
-    const ARITY: FunctionArity<4, 0> = FunctionArity {
-        required: [
-            ArgType::Strict,
-            ArgType::Lazy,
-            ArgType::Strict,
-            ArgType::Strict,
-        ],
+    const ARITY: FunctionArity<3, 0> = FunctionArity {
+        required: [ArgType::Lazy, ArgType::Strict, ArgType::Strict],
         optional: [],
         variadic: None,
     };
@@ -45,27 +40,18 @@ impl<T: Expression> Applicable<T> for Scan {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let mut args = args.into_iter();
-        let name = args.next().unwrap();
         let target = args.next().unwrap();
         let seed = args.next().unwrap();
         let iteratee = args.next().unwrap();
-        match factory.match_string_term(&name) {
-            None => Err(format!(
-                "Invalid scan name: Expected String, received {}",
-                name
-            )),
-            Some(_) => {
-                if !is_pure_expression(&seed) {
-                    Err(format!("Scan seed must be a pure expression"))
-                } else if !is_pure_expression(&iteratee) {
-                    Err(format!("Scan iteratee must be a pure expression"))
-                } else {
-                    Ok(factory.create_effect_term(allocator.create_signal(
-                        SignalType::Custom(String::from(EFFECT_TYPE_SCAN)),
-                        allocator.create_list([name, target, seed, iteratee]),
-                    )))
-                }
-            }
+        if !is_pure_expression(&seed) {
+            Err(format!("Scan seed must be a pure expression"))
+        } else if !is_pure_expression(&iteratee) {
+            Err(format!("Scan iteratee must be a pure expression"))
+        } else {
+            Ok(factory.create_effect_term(allocator.create_signal(
+                SignalType::Custom(String::from(EFFECT_TYPE_SCAN)),
+                allocator.create_list([target, seed, iteratee]),
+            )))
         }
     }
 }

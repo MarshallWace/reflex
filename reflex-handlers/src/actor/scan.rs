@@ -8,10 +8,9 @@ use std::{
     marker::PhantomData,
 };
 
-use metrics::{describe_counter, describe_gauge, gauge, increment_gauge, Unit};
+use metrics::{describe_counter, describe_gauge, gauge, increment_gauge, SharedString, Unit};
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, HeapAllocator, RefType, SignalType, StateToken,
-    StringTermType, StringValue,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -120,7 +119,7 @@ impl<T: Expression> Default for ScanHandlerState<T> {
 }
 
 struct ScanHandlerReducerState<T: Expression> {
-    metric_labels: Vec<(String, String)>,
+    metric_labels: [(SharedString, SharedString); 2],
     source_effect: T::Signal<T>,
     source_value_effect: T::Signal<T>,
     source_value: Option<T>,
@@ -251,30 +250,28 @@ where
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
-            .filter_map(
-                |effect| match parse_scan_effect_args(effect, &self.factory) {
-                    Ok(args) => {
-                        if let Some(action) = self.subscribe_scan_effect(state, effect, args) {
-                            Some((
-                                (
-                                    effect.id(),
-                                    create_pending_expression(&self.factory, &self.allocator),
-                                ),
-                                Some(SchedulerCommand::Send(self.main_pid, action)),
-                            ))
-                        } else {
-                            None
-                        }
+            .filter_map(|effect| match parse_scan_effect_args(effect) {
+                Ok(args) => {
+                    if let Some(action) = self.subscribe_scan_effect(state, effect, args) {
+                        Some((
+                            (
+                                effect.id(),
+                                create_pending_expression(&self.factory, &self.allocator),
+                            ),
+                            Some(SchedulerCommand::Send(self.main_pid, action)),
+                        ))
+                    } else {
+                        None
                     }
-                    Err(err) => Some((
-                        (
-                            effect.id(),
-                            create_error_expression(err, &self.factory, &self.allocator),
-                        ),
-                        None,
-                    )),
-                },
-            )
+                }
+                Err(err) => Some((
+                    (
+                        effect.id(),
+                        create_error_expression(err, &self.factory, &self.allocator),
+                    ),
+                    None,
+                )),
+            })
             .unzip();
         let initial_values_action = if initial_values.is_empty() {
             None
@@ -429,7 +426,6 @@ where
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => {
                 let ScanEffectArgs {
-                    label,
                     target,
                     seed,
                     iteratee,
@@ -444,9 +440,20 @@ where
                     self.allocator
                         .create_triple(target.clone(), seed.clone(), iteratee.clone()),
                 );
-                let reducer_label = format!("{} [reducer]", label);
+                let source_label = format!("{}:{} [scan]", target.id(), iteratee.id());
+                let reducer_label = format!("{}:{} [reducer]", target.id(), iteratee.id());
+                let metric_labels = [
+                    (
+                        SharedString::borrowed("source"),
+                        SharedString::owned(format!("{}", target.id())),
+                    ),
+                    (
+                        SharedString::borrowed("reducer"),
+                        SharedString::owned(format!("{}", iteratee.id())),
+                    ),
+                ];
                 let source_effect = create_evaluate_effect(
-                    label.clone(),
+                    source_label,
                     target,
                     QueryEvaluationMode::Standalone,
                     QueryInvalidationStrategy::Exact,
@@ -468,7 +475,7 @@ where
                     &self.allocator,
                 );
                 let reducer_state = ScanHandlerReducerState {
-                    metric_labels: vec![(String::from("label"), label)],
+                    metric_labels,
                     source_effect: source_effect.clone(),
                     source_value_effect,
                     source_value: None,
@@ -559,7 +566,6 @@ where
 }
 
 struct ScanEffectArgs<T: Expression> {
-    label: String,
     target: T,
     seed: T,
     iteratee: T,
@@ -567,36 +573,23 @@ struct ScanEffectArgs<T: Expression> {
 
 fn parse_scan_effect_args<T: Expression>(
     effect: &T::Signal<T>,
-    factory: &impl ExpressionFactory<T>,
 ) -> Result<ScanEffectArgs<T>, String> {
     let args = effect.args();
-    if args.len() != 4 {
+    if args.len() != 3 {
         return Err(format!(
-            "Invalid scan signal: Expected 4 arguments, received {}",
+            "Invalid scan signal: Expected 3 arguments, received {}",
             args.len()
         ));
     }
     let mut remaining_args = args.map(|item| item.as_deref());
-    let name = remaining_args.next().unwrap();
     let target = remaining_args.next().unwrap();
     let seed = remaining_args.next().unwrap();
     let iteratee = remaining_args.next().unwrap();
-    if let Some(name) = factory.match_string_term(name) {
-        Ok(ScanEffectArgs {
-            label: String::from(name.value().as_deref().as_str()),
-            target: target.clone(),
-            seed: seed.clone(),
-            iteratee: iteratee.clone(),
-        })
-    } else {
-        Err(format!(
-            "Invalid scan signal arguments: Expected (String, <any>, <any>, <function:2>), received ({}, {}, {}, {})",
-            name,
-            target,
-            seed,
-            iteratee,
-        ))
-    }
+    Ok(ScanEffectArgs {
+        target: target.clone(),
+        seed: seed.clone(),
+        iteratee: iteratee.clone(),
+    })
 }
 
 fn create_pending_expression<T: Expression>(
