@@ -8,13 +8,11 @@ use reflex::core::{
     FunctionArity, HeapAllocator, Uid, Uuid,
 };
 use reflex_json::stringify;
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::ResolveDeep;
 
-use crate::stdlib::Stdlib as JsStdlib;
-
-pub struct Log {}
+pub struct Log;
 impl Log {
-    pub(crate) const UUID: Uuid = uuid!("c0f30755-91b9-4252-b038-1aa3cd6f267c");
+    pub const UUID: Uuid = uuid!("c0f30755-91b9-4252-b038-1aa3cd6f267c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Eager],
         optional: [],
@@ -31,7 +29,7 @@ impl Uid for Log {
 }
 impl<T: Expression> Applicable<T> for Log
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<LogArgs> + From<ResolveDeep>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -48,10 +46,10 @@ where
     ) -> Result<T, String> {
         let args = args.into_iter();
         Ok(factory.create_application_term(
-            factory.create_builtin_term(JsStdlib::LogArgs),
+            factory.create_builtin_term(LogArgs),
             allocator.create_list(args.map(|arg| {
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ResolveDeep),
+                    factory.create_builtin_term(ResolveDeep),
                     allocator.create_unit_list(arg),
                 )
             })),
@@ -59,9 +57,9 @@ where
     }
 }
 
-pub struct LogArgs {}
+pub struct LogArgs;
 impl LogArgs {
-    pub(crate) const UUID: Uuid = uuid!("ee23acbf-a549-498c-b463-12373556221a");
+    pub const UUID: Uuid = uuid!("ee23acbf-a549-498c-b463-12373556221a");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Eager],
         optional: [],

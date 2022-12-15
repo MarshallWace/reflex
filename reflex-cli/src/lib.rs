@@ -11,13 +11,12 @@ use reflex::core::{
     InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, SignalType, StringTermType,
     StringValue,
 };
-use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
+use reflex_handlers::imports::HandlerImportsBuiltin;
 use reflex_interpreter::compiler::{
     Compile, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
 };
-use reflex_js::stdlib::Stdlib as JsStdlib;
-use reflex_json::stdlib::Stdlib as JsonStdlib;
-use reflex_stdlib::Stdlib;
+use reflex_js::{globals::JsGlobalsBuiltin, imports::JsImportsBuiltin, JsParserBuiltin};
+use reflex_lisp::LispParserBuiltin;
 
 use crate::syntax::{
     js::compile_js_entry_point,
@@ -78,7 +77,11 @@ pub fn create_parser<T>(
 ) -> impl SyntaxParser<T>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<HandlersStdlib>,
+    T::Builtin: JsParserBuiltin
+        + JsGlobalsBuiltin
+        + JsImportsBuiltin
+        + HandlerImportsBuiltin
+        + LispParserBuiltin,
 {
     match (syntax, entry_path) {
         (Syntax::JavaScript, None) => {
@@ -118,7 +121,7 @@ pub fn compile_entry_point<T, TLoader>(
 ) -> Result<(CompiledProgram, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + LispParserBuiltin,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
     match syntax {

@@ -8,9 +8,9 @@ use reflex::core::{
 
 use super::is_truthy;
 
-pub struct And {}
+pub struct And;
 impl And {
-    pub(crate) const UUID: Uuid = uuid!("223539c0-3858-4257-a53d-55fa93e2e7ba");
+    pub const UUID: Uuid = uuid!("223539c0-3858-4257-a53d-55fa93e2e7ba");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Lazy],
         optional: [],

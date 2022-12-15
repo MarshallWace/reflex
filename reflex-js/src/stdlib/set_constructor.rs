@@ -7,11 +7,11 @@ use reflex::core::{
     ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
     Uid, Uuid,
 };
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::CollectHashSet;
 
-pub struct SetConstructor {}
+pub struct SetConstructor;
 impl SetConstructor {
-    pub(crate) const UUID: Uuid = uuid!("c87cb7a9-a926-4f78-b38b-5be67ac83baf");
+    pub const UUID: Uuid = uuid!("c87cb7a9-a926-4f78-b38b-5be67ac83baf");
     const ARITY: FunctionArity<0, 1> = FunctionArity {
         required: [],
         optional: [ArgType::Strict],
@@ -28,7 +28,7 @@ impl Uid for SetConstructor {
 }
 impl<T: Expression> Applicable<T> for SetConstructor
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<CollectHashSet>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -58,7 +58,7 @@ where
             let has_dynamic_values = values.iter().any(|item| !item.is_static());
             if has_dynamic_values {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectHashSet),
+                    factory.create_builtin_term(CollectHashSet),
                     allocator.create_list(values),
                 ))
             } else {

@@ -10,17 +10,13 @@ use reflex::core::{
     Rewritable,
 };
 use reflex_interpreter::compiler::{Compile, CompiledProgram, CompilerMode, CompilerOptions};
-use reflex_stdlib::Stdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
 
 pub fn create_json_parser<T: Expression + Rewritable<T> + Reducible<T>>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
-) -> impl SyntaxParser<T>
-where
-    T::Builtin: From<Stdlib>,
-{
+) -> impl SyntaxParser<T> {
     let factory = factory.clone();
     let allocator = allocator.clone();
     move |input: &str| reflex_json::parse(input, &factory, &allocator)
@@ -33,10 +29,7 @@ pub fn compile_json_entry_point<
     compiler_options: &CompilerOptions,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<(CompiledProgram, InstructionPointer)>
-where
-    T::Builtin: From<Stdlib>,
-{
+) -> Result<(CompiledProgram, InstructionPointer)> {
     let input = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to load JSON graph definition: {}", path.display(),))?;
     let root = reflex_json::parse(&input, factory, allocator)

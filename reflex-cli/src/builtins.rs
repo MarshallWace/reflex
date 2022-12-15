@@ -8,35 +8,32 @@ use reflex::core::{
     Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid,
     Uuid,
 };
-use reflex_handlers::stdlib::Stdlib as HandlersStdlib;
-use reflex_js::stdlib::Stdlib as JsStdlib;
-use reflex_json::stdlib::Stdlib as JsonStdlib;
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::stdlib;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum CliBuiltins {
-    Stdlib(Stdlib),
-    Json(JsonStdlib),
-    Js(JsStdlib),
-    Handlers(HandlersStdlib),
+    Stdlib(stdlib::Stdlib),
+    Json(reflex_json::stdlib::Stdlib),
+    Js(reflex_js::stdlib::Stdlib),
+    Handlers(reflex_handlers::stdlib::Stdlib),
 }
-impl From<Stdlib> for CliBuiltins {
-    fn from(target: Stdlib) -> Self {
+impl From<stdlib::Stdlib> for CliBuiltins {
+    fn from(target: stdlib::Stdlib) -> Self {
         CliBuiltins::Stdlib(target)
     }
 }
-impl From<JsonStdlib> for CliBuiltins {
-    fn from(target: JsonStdlib) -> Self {
+impl From<reflex_json::stdlib::Stdlib> for CliBuiltins {
+    fn from(target: reflex_json::stdlib::Stdlib) -> Self {
         CliBuiltins::Json(target)
     }
 }
-impl From<JsStdlib> for CliBuiltins {
-    fn from(target: JsStdlib) -> Self {
+impl From<reflex_js::stdlib::Stdlib> for CliBuiltins {
+    fn from(target: reflex_js::stdlib::Stdlib) -> Self {
         CliBuiltins::Js(target)
     }
 }
-impl From<HandlersStdlib> for CliBuiltins {
-    fn from(target: HandlersStdlib) -> Self {
+impl From<reflex_handlers::stdlib::Stdlib> for CliBuiltins {
+    fn from(target: reflex_handlers::stdlib::Stdlib) -> Self {
         CliBuiltins::Handlers(target)
     }
 }
@@ -53,11 +50,13 @@ impl Uid for CliBuiltins {
 impl TryFrom<Uuid> for CliBuiltins {
     type Error = ();
     fn try_from(value: Uuid) -> Result<Self, Self::Error> {
-        TryInto::<Stdlib>::try_into(value)
+        TryInto::<stdlib::Stdlib>::try_into(value)
             .map(Self::Stdlib)
-            .or_else(|_| TryInto::<JsonStdlib>::try_into(value).map(Self::Json))
-            .or_else(|_| TryInto::<JsStdlib>::try_into(value).map(Self::Js))
-            .or_else(|_| TryInto::<HandlersStdlib>::try_into(value).map(Self::Handlers))
+            .or_else(|_| TryInto::<reflex_json::stdlib::Stdlib>::try_into(value).map(Self::Json))
+            .or_else(|_| TryInto::<reflex_js::stdlib::Stdlib>::try_into(value).map(Self::Js))
+            .or_else(|_| {
+                TryInto::<reflex_handlers::stdlib::Stdlib>::try_into(value).map(Self::Handlers)
+            })
     }
 }
 impl Builtin for CliBuiltins {
@@ -103,5 +102,479 @@ impl std::fmt::Display for CliBuiltins {
             Self::Js(target) => std::fmt::Display::fmt(target, f),
             Self::Handlers(target) => std::fmt::Display::fmt(target, f),
         }
+    }
+}
+
+impl From<stdlib::Abs> for CliBuiltins {
+    fn from(value: stdlib::Abs) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Add> for CliBuiltins {
+    fn from(value: stdlib::Add) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::And> for CliBuiltins {
+    fn from(value: stdlib::And) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Append> for CliBuiltins {
+    fn from(value: stdlib::Append) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Apply> for CliBuiltins {
+    fn from(value: stdlib::Apply) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Car> for CliBuiltins {
+    fn from(value: stdlib::Car) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Cdr> for CliBuiltins {
+    fn from(value: stdlib::Cdr) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Ceil> for CliBuiltins {
+    fn from(value: stdlib::Ceil) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Collect> for CliBuiltins {
+    fn from(value: stdlib::Collect) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::CollectFilterResults> for CliBuiltins {
+    fn from(value: stdlib::CollectFilterResults) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::CollectHashMap> for CliBuiltins {
+    fn from(value: stdlib::CollectHashMap) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::CollectHashSet> for CliBuiltins {
+    fn from(value: stdlib::CollectHashSet) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::CollectRecord> for CliBuiltins {
+    fn from(value: stdlib::CollectRecord) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::CollectList> for CliBuiltins {
+    fn from(value: stdlib::CollectList) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Concat> for CliBuiltins {
+    fn from(value: stdlib::Concat) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Cons> for CliBuiltins {
+    fn from(value: stdlib::Cons) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ConstructHashMap> for CliBuiltins {
+    fn from(value: stdlib::ConstructHashMap) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ConstructHashSet> for CliBuiltins {
+    fn from(value: stdlib::ConstructHashSet) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ConstructRecord> for CliBuiltins {
+    fn from(value: stdlib::ConstructRecord) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ConstructList> for CliBuiltins {
+    fn from(value: stdlib::ConstructList) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Contains> for CliBuiltins {
+    fn from(value: stdlib::Contains) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Divide> for CliBuiltins {
+    fn from(value: stdlib::Divide) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Effect> for CliBuiltins {
+    fn from(value: stdlib::Effect) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::EndsWith> for CliBuiltins {
+    fn from(value: stdlib::EndsWith) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Entries> for CliBuiltins {
+    fn from(value: stdlib::Entries) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Eq> for CliBuiltins {
+    fn from(value: stdlib::Eq) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Equal> for CliBuiltins {
+    fn from(value: stdlib::Equal) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Filter> for CliBuiltins {
+    fn from(value: stdlib::Filter) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Flatten> for CliBuiltins {
+    fn from(value: stdlib::Flatten) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Floor> for CliBuiltins {
+    fn from(value: stdlib::Floor) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Get> for CliBuiltins {
+    fn from(value: stdlib::Get) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Gt> for CliBuiltins {
+    fn from(value: stdlib::Gt) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Gte> for CliBuiltins {
+    fn from(value: stdlib::Gte) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::If> for CliBuiltins {
+    fn from(value: stdlib::If) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::IfError> for CliBuiltins {
+    fn from(value: stdlib::IfError) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::IfPending> for CliBuiltins {
+    fn from(value: stdlib::IfPending) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Insert> for CliBuiltins {
+    fn from(value: stdlib::Insert) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Keys> for CliBuiltins {
+    fn from(value: stdlib::Keys) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Length> for CliBuiltins {
+    fn from(value: stdlib::Length) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Lt> for CliBuiltins {
+    fn from(value: stdlib::Lt) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Lte> for CliBuiltins {
+    fn from(value: stdlib::Lte) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Map> for CliBuiltins {
+    fn from(value: stdlib::Map) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Match> for CliBuiltins {
+    fn from(value: stdlib::Match) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Max> for CliBuiltins {
+    fn from(value: stdlib::Max) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Merge> for CliBuiltins {
+    fn from(value: stdlib::Merge) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Min> for CliBuiltins {
+    fn from(value: stdlib::Min) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Multiply> for CliBuiltins {
+    fn from(value: stdlib::Multiply) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Not> for CliBuiltins {
+    fn from(value: stdlib::Not) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Or> for CliBuiltins {
+    fn from(value: stdlib::Or) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Pow> for CliBuiltins {
+    fn from(value: stdlib::Pow) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Push> for CliBuiltins {
+    fn from(value: stdlib::Push) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::PushFront> for CliBuiltins {
+    fn from(value: stdlib::PushFront) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Reduce> for CliBuiltins {
+    fn from(value: stdlib::Reduce) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Remainder> for CliBuiltins {
+    fn from(value: stdlib::Remainder) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Replace> for CliBuiltins {
+    fn from(value: stdlib::Replace) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveArgs> for CliBuiltins {
+    fn from(value: stdlib::ResolveArgs) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveDeep> for CliBuiltins {
+    fn from(value: stdlib::ResolveDeep) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveHashMap> for CliBuiltins {
+    fn from(value: stdlib::ResolveHashMap) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveHashSet> for CliBuiltins {
+    fn from(value: stdlib::ResolveHashSet) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveShallow> for CliBuiltins {
+    fn from(value: stdlib::ResolveShallow) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveRecord> for CliBuiltins {
+    fn from(value: stdlib::ResolveRecord) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::ResolveList> for CliBuiltins {
+    fn from(value: stdlib::ResolveList) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Round> for CliBuiltins {
+    fn from(value: stdlib::Round) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Sequence> for CliBuiltins {
+    fn from(value: stdlib::Sequence) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Slice> for CliBuiltins {
+    fn from(value: stdlib::Slice) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Split> for CliBuiltins {
+    fn from(value: stdlib::Split) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::StartsWith> for CliBuiltins {
+    fn from(value: stdlib::StartsWith) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Subtract> for CliBuiltins {
+    fn from(value: stdlib::Subtract) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Values> for CliBuiltins {
+    fn from(value: stdlib::Values) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+
+impl From<reflex_json::stdlib::JsonDeserialize> for CliBuiltins {
+    fn from(value: reflex_json::stdlib::JsonDeserialize) -> Self {
+        Self::from(reflex_json::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_json::stdlib::JsonSerialize> for CliBuiltins {
+    fn from(value: reflex_json::stdlib::JsonSerialize) -> Self {
+        Self::from(reflex_json::stdlib::Stdlib::from(value))
+    }
+}
+
+impl From<reflex_js::stdlib::Construct> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::Construct) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::DateConstructor> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::DateConstructor) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::Dispatch> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::Dispatch) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::EncodeUriComponent> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::EncodeUriComponent) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::FormatErrorMessage> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::FormatErrorMessage) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::FromEntries> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::FromEntries) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::Hash> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::Hash) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::IsFinite> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::IsFinite) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::Log> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::Log) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::LogArgs> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::LogArgs) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::MapConstructor> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::MapConstructor) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::ParseFloat> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::ParseFloat) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::ParseInt> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::ParseInt) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::SetConstructor> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::SetConstructor) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::StructTypeFactory> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::StructTypeFactory) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::Throw> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::Throw) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_js::stdlib::ToString> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::ToString) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
+
+impl From<reflex_handlers::stdlib::Scan> for CliBuiltins {
+    fn from(value: reflex_handlers::stdlib::Scan) -> Self {
+        Self::from(reflex_handlers::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_handlers::stdlib::ToRequest> for CliBuiltins {
+    fn from(value: reflex_handlers::stdlib::ToRequest) -> Self {
+        Self::from(reflex_handlers::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_handlers::stdlib::GetVariable> for CliBuiltins {
+    fn from(value: reflex_handlers::stdlib::GetVariable) -> Self {
+        Self::from(reflex_handlers::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_handlers::stdlib::SetVariable> for CliBuiltins {
+    fn from(value: reflex_handlers::stdlib::SetVariable) -> Self {
+        Self::from(reflex_handlers::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_handlers::stdlib::IncrementVariable> for CliBuiltins {
+    fn from(value: reflex_handlers::stdlib::IncrementVariable) -> Self {
+        Self::from(reflex_handlers::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_handlers::stdlib::DecrementVariable> for CliBuiltins {
+    fn from(value: reflex_handlers::stdlib::DecrementVariable) -> Self {
+        Self::from(reflex_handlers::stdlib::Stdlib::from(value))
     }
 }

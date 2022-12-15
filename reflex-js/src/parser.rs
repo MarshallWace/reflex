@@ -8,11 +8,17 @@ use std::{iter::once, path::Path};
 use reflex::{
     cache::NoopCache,
     core::{
-        as_integer, create_record, Expression, ExpressionFactory, FloatTermType, HeapAllocator,
-        IntTermType, RefType, Rewritable, StringTermType, StringValue, Substitutions,
+        as_integer, create_record, Builtin, Expression, ExpressionFactory, FloatTermType,
+        HeapAllocator, IntTermType, RefType, Rewritable, StringTermType, StringValue,
+        Substitutions,
     },
 };
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::{
+    Add, And, Append, Apply, Concat, Contains, Divide, Entries, Eq, Filter, Flatten, Get, Gt, Gte,
+    If, IfError, Insert, Keys, Lt, Lte, Map, Merge, Multiply, Not, Or, Pow, Push, PushFront,
+    Reduce, Remainder, Replace, ResolveDeep, ResolveList, ResolveShallow, Sequence, Slice, Split,
+    Subtract, Values,
+};
 use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     ArrayLit, ArrowExpr, BinExpr, BinaryOp, BlockStmt, BlockStmtOrExpr, Bool, CallExpr, Callee,
@@ -25,12 +31,117 @@ use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
 use crate::{
     globals::global_aggregate_error,
-    stdlib::{get_builtin_field, Stdlib as JsStdlib},
+    stdlib::{get_builtin_field, Construct, Dispatch, FormatErrorMessage, Throw, ToString},
     Env,
 };
 
 pub type ParserResult<T> = Result<T, ParserError>;
 pub type ParserError = String;
+
+pub trait JsParserBuiltin:
+    Builtin
+    + From<Add>
+    + From<And>
+    + From<Append>
+    + From<Apply>
+    + From<Concat>
+    + From<Construct>
+    + From<Contains>
+    + From<Contains>
+    + From<Dispatch>
+    + From<Divide>
+    + From<Entries>
+    + From<Eq>
+    + From<Filter>
+    + From<Flatten>
+    + From<FormatErrorMessage>
+    + From<Get>
+    + From<Get>
+    + From<Gt>
+    + From<Gte>
+    + From<If>
+    + From<IfError>
+    + From<Insert>
+    + From<Keys>
+    + From<Lt>
+    + From<Lte>
+    + From<Map>
+    + From<Merge>
+    + From<Multiply>
+    + From<Not>
+    + From<Or>
+    + From<Pow>
+    + From<Push>
+    + From<Push>
+    + From<PushFront>
+    + From<PushFront>
+    + From<Reduce>
+    + From<Remainder>
+    + From<Replace>
+    + From<ResolveDeep>
+    + From<ResolveList>
+    + From<ResolveShallow>
+    + From<Sequence>
+    + From<Slice>
+    + From<Split>
+    + From<Subtract>
+    + From<Throw>
+    + From<ToString>
+    + From<Values>
+{
+}
+impl<T> JsParserBuiltin for T where
+    T: Builtin
+        + From<Add>
+        + From<And>
+        + From<Append>
+        + From<Apply>
+        + From<Concat>
+        + From<Construct>
+        + From<Contains>
+        + From<Contains>
+        + From<Dispatch>
+        + From<Divide>
+        + From<Entries>
+        + From<Eq>
+        + From<Filter>
+        + From<Flatten>
+        + From<FormatErrorMessage>
+        + From<Get>
+        + From<Get>
+        + From<Gt>
+        + From<Gte>
+        + From<If>
+        + From<IfError>
+        + From<Insert>
+        + From<Keys>
+        + From<Lt>
+        + From<Lte>
+        + From<Map>
+        + From<Merge>
+        + From<Multiply>
+        + From<Not>
+        + From<Or>
+        + From<Pow>
+        + From<Push>
+        + From<Push>
+        + From<PushFront>
+        + From<PushFront>
+        + From<Reduce>
+        + From<Remainder>
+        + From<Replace>
+        + From<ResolveDeep>
+        + From<ResolveList>
+        + From<ResolveShallow>
+        + From<Sequence>
+        + From<Slice>
+        + From<Split>
+        + From<Subtract>
+        + From<Throw>
+        + From<ToString>
+        + From<Values>
+{
+}
 
 fn err<T: std::fmt::Debug>(message: &str, _node: T) -> ParserError {
     String::from(message)
@@ -89,7 +200,7 @@ pub fn parse<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let program = parse_ast(input, None)?;
     parse_script_contents(program.body.into_iter(), env, factory, allocator)
@@ -104,7 +215,7 @@ pub fn parse_module<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let program = parse_ast(input, Some(path))?;
     parse_module_contents(
@@ -186,7 +297,7 @@ fn parse_script_contents<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let body = program
         .into_iter()
@@ -210,7 +321,7 @@ fn parse_module_contents<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let num_statements = program.len();
     let (body, import_bindings) = program.into_iter().fold(
@@ -265,7 +376,7 @@ fn parse_module_import<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<Vec<(String, T)>>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let module_path = parse_string(&node.src);
     let module = match loader(&module_path, path)
@@ -320,7 +431,7 @@ fn parse_block<'a, T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<Option<T>>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     parse_block_statements(body, None, scope, env, factory, allocator)
 }
@@ -334,7 +445,7 @@ fn parse_block_statements<'a, T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<Option<T>>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let mut remaining = remaining.into_iter();
     let node = remaining.next();
@@ -486,7 +597,7 @@ fn parse_variable_declarators<T: Expression + Rewritable<T>>(
     Option<LexicalScope>,
 )>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     declarators
         .iter()
@@ -508,7 +619,7 @@ fn parse_variable_declarator<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope>)>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let init = node
         .init
@@ -560,7 +671,7 @@ fn parse_object_destructuring_pattern_bindings<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<(Vec<T>, Option<LexicalScope>)>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let properties = properties
         .iter()
@@ -641,7 +752,7 @@ fn parse_array_destructuring_pattern_bindings<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<(impl IntoIterator<Item = T>, Option<LexicalScope>)>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let accessors = accessors
         .iter()
@@ -708,7 +819,7 @@ fn parse_prop_name<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<String>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     match node {
         PropName::Ident(key) => Ok(String::from(parse_identifier(key))),
@@ -752,13 +863,13 @@ fn parse_throw_statement<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let error = parse_expression(value, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(JsStdlib::Throw),
+        factory.create_builtin_term(Throw),
         allocator.create_unit_list(factory.create_application_term(
-            factory.create_builtin_term(Stdlib::ResolveDeep),
+            factory.create_builtin_term(ResolveDeep),
             allocator.create_unit_list(error),
         )),
     ))
@@ -772,7 +883,7 @@ fn parse_if_branch<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     match node {
         Stmt::Block(block) => {
@@ -792,7 +903,7 @@ fn parse_branch<'a, T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let expression = parse_block(body, scope, env, factory, allocator)?;
     match expression {
@@ -809,7 +920,7 @@ fn parse_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     match node {
         Expr::Paren(node) => parse_expression(&node.expr, scope, env, factory, allocator),
@@ -838,7 +949,7 @@ fn parse_expressions<'a, T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<Vec<T>>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     expressions
         .into_iter()
@@ -936,7 +1047,7 @@ fn parse_template_literal<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let args = node
         .quasis
@@ -955,7 +1066,7 @@ where
                 .map(|expression| {
                     let value = parse_expression(expression, scope, env, factory, allocator)?;
                     Ok(Some(factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(value),
                     )))
                 })
@@ -972,7 +1083,7 @@ where
         0 => factory.create_string_term(allocator.create_static_string("")),
         1 => args.into_iter().next().unwrap(),
         _ => factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Concat),
+            factory.create_builtin_term(Concat),
             allocator.create_list(args),
         ),
     })
@@ -996,7 +1107,7 @@ fn parse_tagged_template<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     parse_template_literal(&node.tpl, scope, env, factory, allocator)
 }
@@ -1009,7 +1120,7 @@ fn parse_object_literal<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     enum ObjectLiteralField<T> {
         Property(String, T),
@@ -1086,7 +1197,7 @@ where
 
     Ok(if field_sets.len() >= 2 {
         factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Merge),
+            factory.create_builtin_term(Merge),
             allocator.create_unit_list(factory.create_list_term(allocator.create_list(field_sets))),
         )
     } else {
@@ -1107,7 +1218,7 @@ fn parse_array_literal<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     enum ArrayLiteralFields<T> {
         Items(Vec<T>),
@@ -1153,7 +1264,7 @@ where
                 if items.len() == 1 =>
             {
                 return Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Push),
+                    factory.create_builtin_term(Push),
                     allocator
                         .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
                 ))
@@ -1162,7 +1273,7 @@ where
                 if items.len() == 1 =>
             {
                 return Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::PushFront),
+                    factory.create_builtin_term(PushFront),
                     allocator
                         .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
                 ))
@@ -1177,7 +1288,7 @@ where
     });
     Ok(if item_sets.len() >= 2 {
         factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Append),
+            factory.create_builtin_term(Append),
             allocator.create_list(item_sets),
         )
     } else {
@@ -1196,7 +1307,7 @@ fn parse_unary_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     match node.op {
         UnaryOp::Minus => parse_unary_minus_expression(node, scope, env, factory, allocator),
@@ -1214,7 +1325,7 @@ fn parse_binary_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     match node.op {
         BinaryOp::Add => parse_binary_add_expression(node, scope, env, factory, allocator),
@@ -1252,7 +1363,7 @@ fn parse_unary_minus_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
     Ok(if let Some(term) = factory.match_int_term(&operand) {
@@ -1261,7 +1372,7 @@ where
         factory.create_float_term(-term.value())
     } else {
         factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Subtract),
+            factory.create_builtin_term(Subtract),
             allocator.create_pair(factory.create_float_term(0.0), operand),
         )
     })
@@ -1275,7 +1386,7 @@ fn parse_unary_plus_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
     Ok(if let Some(_) = factory.match_int_term(&operand) {
@@ -1284,7 +1395,7 @@ where
         operand
     } else {
         factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Add),
+            factory.create_builtin_term(Add),
             allocator.create_pair(factory.create_float_term(0.0), operand),
         )
     })
@@ -1298,11 +1409,11 @@ fn parse_unary_not_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let operand = parse_expression(&node.arg, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Not),
+        factory.create_builtin_term(Not),
         allocator.create_unit_list(operand),
     ))
 }
@@ -1315,12 +1426,12 @@ fn parse_binary_add_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Add),
+        factory.create_builtin_term(Add),
         allocator.create_pair(left, right),
     ))
 }
@@ -1333,12 +1444,12 @@ fn parse_binary_subtract_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Subtract),
+        factory.create_builtin_term(Subtract),
         allocator.create_pair(left, right),
     ))
 }
@@ -1351,12 +1462,12 @@ fn parse_binary_multiply_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Multiply),
+        factory.create_builtin_term(Multiply),
         allocator.create_pair(left, right),
     ))
 }
@@ -1369,12 +1480,12 @@ fn parse_binary_divide_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Divide),
+        factory.create_builtin_term(Divide),
         allocator.create_pair(left, right),
     ))
 }
@@ -1387,12 +1498,12 @@ fn parse_binary_remainder_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Remainder),
+        factory.create_builtin_term(Remainder),
         allocator.create_pair(left, right),
     ))
 }
@@ -1405,12 +1516,12 @@ fn parse_binary_pow_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Pow),
+        factory.create_builtin_term(Pow),
         allocator.create_pair(left, right),
     ))
 }
@@ -1423,12 +1534,12 @@ fn parse_binary_lt_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Lt),
+        factory.create_builtin_term(Lt),
         allocator.create_pair(left, right),
     ))
 }
@@ -1441,12 +1552,12 @@ fn parse_binary_gt_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Gt),
+        factory.create_builtin_term(Gt),
         allocator.create_pair(left, right),
     ))
 }
@@ -1459,12 +1570,12 @@ fn parse_binary_lte_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Lte),
+        factory.create_builtin_term(Lte),
         allocator.create_pair(left, right),
     ))
 }
@@ -1477,12 +1588,12 @@ fn parse_binary_gte_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Gte),
+        factory.create_builtin_term(Gte),
         allocator.create_pair(left, right),
     ))
 }
@@ -1495,12 +1606,12 @@ fn parse_binary_equal_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Eq),
+        factory.create_builtin_term(Eq),
         allocator.create_pair(left, right),
     ))
 }
@@ -1513,11 +1624,11 @@ fn parse_binary_not_equal_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let expression = parse_binary_equal_expression(node, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Not),
+        factory.create_builtin_term(Not),
         allocator.create_unit_list(expression),
     ))
 }
@@ -1530,12 +1641,12 @@ fn parse_binary_logical_and_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::And),
+        factory.create_builtin_term(And),
         allocator.create_pair(left, right),
     ))
 }
@@ -1548,12 +1659,12 @@ fn parse_binary_logical_or_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Or),
+        factory.create_builtin_term(Or),
         allocator.create_pair(left, right),
     ))
 }
@@ -1566,12 +1677,12 @@ fn parse_binary_in_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let left = parse_expression(&node.left, scope, env, factory, allocator)?;
     let right = parse_expression(&node.right, scope, env, factory, allocator)?;
     Ok(factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Contains),
+        factory.create_builtin_term(Contains),
         allocator.create_pair(right, left),
     ))
 }
@@ -1584,7 +1695,7 @@ fn parse_conditional_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let condition = parse_expression(&node.test, scope, env, factory, allocator)?;
     let consequent = parse_expression(&node.cons, scope, env, factory, allocator)?;
@@ -1602,10 +1713,10 @@ fn create_if_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     factory.create_application_term(
-        factory.create_builtin_term(Stdlib::If),
+        factory.create_builtin_term(If),
         allocator.create_triple(condition, consequent, alternate),
     )
 }
@@ -1617,10 +1728,10 @@ fn create_try_catch_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     factory.create_application_term(
-        factory.create_builtin_term(Stdlib::IfError),
+        factory.create_builtin_term(IfError),
         allocator.create_pair(
             body,
             factory.create_lambda_term(
@@ -1652,7 +1763,7 @@ fn parse_arrow_function_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     if node.is_generator || node.is_async {
         Err(err_unimplemented(node))
@@ -1745,7 +1856,7 @@ fn parse_member_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let target = parse_expression(&node.obj, scope, env, factory, allocator)?;
     let field_name = parse_static_member_field_name(node)?;
@@ -1787,7 +1898,7 @@ fn get_static_field<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let field = factory.create_string_term(allocator.create_string(field));
     get_dynamic_field(target, field, factory, allocator)
@@ -1800,10 +1911,10 @@ fn get_dynamic_field<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Get),
+        factory.create_builtin_term(Get),
         allocator.create_pair(target, field),
     )
 }
@@ -1815,7 +1926,7 @@ fn get_indexed_field<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     get_dynamic_field(
         target,
@@ -1833,7 +1944,7 @@ fn parse_call_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let static_dispatch = match &node.callee {
         Callee::Expr(callee) => match &**callee {
@@ -1880,7 +1991,7 @@ fn parse_static_method_call_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let target = parse_expression(target, scope, env, factory, allocator)?;
     let is_potential_builtin_method =
@@ -1909,7 +2020,7 @@ where
         combined_args.push(dynamic_fallback);
         combined_args.extend(method_args);
         Ok(factory.create_application_term(
-            factory.create_builtin_term(JsStdlib::Dispatch),
+            factory.create_builtin_term(Dispatch),
             allocator.create_list(combined_args),
         ))
     } else {
@@ -1933,7 +2044,7 @@ fn parse_function_application_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let num_args = args.len();
     let (args, spread) = args.into_iter().fold(
@@ -1959,7 +2070,7 @@ where
             factory.create_partial_application_term(target, allocator.create_list(args))
         };
         Ok(factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Apply),
+            factory.create_builtin_term(Apply),
             allocator.create_pair(target, spread),
         ))
     } else {
@@ -1975,7 +2086,7 @@ fn parse_constructor_expression<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> ParserResult<T>
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let target = parse_expression(&node.callee, scope, env, factory, allocator);
     let args = (&node.args).iter().flat_map(|args| {
@@ -1988,7 +2099,7 @@ where
         })
     });
     Ok(factory.create_application_term(
-        factory.create_builtin_term(JsStdlib::Construct),
+        factory.create_builtin_term(Construct),
         allocator.create_list(once(target).chain(args).collect::<ParserResult<Vec<_>>>()?),
     ))
 }
@@ -2001,9 +2112,7 @@ mod tests {
         builtins::JsBuiltins,
         globals::{builtin_globals, global_error},
         imports::builtin_imports,
-        static_module_loader,
-        stdlib::Stdlib as JsStdlib,
-        Env,
+        static_module_loader, Env,
     };
     use reflex::{
         cache::SubstitutionCache,
@@ -2019,7 +2128,7 @@ mod tests {
         execute, DefaultInterpreterCache, InterpreterOptions,
     };
     use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
-    use reflex_stdlib::Stdlib;
+    use reflex_stdlib::{Collect, CollectList};
 
     use super::*;
 
@@ -2087,12 +2196,12 @@ mod tests {
         allocator: &impl HeapAllocator<T>,
     ) -> T
     where
-        T::Builtin: From<Stdlib> + From<JsStdlib>,
+        T::Builtin: JsParserBuiltin,
     {
         factory.create_application_term(
-            factory.create_builtin_term(Stdlib::ResolveDeep),
+            factory.create_builtin_term(ResolveDeep),
             allocator.create_unit_list(factory.create_application_term(
-                factory.create_builtin_term(JsStdlib::Construct),
+                factory.create_builtin_term(Construct),
                 allocator.create_pair(global_error(factory, allocator), payload),
             )),
         )
@@ -2246,7 +2355,7 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(JsStdlib::ToString),
+                factory.create_builtin_term(ToString),
                 allocator.create_unit_list(
                     factory.create_string_term(allocator.create_static_string("foo"))
                 ),
@@ -2255,11 +2364,11 @@ mod tests {
         assert_eq!(
             parse("`foo${'bar'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_string_term(allocator.create_static_string("foo")),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("bar"))
                         ),
@@ -2270,10 +2379,10 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}bar`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("foo"))
                         ),
@@ -2285,16 +2394,16 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}${'bar'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("foo"))
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("bar"))
                         ),
@@ -2305,11 +2414,11 @@ mod tests {
         assert_eq!(
             parse("`foo${'bar'}baz`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_string_term(allocator.create_static_string("foo")),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("bar"))
                         ),
@@ -2321,17 +2430,17 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}bar${'baz'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("foo"))
                         ),
                     ),
                     factory.create_string_term(allocator.create_static_string("bar")),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("baz"))
                         ),
@@ -2342,22 +2451,22 @@ mod tests {
         assert_eq!(
             parse("`${'foo'}${'bar'}${'baz'}`", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("foo"))
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("bar"))
                         ),
                     ),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("baz"))
                         ),
@@ -2373,25 +2482,25 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Concat),
+                factory.create_builtin_term(Concat),
                 allocator.create_list([
                     factory.create_string_term(allocator.create_static_string("foo")),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("one"))
                         ),
                     ),
                     factory.create_string_term(allocator.create_static_string("bar")),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("two"))
                         ),
                     ),
                     factory.create_string_term(allocator.create_static_string("baz")),
                     factory.create_application_term(
-                        factory.create_builtin_term(JsStdlib::ToString),
+                        factory.create_builtin_term(ToString),
                         allocator.create_unit_list(
                             factory.create_string_term(allocator.create_static_string("three"))
                         ),
@@ -2583,38 +2692,38 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::CollectList),
+            factory.create_builtin_term(CollectList),
             allocator.create_list([
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("first")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("second")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("third")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("fourth")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("fifth")),
@@ -2650,24 +2759,24 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::CollectList),
+            factory.create_builtin_term(CollectList),
             allocator.create_list([
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("first")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("second")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("third")),
@@ -2747,7 +2856,7 @@ mod tests {
         assert_eq!(
             parse("[...[3, 4, 5], 6]", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Push),
+                factory.create_builtin_term(Push),
                 allocator.create_pair(
                     factory.create_list_term(allocator.create_list([
                         factory.create_float_term(3.0),
@@ -2761,7 +2870,7 @@ mod tests {
         assert_eq!(
             parse("[3, ...[4, 5, 6]]", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::PushFront),
+                factory.create_builtin_term(PushFront),
                 allocator.create_pair(
                     factory.create_list_term(allocator.create_list([
                         factory.create_float_term(4.0),
@@ -2780,7 +2889,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Collect),
+            factory.create_builtin_term(Collect),
             allocator.create_unit_list(expression),
         );
         let result = evaluate(
@@ -2813,7 +2922,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Collect),
+            factory.create_builtin_term(Collect),
             allocator.create_unit_list(expression),
         );
         let result = evaluate(
@@ -2849,7 +2958,7 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(JsStdlib::Dispatch),
+                factory.create_builtin_term(Dispatch),
                 allocator.create_list([
                     factory.create_list_term(allocator.create_list([
                         factory.create_float_term(3.0),
@@ -2859,7 +2968,7 @@ mod tests {
                     factory.create_string_term(allocator.create_static_string("map")),
                     factory.create_application_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_list_term(allocator.create_list([
                                     factory.create_float_term(3.0),
@@ -2872,7 +2981,7 @@ mod tests {
                         allocator.create_unit_list(factory.create_lambda_term(
                             1,
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Multiply),
+                                factory.create_builtin_term(Multiply),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_float_term(2.0),
@@ -2883,7 +2992,7 @@ mod tests {
                     factory.create_lambda_term(
                         1,
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Multiply),
+                            factory.create_builtin_term(Multiply),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_float_term(2.0),
@@ -3001,7 +3110,7 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         factory.create_record_term(
                             allocator.create_struct_prototype(allocator.create_list([
@@ -3043,7 +3152,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3051,7 +3160,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3084,7 +3193,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3092,7 +3201,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3125,7 +3234,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3133,7 +3242,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3166,7 +3275,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3174,7 +3283,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3209,7 +3318,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_string_term(
@@ -3219,7 +3328,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_string_term(
@@ -3259,7 +3368,7 @@ mod tests {
                         factory.create_variable_term(1),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_string_term(
@@ -3269,7 +3378,7 @@ mod tests {
                             ),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Get),
+                                    factory.create_builtin_term(Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(1),
                                         factory.create_string_term(
@@ -3322,7 +3431,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_string(
@@ -3332,7 +3441,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_string(
@@ -3344,7 +3453,7 @@ mod tests {
                             factory.create_variable_term(1),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Get),
+                                    factory.create_builtin_term(Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(allocator.create_static_string("a")),
@@ -3352,7 +3461,7 @@ mod tests {
                                 ),
                                 factory.create_let_term(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Get),
+                                        factory.create_builtin_term(Get),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_string_term(allocator.create_static_string("b")),
@@ -3362,7 +3471,7 @@ mod tests {
                                         factory.create_variable_term(3),
                                         factory.create_let_term(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Stdlib::Get),
+                                                factory.create_builtin_term(Get),
                                                 allocator.create_pair(
                                                     factory.create_variable_term(0),
                                                     factory.create_string_term(allocator.create_static_string("c")),
@@ -3370,7 +3479,7 @@ mod tests {
                                             ),
                                             factory.create_let_term(
                                                 factory.create_application_term(
-                                                    factory.create_builtin_term(Stdlib::Get),
+                                                    factory.create_builtin_term(Get),
                                                     allocator.create_pair(
                                                         factory.create_variable_term(1),
                                                         factory.create_string_term(allocator.create_static_string("d")),
@@ -3396,7 +3505,7 @@ mod tests {
                         factory.create_variable_term(0),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_string_term(allocator.create_static_string("foo")),
@@ -3404,7 +3513,7 @@ mod tests {
                             ),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Get),
+                                    factory.create_builtin_term(Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(1),
                                         factory.create_string_term(allocator.create_static_string("bar")),
@@ -3442,7 +3551,7 @@ mod tests {
             parse("const [foo] = [3, 4, 5]; foo;", &env, &factory, &allocator),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         factory.create_list_term(allocator.create_list([
                             factory.create_float_term(3.0),
@@ -3470,7 +3579,7 @@ mod tests {
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(0),
@@ -3478,7 +3587,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_int_term(1),
@@ -3498,7 +3607,7 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Get),
+                    factory.create_builtin_term(Get),
                     allocator.create_pair(
                         factory.create_list_term(allocator.create_list([
                             factory.create_float_term(3.0),
@@ -3526,7 +3635,7 @@ mod tests {
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(1),
@@ -3534,7 +3643,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_int_term(2),
@@ -3556,7 +3665,7 @@ mod tests {
                 factory.create_boolean_term(true),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_list_term(allocator.create_list([
                                 factory.create_float_term(3.0),
@@ -3587,7 +3696,7 @@ mod tests {
                     ])),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
@@ -3595,7 +3704,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(1),
@@ -3731,21 +3840,21 @@ mod tests {
         assert_eq!(
             parse("!true", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Not),
+                factory.create_builtin_term(Not),
                 allocator.create_unit_list(factory.create_boolean_term(true)),
             )),
         );
         assert_eq!(
             parse("!false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Not),
+                factory.create_builtin_term(Not),
                 allocator.create_unit_list(factory.create_boolean_term(false)),
             )),
         );
         assert_eq!(
             parse("!3", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Not),
+                factory.create_builtin_term(Not),
                 allocator.create_unit_list(factory.create_float_term(3.0)),
             )),
         );
@@ -3759,7 +3868,7 @@ mod tests {
         assert_eq!(
             parse("3 + 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Add),
+                factory.create_builtin_term(Add),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3769,7 +3878,7 @@ mod tests {
         assert_eq!(
             parse("3 - 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Subtract),
+                factory.create_builtin_term(Subtract),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3779,7 +3888,7 @@ mod tests {
         assert_eq!(
             parse("3 * 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Multiply),
+                factory.create_builtin_term(Multiply),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3789,7 +3898,7 @@ mod tests {
         assert_eq!(
             parse("3 / 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Divide),
+                factory.create_builtin_term(Divide),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3799,7 +3908,7 @@ mod tests {
         assert_eq!(
             parse("3 % 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Remainder),
+                factory.create_builtin_term(Remainder),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3809,7 +3918,7 @@ mod tests {
         assert_eq!(
             parse("3 ** 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Pow),
+                factory.create_builtin_term(Pow),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3819,7 +3928,7 @@ mod tests {
         assert_eq!(
             parse("3 < 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Lt),
+                factory.create_builtin_term(Lt),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3829,7 +3938,7 @@ mod tests {
         assert_eq!(
             parse("3 <= 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Lte),
+                factory.create_builtin_term(Lte),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3839,7 +3948,7 @@ mod tests {
         assert_eq!(
             parse("3 > 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Gt),
+                factory.create_builtin_term(Gt),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3849,7 +3958,7 @@ mod tests {
         assert_eq!(
             parse("3 >= 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Gte),
+                factory.create_builtin_term(Gte),
                 allocator.create_pair(
                     factory.create_float_term(3.0),
                     factory.create_float_term(4.0),
@@ -3866,7 +3975,7 @@ mod tests {
         assert_eq!(
             parse("true === false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Eq),
+                factory.create_builtin_term(Eq),
                 allocator.create_pair(
                     factory.create_boolean_term(true),
                     factory.create_boolean_term(false),
@@ -3876,9 +3985,9 @@ mod tests {
         assert_eq!(
             parse("true !== false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Not),
+                factory.create_builtin_term(Not),
                 allocator.create_unit_list(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Eq),
+                    factory.create_builtin_term(Eq),
                     allocator.create_pair(
                         factory.create_boolean_term(true),
                         factory.create_boolean_term(false),
@@ -3896,7 +4005,7 @@ mod tests {
         assert_eq!(
             parse("true && false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::And),
+                factory.create_builtin_term(And),
                 allocator.create_pair(
                     factory.create_boolean_term(true),
                     factory.create_boolean_term(false),
@@ -3906,7 +4015,7 @@ mod tests {
         assert_eq!(
             parse("true || false", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Or),
+                factory.create_builtin_term(Or),
                 allocator.create_pair(
                     factory.create_boolean_term(true),
                     factory.create_boolean_term(false),
@@ -3923,7 +4032,7 @@ mod tests {
         assert_eq!(
             parse("true ? 3 : 4", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::If),
+                factory.create_builtin_term(If),
                 allocator.create_triple(
                     factory.create_boolean_term(true),
                     factory.create_float_term(3.0),
@@ -3949,7 +4058,7 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::If),
+                        factory.create_builtin_term(If),
                         allocator.create_triple(
                             factory.create_boolean_term(true),
                             factory.create_float_term(3.0),
@@ -3966,11 +4075,11 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::If),
+                        factory.create_builtin_term(If),
                         allocator.create_triple(
                             factory.create_boolean_term(true),
                             factory.create_application_term(
-                                factory.create_builtin_term(JsStdlib::Throw),
+                                factory.create_builtin_term(Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
                                         factory.create_string_term(allocator.create_static_string("foo")),
@@ -3980,7 +4089,7 @@ mod tests {
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(JsStdlib::Throw),
+                                factory.create_builtin_term(Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
                                         factory.create_string_term(allocator.create_static_string("bar")),
@@ -4001,7 +4110,7 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::If),
+                        factory.create_builtin_term(If),
                         allocator.create_triple(
                             factory.create_boolean_term(true),
                             factory.create_let_term(
@@ -4009,7 +4118,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_float_term(4.0),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_variable_term(0),
@@ -4022,7 +4131,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_float_term(3.0),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_variable_term(0),
@@ -4042,7 +4151,7 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::If),
+                        factory.create_builtin_term(If),
                         allocator.create_triple(
                             factory.create_boolean_term(true),
                             factory.create_let_term(
@@ -4050,7 +4159,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_float_term(4.0),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_variable_term(0),
@@ -4063,7 +4172,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_float_term(3.0),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_variable_term(0),
@@ -4083,11 +4192,11 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::If),
+                        factory.create_builtin_term(If),
                         allocator.create_triple(
                             factory.create_boolean_term(true),
                             factory.create_application_term(
-                                factory.create_builtin_term(JsStdlib::Throw),
+                                factory.create_builtin_term(Throw),
                                 allocator.create_unit_list(
                                     create_error_instance(
                                         factory.create_string_term(allocator.create_static_string("foo")),
@@ -4101,7 +4210,7 @@ mod tests {
                                 factory.create_let_term(
                                     factory.create_float_term(4.0),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_variable_term(0),
@@ -4125,7 +4234,7 @@ mod tests {
         assert_eq!(
             parse("throw new Error(\"foo\")", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(JsStdlib::Throw),
+                factory.create_builtin_term(Throw),
                 allocator.create_unit_list(create_error_instance(
                     factory.create_string_term(allocator.create_static_string("foo")),
                     &factory,
@@ -4136,14 +4245,14 @@ mod tests {
         assert_eq!(
             parse("throw new Error(`foo${'bar'}`)", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(JsStdlib::Throw),
+                factory.create_builtin_term(Throw),
                 allocator.create_unit_list(create_error_instance(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Concat),
+                        factory.create_builtin_term(Concat),
                         allocator.create_pair(
                             factory.create_string_term(allocator.create_static_string("foo")),
                             factory.create_application_term(
-                                factory.create_builtin_term(JsStdlib::ToString),
+                                factory.create_builtin_term(ToString),
                                 allocator.create_unit_list(
                                     factory
                                         .create_string_term(allocator.create_static_string("bar"))
@@ -4524,7 +4633,7 @@ mod tests {
         assert_eq!(
             parse("'foo' in { bar: true }", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Contains),
+                factory.create_builtin_term(Contains),
                 allocator.create_pair(
                     create_record(
                         once((
@@ -4562,7 +4671,7 @@ mod tests {
             Ok(factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Add),
+                    factory.create_builtin_term(Add),
                     allocator.create_pair(
                         factory.create_variable_term(0),
                         factory.create_variable_term(0),
@@ -4575,7 +4684,7 @@ mod tests {
             Ok(factory.create_lambda_term(
                 3,
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Add),
+                    factory.create_builtin_term(Add),
                     allocator.create_pair(
                         factory.create_variable_term(2),
                         factory.create_variable_term(1),
@@ -4597,7 +4706,7 @@ mod tests {
                     factory.create_lambda_term(
                         1,
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_variable_term(2),
                                 factory.create_variable_term(1),
@@ -4624,7 +4733,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("foo")),
@@ -4642,7 +4751,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -4650,7 +4759,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory
@@ -4658,7 +4767,7 @@ mod tests {
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_variable_term(0),
@@ -4682,7 +4791,7 @@ mod tests {
                     factory.create_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -4690,7 +4799,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory
@@ -4698,13 +4807,13 @@ mod tests {
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Stdlib::Add),
+                                                factory.create_builtin_term(Add),
                                                 allocator.create_pair(
                                                     factory.create_variable_term(6),
                                                     factory.create_variable_term(1),
@@ -4738,7 +4847,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(0),
@@ -4756,7 +4865,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
@@ -4764,14 +4873,14 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(1),
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_variable_term(0),
@@ -4788,7 +4897,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Get),
+                        factory.create_builtin_term(Get),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(2),
@@ -4806,7 +4915,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(1),
@@ -4814,7 +4923,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(2),
@@ -4839,7 +4948,7 @@ mod tests {
                     factory.create_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
@@ -4847,20 +4956,20 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Get),
+                                factory.create_builtin_term(Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(1),
                                 ),
                             ),
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Stdlib::Add),
+                                                factory.create_builtin_term(Add),
                                                 allocator.create_pair(
                                                     factory.create_variable_term(6),
                                                     factory.create_variable_term(1),
@@ -4909,7 +5018,7 @@ mod tests {
                 factory.create_lambda_term(
                     3,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Add),
+                        factory.create_builtin_term(Add),
                         allocator.create_pair(
                             factory.create_variable_term(2),
                             factory.create_variable_term(1),
@@ -4940,7 +5049,7 @@ mod tests {
                                 factory.create_lambda_term(
                                     1,
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(2),
                                             factory.create_variable_term(1),
@@ -4966,12 +5075,12 @@ mod tests {
         assert_eq!(
             parse("((x, y) => x + y)(...[3, 4])", &env, &factory, &allocator),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Apply),
+                factory.create_builtin_term(Apply),
                 allocator.create_pair(
                     factory.create_lambda_term(
                         2,
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_variable_term(0)
@@ -4993,13 +5102,13 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Apply),
+                factory.create_builtin_term(Apply),
                 allocator.create_pair(
                     factory.create_partial_application_term(
                         factory.create_lambda_term(
                             2,
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_variable_term(0)

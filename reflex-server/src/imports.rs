@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::stdlib::Stdlib as ServerStdlib;
+use crate::stdlib::GraphQlResolver;
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
 
 pub(crate) mod graphql;
@@ -13,7 +13,7 @@ pub fn server_imports<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Vec<(&'static str, T)>
 where
-    T::Builtin: From<ServerStdlib>,
+    T::Builtin: From<GraphQlResolver>,
 {
     vec![("reflex::graphql", import_graphql(factory, allocator))]
 }

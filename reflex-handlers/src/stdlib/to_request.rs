@@ -6,9 +6,9 @@ use reflex::core::{
     ExpressionFactory, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct ToRequest {}
+pub struct ToRequest;
 impl ToRequest {
-    pub(crate) const UUID: Uuid = uuid!("29d89369-0b7b-41df-aa14-47ea708a8fa6");
+    pub const UUID: Uuid = uuid!("29d89369-0b7b-41df-aa14-47ea708a8fa6");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

@@ -76,3 +76,9 @@ impl std::fmt::Display for Stdlib {
         write!(f, "<server:{:?}>", self)
     }
 }
+
+impl From<GraphQlResolver> for Stdlib {
+    fn from(_value: GraphQlResolver) -> Self {
+        Self::GraphQlResolver
+    }
+}

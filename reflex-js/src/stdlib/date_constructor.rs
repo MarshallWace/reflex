@@ -7,11 +7,10 @@ use reflex::core::{
     ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, RefType,
     StringTermType, StringValue, Uid, Uuid,
 };
-use reflex_stdlib::Stdlib;
 
-pub struct DateConstructor {}
+pub struct DateConstructor;
 impl DateConstructor {
-    pub(crate) const UUID: Uuid = uuid!("c63f7c30-b28c-42dd-aabc-3a228cca40e2");
+    pub const UUID: Uuid = uuid!("c63f7c30-b28c-42dd-aabc-3a228cca40e2");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -26,10 +25,7 @@ impl Uid for DateConstructor {
         Self::UUID
     }
 }
-impl<T: Expression> Applicable<T> for DateConstructor
-where
-    T::Builtin: From<Stdlib>,
-{
+impl<T: Expression> Applicable<T> for DateConstructor {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
     }

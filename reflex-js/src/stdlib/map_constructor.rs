@@ -7,11 +7,11 @@ use reflex::core::{
     ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
     Uid, Uuid,
 };
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::{CollectList, ConstructHashMap, Get};
 
-pub struct MapConstructor {}
+pub struct MapConstructor;
 impl MapConstructor {
-    pub(crate) const UUID: Uuid = uuid!("81fae6f8-9557-4784-998a-13ebfbf289ef");
+    pub const UUID: Uuid = uuid!("81fae6f8-9557-4784-998a-13ebfbf289ef");
     const ARITY: FunctionArity<0, 1> = FunctionArity {
         required: [],
         optional: [ArgType::Strict],
@@ -28,7 +28,7 @@ impl Uid for MapConstructor {
 }
 impl<T: Expression> Applicable<T> for MapConstructor
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<ConstructHashMap> + From<CollectList> + From<Get>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -74,11 +74,11 @@ where
                     let has_dynamic_values = values.iter().any(|item| !item.is_static());
                     if has_dynamic_keys || has_dynamic_values {
                         Ok(factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::ConstructHashMap),
+                            factory.create_builtin_term(ConstructHashMap),
                             allocator.create_pair(
                                 if has_dynamic_keys {
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::CollectList),
+                                        factory.create_builtin_term(CollectList),
                                         allocator.create_list(keys),
                                     )
                                 } else {
@@ -86,7 +86,7 @@ where
                                 },
                                 if has_dynamic_values {
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::CollectList),
+                                        factory.create_builtin_term(CollectList),
                                         allocator.create_list(values),
                                     )
                                 } else {
@@ -122,7 +122,7 @@ fn get_indexed_field<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<Get>,
 {
     if let Some(target) = factory.match_list_term(target) {
         target
@@ -135,7 +135,7 @@ where
         None
     } else {
         Some(factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Get),
+            factory.create_builtin_term(Get),
             allocator.create_pair(target.clone(), factory.create_int_term(index as i32)),
         ))
     }

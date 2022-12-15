@@ -12,9 +12,9 @@ use super::format_value;
 
 const UNKNOWN_ERROR_MESSAGE: &'static str = "Unknown error";
 
-pub struct FormatErrorMessage {}
+pub struct FormatErrorMessage;
 impl FormatErrorMessage {
-    pub(crate) const UUID: Uuid = uuid!("3f88d05d-47f1-4b49-b16e-b8dc2f4ee61c");
+    pub const UUID: Uuid = uuid!("3f88d05d-47f1-4b49-b16e-b8dc2f4ee61c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

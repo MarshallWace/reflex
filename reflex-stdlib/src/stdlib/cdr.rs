@@ -8,9 +8,9 @@ use reflex::core::{
 
 use super::cons::match_cons_cell;
 
-pub struct Cdr {}
+pub struct Cdr;
 impl Cdr {
-    pub(crate) const UUID: Uuid = uuid!("32207846-e4f4-40ec-9aa3-0c47c6c8b890");
+    pub const UUID: Uuid = uuid!("32207846-e4f4-40ec-9aa3-0c47c6c8b890");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

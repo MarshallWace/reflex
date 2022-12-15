@@ -6,9 +6,9 @@ use reflex::core::{
     FloatTermType, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct Floor {}
+pub struct Floor;
 impl Floor {
-    pub(crate) const UUID: Uuid = uuid!("4fc9980d-02de-49b1-bbb6-2eb4f8aecf6f");
+    pub const UUID: Uuid = uuid!("4fc9980d-02de-49b1-bbb6-2eb4f8aecf6f");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

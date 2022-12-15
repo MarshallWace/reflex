@@ -11,10 +11,13 @@ use std::{
     rc::Rc,
 };
 
-use crate::{globals::builtin_globals, parse_module, stdlib::Stdlib as JsStdlib, Env};
+use crate::{
+    globals::{builtin_globals, JsGlobalsBuiltin},
+    parse_module,
+    parser::JsParserBuiltin,
+    Env,
+};
 use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Rewritable};
-use reflex_json::stdlib::Stdlib as JsonStdlib;
-use reflex_stdlib::Stdlib;
 
 pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     env: Env<T>,
@@ -23,7 +26,7 @@ pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
 where
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -110,7 +113,7 @@ pub fn create_js_loader<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
 where
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -146,7 +149,7 @@ pub fn create_js_env<T: Expression + Rewritable<T>>(
     allocator: &impl HeapAllocator<T>,
 ) -> Env<T>
 where
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
+    T::Builtin: JsGlobalsBuiltin,
 {
     Env::new().with_globals(builtin_globals(factory, allocator))
 }

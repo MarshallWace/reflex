@@ -10,7 +10,7 @@ use reflex::core::{
     Rewritable,
 };
 use reflex_interpreter::compiler::{Compile, CompiledProgram, CompilerMode, CompilerOptions};
-use reflex_stdlib::Stdlib;
+use reflex_lisp::LispParserBuiltin;
 
 use crate::{compile_graph_root, SyntaxParser};
 
@@ -19,7 +19,7 @@ pub fn create_sexpr_parser<T: Expression + Rewritable<T> + Reducible<T>>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl SyntaxParser<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: LispParserBuiltin,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -38,7 +38,7 @@ pub fn compile_sexpr_entry_point<
     allocator: &impl HeapAllocator<T>,
 ) -> Result<(CompiledProgram, InstructionPointer)>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: LispParserBuiltin,
 {
     let input = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to load Lisp graph definition: {}", path.display(),))?;

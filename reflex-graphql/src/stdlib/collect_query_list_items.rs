@@ -7,9 +7,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct CollectQueryListItems {}
+pub struct CollectQueryListItems;
 impl CollectQueryListItems {
-    pub(crate) const UUID: Uuid = uuid!("40034e1a-08d7-43fd-972a-6cac977aae4e");
+    pub const UUID: Uuid = uuid!("40034e1a-08d7-43fd-972a-6cac977aae4e");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],

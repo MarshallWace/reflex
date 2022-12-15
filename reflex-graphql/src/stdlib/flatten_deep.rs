@@ -6,13 +6,11 @@ use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::CollectList;
 
-use crate::stdlib::Stdlib as GraphQlStdlib;
-
-pub struct FlattenDeep {}
+pub struct FlattenDeep;
 impl FlattenDeep {
-    pub(crate) const UUID: Uuid = uuid!("52299fbb-a84b-488e-81ef-98c439869f74");
+    pub const UUID: Uuid = uuid!("52299fbb-a84b-488e-81ef-98c439869f74");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -29,7 +27,7 @@ impl Uid for FlattenDeep {
 }
 impl<T: Expression> Applicable<T> for FlattenDeep
 where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: From<CollectList> + From<FlattenDeep>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -50,7 +48,7 @@ where
             Ok(target)
         } else if let Some(list) = factory.match_list_term(&target) {
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Stdlib::CollectList),
+                factory.create_builtin_term(CollectList),
                 allocator.create_list(
                     list.items()
                         .as_deref()
@@ -58,7 +56,7 @@ where
                         .map(|item| item.as_deref())
                         .map(|item| {
                             factory.create_application_term(
-                                factory.create_builtin_term(GraphQlStdlib::FlattenDeep),
+                                factory.create_builtin_term(FlattenDeep),
                                 allocator.create_unit_list(item.clone()),
                             )
                         }),

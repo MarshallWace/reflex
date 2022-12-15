@@ -11,10 +11,11 @@ use reflex::core::{
     HeapAllocator, ListTermType, RefType, SignalType, StructPrototypeType, Uid, Uuid,
 };
 
-use crate::Stdlib;
-pub struct Collect {}
+use crate::Get;
+
+pub struct Collect;
 impl Collect {
-    pub(crate) const UUID: Uuid = uuid!("c3365e24-8bbc-461c-ad86-71ca519ec20e");
+    pub const UUID: Uuid = uuid!("c3365e24-8bbc-461c-ad86-71ca519ec20e");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -31,7 +32,7 @@ impl Uid for Collect {
 }
 impl<T: Expression> Applicable<T> for Collect
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<CollectList> + From<CollectHashMap> + From<CollectHashSet>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -58,7 +59,7 @@ where
                 target.clone()
             } else {
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectList),
+                    factory.create_builtin_term(CollectList),
                     allocator.clone_list(collection.items()),
                 )
             })
@@ -71,7 +72,7 @@ where
                 target.clone()
             } else {
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectHashSet),
+                    factory.create_builtin_term(CollectHashSet),
                     allocator.create_list(collection.values().map(|item| item.as_deref()).cloned()),
                 )
             })
@@ -84,7 +85,7 @@ where
                 target.clone()
             } else {
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectHashMap),
+                    factory.create_builtin_term(CollectHashMap),
                     allocator.create_list(get_hashmap_entries(collection, factory, allocator)),
                 )
             })
@@ -97,9 +98,9 @@ where
     }
 }
 
-pub struct CollectRecord {}
+pub struct CollectRecord;
 impl CollectRecord {
-    pub(crate) const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
+    pub const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -147,9 +148,9 @@ impl<T: Expression> Applicable<T> for CollectRecord {
     }
 }
 
-pub struct CollectList {}
+pub struct CollectList;
 impl CollectList {
-    pub(crate) const UUID: Uuid = uuid!("c99b0901-f996-4887-9403-c2f123b779b0");
+    pub const UUID: Uuid = uuid!("c99b0901-f996-4887-9403-c2f123b779b0");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -182,9 +183,9 @@ impl<T: Expression> Applicable<T> for CollectList {
     }
 }
 
-pub struct CollectHashSet {}
+pub struct CollectHashSet;
 impl CollectHashSet {
-    pub(crate) const UUID: Uuid = uuid!("941b9298-62d3-47e1-a909-d4252df2c935");
+    pub const UUID: Uuid = uuid!("941b9298-62d3-47e1-a909-d4252df2c935");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -222,9 +223,9 @@ impl<T: Expression> Applicable<T> for CollectHashSet {
     }
 }
 
-pub struct CollectHashMap {}
+pub struct CollectHashMap;
 impl CollectHashMap {
-    pub(crate) const UUID: Uuid = uuid!("4a9b9c32-8597-4a23-875e-d320f187cf7a");
+    pub const UUID: Uuid = uuid!("4a9b9c32-8597-4a23-875e-d320f187cf7a");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -241,7 +242,7 @@ impl Uid for CollectHashMap {
 }
 impl<T: Expression> Applicable<T> for CollectHashMap
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<Get>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -273,11 +274,11 @@ where
                     Ok(Some((key, value))) => (key, value),
                     Ok(None) => (
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(arg.clone(), factory.create_int_term(0)),
                         ),
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Get),
+                            factory.create_builtin_term(Get),
                             allocator.create_pair(arg, factory.create_int_term(1)),
                         ),
                     ),

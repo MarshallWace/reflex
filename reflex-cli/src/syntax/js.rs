@@ -13,15 +13,15 @@ use reflex::{
     env::inject_env_vars,
 };
 use reflex_handlers::{
-    imports::handler_imports, loader::graphql_loader, stdlib::Stdlib as HandlersStdlib,
+    imports::{handler_imports, HandlerImportsBuiltin},
+    loader::graphql_loader,
 };
 use reflex_interpreter::compiler::{Compile, CompiledProgram, CompilerMode, CompilerOptions};
 use reflex_js::{
-    builtin_imports, compose_module_loaders, create_js_env, create_module_loader, parse_module,
-    static_module_loader, stdlib::Stdlib as JsStdlib,
+    builtin_imports, compose_module_loaders, create_js_env, create_module_loader,
+    globals::JsGlobalsBuiltin, imports::JsImportsBuiltin, parse_module, static_module_loader,
+    JsParserBuiltin,
 };
-use reflex_json::stdlib::Stdlib as JsonStdlib;
-use reflex_stdlib::Stdlib;
 
 use crate::{compile_graph_root, SyntaxParser};
 
@@ -35,7 +35,7 @@ pub fn default_js_loaders<'a, T: Expression + 'static>(
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<HandlersStdlib>,
+    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + JsImportsBuiltin + HandlerImportsBuiltin,
 {
     compose_module_loaders(
         static_module_loader(
@@ -53,7 +53,7 @@ pub fn create_js_script_parser<T: Expression + Rewritable<T> + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl SyntaxParser<T>
 where
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin,
 {
     let env = create_js_env(factory, allocator);
     let factory = factory.clone();
@@ -68,7 +68,7 @@ pub fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
 ) -> impl SyntaxParser<T>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<HandlersStdlib>,
+    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + JsImportsBuiltin + HandlerImportsBuiltin,
 {
     let env = create_js_env(factory, allocator);
     let loader = create_module_loader(
@@ -93,7 +93,7 @@ pub fn compile_js_entry_point<T: Expression + Rewritable<T> + Reducible<T> + 'st
 ) -> Result<(CompiledProgram, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib>,
+    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
     let input = std::fs::read_to_string(path).with_context(|| {

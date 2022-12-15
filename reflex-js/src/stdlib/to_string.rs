@@ -8,9 +8,9 @@ use reflex::core::{
     StringTermType, StringValue, SymbolTermType, Uid, Uuid,
 };
 
-pub struct ToString {}
+pub struct ToString;
 impl ToString {
-    pub(crate) const UUID: Uuid = uuid!("7f651286-8d00-4854-a956-0a54dfe662d0");
+    pub const UUID: Uuid = uuid!("7f651286-8d00-4854-a956-0a54dfe662d0");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

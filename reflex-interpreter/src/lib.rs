@@ -1654,7 +1654,7 @@ mod tests {
     use reflex::core::{DependencyList, SignalType, StateCache, Uid};
     use reflex_lang::{allocator::DefaultAllocator, term::*, SharedTermFactory};
     use reflex_lisp::parse;
-    use reflex_stdlib::Stdlib;
+    use reflex_stdlib::{Add, And, Append, If, Stdlib};
 
     use crate::compiler::{hash_compiled_program, Compiler, CompilerMode, CompilerOptions};
 
@@ -1946,7 +1946,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Add),
+            factory.create_builtin_term(Add),
             allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -1977,7 +1977,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::If),
+            factory.create_builtin_term(If),
             allocator.create_triple(
                 factory.create_boolean_term(true),
                 factory.create_int_term(3),
@@ -2010,7 +2010,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::If),
+            factory.create_builtin_term(If),
             allocator.create_triple(
                 factory.create_boolean_term(false),
                 factory.create_int_term(3),
@@ -2045,10 +2045,10 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::If),
+            factory.create_builtin_term(If),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::And),
+                    factory.create_builtin_term(And),
                     allocator.create_pair(
                         factory.create_boolean_term(true),
                         factory.create_boolean_term(true),
@@ -2086,10 +2086,10 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::If),
+            factory.create_builtin_term(If),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::And),
+                    factory.create_builtin_term(And),
                     allocator.create_pair(
                         factory.create_boolean_term(true),
                         factory.create_boolean_term(false),
@@ -2130,10 +2130,10 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Add),
+            factory.create_builtin_term(Add),
             allocator.create_pair(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Add),
+                    factory.create_builtin_term(Add),
                     allocator.create_pair(factory.create_int_term(3), factory.create_int_term(4)),
                 ),
                 factory.create_int_term(5),
@@ -2167,10 +2167,10 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::If),
+            factory.create_builtin_term(If),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::And),
+                    factory.create_builtin_term(And),
                     allocator.create_pair(
                         factory.create_boolean_term(true),
                         factory.create_boolean_term(false),
@@ -2211,7 +2211,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Append),
+            factory.create_builtin_term(Append),
             allocator.create_triple(
                 factory.create_list_term(allocator.create_list(vec![
                     factory.create_int_term(1),
@@ -2271,7 +2271,7 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Append),
+            factory.create_builtin_term(Append),
             allocator.create_triple(
                 factory.create_application_term(
                     factory.create_lambda_term(

@@ -14,7 +14,7 @@ use reflex::core::{Applicable, InstructionPointer, Reducible, Rewritable};
 use reflex_dispatcher::{
     Action, Actor, Handler, ProcessId, SchedulerTransition, SerializableAction, TaskFactory,
 };
-use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
+use reflex_graphql::{GraphQlOperation, GraphQlParserBuiltin, GraphQlSchema};
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
@@ -27,7 +27,6 @@ use reflex_runtime::{
 use reflex_scheduler::tokio::{
     TokioInbox, TokioSchedulerInstrumentation, TokioSchedulerLogger, TokioThreadPoolFactory,
 };
-use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -124,7 +123,7 @@ where
     T::SignalList<T>: Send,
     T::StructPrototype<T>: Send,
     T::ExpressionList<T>: Send,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: AsyncExpressionFactory<T> + Default,
     TAllocator: AsyncHeapAllocator<T> + Default,
     TActorFactory: for<'a> FnOnce(

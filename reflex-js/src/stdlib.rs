@@ -3,9 +3,14 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid, Uuid,
+    Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid,
+    Uuid,
 };
-use reflex_stdlib::Stdlib as BuiltinStdlib;
+use reflex_stdlib::{
+    CollectHashSet, CollectList, ConstructHashMap, ConstructRecord, Contains, Entries, Filter,
+    Flatten, Get, Insert, Keys, Map, Push, PushFront, Reduce, Replace, ResolveDeep, ResolveShallow,
+    Sequence, Slice, Split, Values,
+};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use strum::IntoEnumIterator;
@@ -142,32 +147,55 @@ impl Stdlib {
     }
     pub fn should_parallelize<T: Expression>(&self, args: &[T]) -> bool
     where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
+        T::Builtin: Builtin
+            + From<CollectHashSet>
+            + From<CollectList>
+            + From<ConstructHashMap>
+            + From<ConstructRecord>
+            + From<Contains>
+            + From<Entries>
+            + From<Filter>
+            + From<Flatten>
+            + From<Get>
+            + From<Insert>
+            + From<Keys>
+            + From<LogArgs>
+            + From<Map>
+            + From<Push>
+            + From<PushFront>
+            + From<Reduce>
+            + From<Replace>
+            + From<ResolveDeep>
+            + From<ResolveShallow>
+            + From<Sequence>
+            + From<Slice>
+            + From<Split>
+            + From<Values>,
     {
         match self {
-            Self::Construct => Applicable::<T>::should_parallelize(&Construct {}, args),
-            Self::DateConstructor => Applicable::<T>::should_parallelize(&DateConstructor {}, args),
-            Self::Dispatch => Applicable::<T>::should_parallelize(&Dispatch {}, args),
+            Self::Construct => Applicable::<T>::should_parallelize(&Construct, args),
+            Self::DateConstructor => Applicable::<T>::should_parallelize(&DateConstructor, args),
+            Self::Dispatch => Applicable::<T>::should_parallelize(&Dispatch, args),
             Self::EncodeUriComponent => {
-                Applicable::<T>::should_parallelize(&EncodeUriComponent {}, args)
+                Applicable::<T>::should_parallelize(&EncodeUriComponent, args)
             }
             Self::FormatErrorMessage => {
-                Applicable::<T>::should_parallelize(&FormatErrorMessage {}, args)
+                Applicable::<T>::should_parallelize(&FormatErrorMessage, args)
             }
-            Self::FromEntries => Applicable::<T>::should_parallelize(&FromEntries {}, args),
-            Self::Hash => Applicable::<T>::should_parallelize(&Hash {}, args),
-            Self::IsFinite => Applicable::<T>::should_parallelize(&IsFinite {}, args),
-            Self::Log => Applicable::<T>::should_parallelize(&Log {}, args),
-            Self::LogArgs => Applicable::<T>::should_parallelize(&LogArgs {}, args),
-            Self::MapConstructor => Applicable::<T>::should_parallelize(&MapConstructor {}, args),
-            Self::ParseFloat => Applicable::<T>::should_parallelize(&ParseFloat {}, args),
-            Self::ParseInt => Applicable::<T>::should_parallelize(&ParseInt {}, args),
-            Self::SetConstructor => Applicable::<T>::should_parallelize(&SetConstructor {}, args),
+            Self::FromEntries => Applicable::<T>::should_parallelize(&FromEntries, args),
+            Self::Hash => Applicable::<T>::should_parallelize(&Hash, args),
+            Self::IsFinite => Applicable::<T>::should_parallelize(&IsFinite, args),
+            Self::Log => Applicable::<T>::should_parallelize(&Log, args),
+            Self::LogArgs => Applicable::<T>::should_parallelize(&LogArgs, args),
+            Self::MapConstructor => Applicable::<T>::should_parallelize(&MapConstructor, args),
+            Self::ParseFloat => Applicable::<T>::should_parallelize(&ParseFloat, args),
+            Self::ParseInt => Applicable::<T>::should_parallelize(&ParseInt, args),
+            Self::SetConstructor => Applicable::<T>::should_parallelize(&SetConstructor, args),
             Self::StructTypeFactory => {
-                Applicable::<T>::should_parallelize(&StructTypeFactory {}, args)
+                Applicable::<T>::should_parallelize(&StructTypeFactory, args)
             }
-            Self::Throw => Applicable::<T>::should_parallelize(&Throw {}, args),
-            Self::ToString => Applicable::<T>::should_parallelize(&ToString {}, args),
+            Self::Throw => Applicable::<T>::should_parallelize(&Throw, args),
+            Self::ToString => Applicable::<T>::should_parallelize(&ToString, args),
         }
     }
     pub fn apply<T: Expression>(
@@ -178,49 +206,156 @@ impl Stdlib {
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String>
     where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
+        T::Builtin: Builtin
+            + From<CollectHashSet>
+            + From<CollectList>
+            + From<ConstructHashMap>
+            + From<ConstructRecord>
+            + From<Contains>
+            + From<Entries>
+            + From<Filter>
+            + From<Flatten>
+            + From<Get>
+            + From<Insert>
+            + From<Keys>
+            + From<LogArgs>
+            + From<Map>
+            + From<Push>
+            + From<PushFront>
+            + From<Reduce>
+            + From<Replace>
+            + From<ResolveDeep>
+            + From<ResolveShallow>
+            + From<Sequence>
+            + From<Slice>
+            + From<Split>
+            + From<Values>,
     {
         match self {
-            Self::Construct => {
-                Applicable::<T>::apply(&Construct {}, args, factory, allocator, cache)
-            }
+            Self::Construct => Applicable::<T>::apply(&Construct, args, factory, allocator, cache),
             Self::DateConstructor => {
-                Applicable::<T>::apply(&DateConstructor {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&DateConstructor, args, factory, allocator, cache)
             }
-            Self::Dispatch => Applicable::<T>::apply(&Dispatch {}, args, factory, allocator, cache),
+            Self::Dispatch => Applicable::<T>::apply(&Dispatch, args, factory, allocator, cache),
             Self::EncodeUriComponent => {
-                Applicable::<T>::apply(&EncodeUriComponent {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&EncodeUriComponent, args, factory, allocator, cache)
             }
             Self::FormatErrorMessage => {
-                Applicable::<T>::apply(&FormatErrorMessage {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&FormatErrorMessage, args, factory, allocator, cache)
             }
             Self::FromEntries => {
-                Applicable::<T>::apply(&FromEntries {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&FromEntries, args, factory, allocator, cache)
             }
-            Self::Hash => Applicable::<T>::apply(&Hash {}, args, factory, allocator, cache),
-            Self::IsFinite => Applicable::<T>::apply(&IsFinite {}, args, factory, allocator, cache),
-            Self::Log => Applicable::<T>::apply(&Log {}, args, factory, allocator, cache),
-            Self::LogArgs => Applicable::<T>::apply(&LogArgs {}, args, factory, allocator, cache),
+            Self::Hash => Applicable::<T>::apply(&Hash, args, factory, allocator, cache),
+            Self::IsFinite => Applicable::<T>::apply(&IsFinite, args, factory, allocator, cache),
+            Self::Log => Applicable::<T>::apply(&Log, args, factory, allocator, cache),
+            Self::LogArgs => Applicable::<T>::apply(&LogArgs, args, factory, allocator, cache),
             Self::MapConstructor => {
-                Applicable::<T>::apply(&MapConstructor {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&MapConstructor, args, factory, allocator, cache)
             }
             Self::ParseFloat => {
-                Applicable::<T>::apply(&ParseFloat {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&ParseFloat, args, factory, allocator, cache)
             }
-            Self::ParseInt => Applicable::<T>::apply(&ParseInt {}, args, factory, allocator, cache),
+            Self::ParseInt => Applicable::<T>::apply(&ParseInt, args, factory, allocator, cache),
             Self::SetConstructor => {
-                Applicable::<T>::apply(&SetConstructor {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&SetConstructor, args, factory, allocator, cache)
             }
             Self::StructTypeFactory => {
-                Applicable::<T>::apply(&StructTypeFactory {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&StructTypeFactory, args, factory, allocator, cache)
             }
-            Self::Throw => Applicable::<T>::apply(&Throw {}, args, factory, allocator, cache),
-            Self::ToString => Applicable::<T>::apply(&ToString {}, args, factory, allocator, cache),
+            Self::Throw => Applicable::<T>::apply(&Throw, args, factory, allocator, cache),
+            Self::ToString => Applicable::<T>::apply(&ToString, args, factory, allocator, cache),
         }
     }
 }
 impl std::fmt::Display for Stdlib {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<js:{:?}>", self)
+    }
+}
+
+impl From<Construct> for Stdlib {
+    fn from(_value: Construct) -> Self {
+        Self::Construct
+    }
+}
+impl From<DateConstructor> for Stdlib {
+    fn from(_value: DateConstructor) -> Self {
+        Self::DateConstructor
+    }
+}
+impl From<Dispatch> for Stdlib {
+    fn from(_value: Dispatch) -> Self {
+        Self::Dispatch
+    }
+}
+impl From<EncodeUriComponent> for Stdlib {
+    fn from(_value: EncodeUriComponent) -> Self {
+        Self::EncodeUriComponent
+    }
+}
+impl From<FormatErrorMessage> for Stdlib {
+    fn from(_value: FormatErrorMessage) -> Self {
+        Self::FormatErrorMessage
+    }
+}
+impl From<FromEntries> for Stdlib {
+    fn from(_value: FromEntries) -> Self {
+        Self::FromEntries
+    }
+}
+impl From<Hash> for Stdlib {
+    fn from(_value: Hash) -> Self {
+        Self::Hash
+    }
+}
+impl From<IsFinite> for Stdlib {
+    fn from(_value: IsFinite) -> Self {
+        Self::IsFinite
+    }
+}
+impl From<Log> for Stdlib {
+    fn from(_value: Log) -> Self {
+        Self::Log
+    }
+}
+impl From<LogArgs> for Stdlib {
+    fn from(_value: LogArgs) -> Self {
+        Self::LogArgs
+    }
+}
+impl From<MapConstructor> for Stdlib {
+    fn from(_value: MapConstructor) -> Self {
+        Self::MapConstructor
+    }
+}
+impl From<ParseFloat> for Stdlib {
+    fn from(_value: ParseFloat) -> Self {
+        Self::ParseFloat
+    }
+}
+impl From<ParseInt> for Stdlib {
+    fn from(_value: ParseInt) -> Self {
+        Self::ParseInt
+    }
+}
+impl From<SetConstructor> for Stdlib {
+    fn from(_value: SetConstructor) -> Self {
+        Self::SetConstructor
+    }
+}
+impl From<StructTypeFactory> for Stdlib {
+    fn from(_value: StructTypeFactory) -> Self {
+        Self::StructTypeFactory
+    }
+}
+impl From<Throw> for Stdlib {
+    fn from(_value: Throw) -> Self {
+        Self::Throw
+    }
+}
+impl From<ToString> for Stdlib {
+    fn from(_value: ToString) -> Self {
+        Self::ToString
     }
 }

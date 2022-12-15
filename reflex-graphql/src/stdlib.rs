@@ -3,9 +3,10 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
-    Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid, Uuid,
+    Applicable, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid,
+    Uuid,
 };
-use reflex_stdlib::Stdlib as BuiltinStdlib;
+use reflex_stdlib::CollectList;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use strum::IntoEnumIterator;
@@ -60,16 +61,20 @@ impl Stdlib {
     }
     pub fn should_parallelize<T: Expression + Applicable<T>>(&self, args: &[T]) -> bool
     where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
+        T::Builtin: Builtin
+            + From<CollectList>
+            + From<CollectQueryListItems>
+            + From<DynamicQueryBranch>
+            + From<FlattenDeep>,
     {
         match self {
             Self::CollectQueryListItems => {
-                Applicable::<T>::should_parallelize(&CollectQueryListItems {}, args)
+                Applicable::<T>::should_parallelize(&CollectQueryListItems, args)
             }
             Self::DynamicQueryBranch => {
-                Applicable::<T>::should_parallelize(&DynamicQueryBranch {}, args)
+                Applicable::<T>::should_parallelize(&DynamicQueryBranch, args)
             }
-            Self::FlattenDeep => Applicable::<T>::should_parallelize(&FlattenDeep {}, args),
+            Self::FlattenDeep => Applicable::<T>::should_parallelize(&FlattenDeep, args),
         }
     }
     pub fn apply<T: Expression + Applicable<T>>(
@@ -80,17 +85,21 @@ impl Stdlib {
         cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String>
     where
-        T::Builtin: From<Self> + From<BuiltinStdlib>,
+        T::Builtin: Builtin
+            + From<CollectList>
+            + From<CollectQueryListItems>
+            + From<DynamicQueryBranch>
+            + From<FlattenDeep>,
     {
         match self {
             Self::CollectQueryListItems => {
-                Applicable::<T>::apply(&CollectQueryListItems {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&CollectQueryListItems, args, factory, allocator, cache)
             }
             Self::DynamicQueryBranch => {
-                Applicable::<T>::apply(&DynamicQueryBranch {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&DynamicQueryBranch, args, factory, allocator, cache)
             }
             Self::FlattenDeep => {
-                Applicable::<T>::apply(&FlattenDeep {}, args, factory, allocator, cache)
+                Applicable::<T>::apply(&FlattenDeep, args, factory, allocator, cache)
             }
         }
     }
@@ -98,5 +107,21 @@ impl Stdlib {
 impl std::fmt::Display for Stdlib {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<graphql:{:?}>", self)
+    }
+}
+
+impl From<CollectQueryListItems> for Stdlib {
+    fn from(_value: CollectQueryListItems) -> Self {
+        Self::CollectQueryListItems
+    }
+}
+impl From<DynamicQueryBranch> for Stdlib {
+    fn from(_value: DynamicQueryBranch) -> Self {
+        Self::DynamicQueryBranch
+    }
+}
+impl From<FlattenDeep> for Stdlib {
+    fn from(_value: FlattenDeep) -> Self {
+        Self::FlattenDeep
     }
 }

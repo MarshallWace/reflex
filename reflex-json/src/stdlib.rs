@@ -103,3 +103,14 @@ impl std::fmt::Display for Stdlib {
         write!(f, "<json:{:?}>", self)
     }
 }
+
+impl From<JsonDeserialize> for Stdlib {
+    fn from(_value: JsonDeserialize) -> Self {
+        Self::JsonDeserialize
+    }
+}
+impl From<JsonSerialize> for Stdlib {
+    fn from(_value: JsonSerialize) -> Self {
+        Self::JsonSerialize
+    }
+}

@@ -7,9 +7,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
-pub struct EncodeUriComponent {}
+pub struct EncodeUriComponent;
 impl EncodeUriComponent {
-    pub(crate) const UUID: Uuid = uuid!("ad730068-31a7-49a4-ae09-ecbda0c9914a");
+    pub const UUID: Uuid = uuid!("ad730068-31a7-49a4-ae09-ecbda0c9914a");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

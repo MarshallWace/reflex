@@ -7,9 +7,9 @@ use reflex::core::{
     RefType, Uid, Uuid,
 };
 
-pub struct Slice {}
+pub struct Slice;
 impl Slice {
-    pub(crate) const UUID: Uuid = uuid!("03f6c061-0058-4ead-b72f-baf79eba31f1");
+    pub const UUID: Uuid = uuid!("03f6c061-0058-4ead-b72f-baf79eba31f1");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
         optional: [],

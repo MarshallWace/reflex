@@ -7,9 +7,9 @@ use reflex::core::{
     Uuid,
 };
 
-pub struct Concat {}
+pub struct Concat;
 impl Concat {
-    pub(crate) const UUID: Uuid = uuid!("46e03082-2c5f-41c7-af49-fc09516e2dfe");
+    pub const UUID: Uuid = uuid!("46e03082-2c5f-41c7-af49-fc09516e2dfe");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],

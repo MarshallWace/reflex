@@ -37,14 +37,13 @@ use nom::{
     IResult,
 };
 use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
-use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, GraphQlOperation, GraphQlSchema};
+use reflex_graphql::{GraphQlOperation, GraphQlParserBuiltin, GraphQlSchema};
 use reflex_handlers::utils::tls::tokio_native_tls::native_tls;
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
 };
-use reflex_js::stdlib::Stdlib as JsStdlib;
-use reflex_json::{stdlib::Stdlib as JsonStdlib, JsonValue};
+use reflex_json::JsonValue;
 use reflex_runtime::{
     actor::bytecode_interpreter::BytecodeInterpreterMetricLabels, task::RuntimeTask,
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
@@ -52,7 +51,6 @@ use reflex_runtime::{
 use reflex_scheduler::tokio::{
     TokioInbox, TokioSchedulerInstrumentation, TokioSchedulerLogger, TokioThreadPoolFactory,
 };
-use reflex_stdlib::Stdlib;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -444,7 +442,7 @@ where
     T::SignalList<T>: Send,
     T::StructPrototype<T>: Send,
     T::ExpressionList<T>: Send,
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<JsStdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: AsyncExpressionFactory<T> + Default,
     TAllocator: AsyncHeapAllocator<T> + Default,
     TActorFactory: for<'a> FnOnce(

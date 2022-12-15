@@ -7,9 +7,9 @@ use reflex::core::{
     ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
-pub struct Get {}
+pub struct Get;
 impl Get {
-    pub(crate) const UUID: Uuid = uuid!("391eba98-8955-4158-bc3f-2c07dee394dc");
+    pub const UUID: Uuid = uuid!("391eba98-8955-4158-bc3f-2c07dee394dc");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

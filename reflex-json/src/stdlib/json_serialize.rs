@@ -6,9 +6,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct JsonSerialize {}
+pub struct JsonSerialize;
 impl JsonSerialize {
-    pub(crate) const UUID: Uuid = uuid!("b0a2caca-1101-402c-a21e-bccdf276e44c");
+    pub const UUID: Uuid = uuid!("b0a2caca-1101-402c-a21e-bccdf276e44c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

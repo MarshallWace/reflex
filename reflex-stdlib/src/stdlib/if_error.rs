@@ -7,9 +7,9 @@ use reflex::core::{
     SignalType, Uid, Uuid,
 };
 
-pub struct IfError {}
+pub struct IfError;
 impl IfError {
-    pub(crate) const UUID: Uuid = uuid!("ca015984-8f33-49c5-b821-aca8fb122ee8");
+    pub const UUID: Uuid = uuid!("ca015984-8f33-49c5-b821-aca8fb122ee8");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Eager, ArgType::Lazy],
         optional: [],

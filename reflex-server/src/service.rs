@@ -27,13 +27,12 @@ use reflex_dispatcher::{
 };
 use reflex_graphql::{
     create_json_error_object,
-    stdlib::Stdlib as GraphQlStdlib,
     subscriptions::{
         deserialize_graphql_client_message, GraphQlSubscriptionClientMessage,
         GraphQlSubscriptionServerMessage,
     },
     validate::parse_graphql_schema_types,
-    GraphQlSchema,
+    GraphQlParserBuiltin, GraphQlSchema,
 };
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
@@ -53,7 +52,6 @@ use reflex_scheduler::tokio::{
     TokioInbox, TokioScheduler, TokioSchedulerBuilder, TokioSchedulerInstrumentation,
     TokioSchedulerLogger, TokioThreadPoolFactory,
 };
-use reflex_stdlib::Stdlib;
 use uuid::Uuid;
 
 use crate::{
@@ -161,7 +159,7 @@ pub trait GraphQlWebServerActor<
     T::SignalList<T>: Send,
     T::StructPrototype<T>: Send,
     T::ExpressionList<T>: Send,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: AsyncExpressionFactory<T> + Default,
     TAllocator: AsyncHeapAllocator<T> + Default,
     TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
@@ -210,7 +208,7 @@ where
     T::SignalList<T>: Send,
     T::StructPrototype<T>: Send,
     T::ExpressionList<T>: Send,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: AsyncExpressionFactory<T> + Default,
     TAllocator: AsyncHeapAllocator<T> + Default,
     TTransformHttp: HttpGraphQlServerQueryTransform + Send + 'static,
@@ -501,7 +499,7 @@ where
         T::SignalList<T>: Send,
         T::StructPrototype<T>: Send,
         T::ExpressionList<T>: Send,
-        T::Builtin: From<Stdlib> + From<GraphQlStdlib> + 'static,
+        T::Builtin: GraphQlParserBuiltin + 'static,
         TFactory: AsyncExpressionFactory<T> + Default,
         TAllocator: AsyncHeapAllocator<T> + Default,
         TActorFactory: for<'a> FnOnce(

@@ -5,16 +5,18 @@
 use std::iter::once;
 
 use reflex::core::{
-    get_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
+    get_hashmap_entries, uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator,
     ListTermType, RefType, Uid, Uuid,
 };
 
-use super::{is_truthy, Stdlib};
+use crate::{CollectHashMap, CollectHashSet, CollectList};
 
-pub struct Filter {}
+use super::is_truthy;
+
+pub struct Filter;
 impl Filter {
-    pub(crate) const UUID: Uuid = uuid!("110c1120-4526-4757-ae4d-fbc5cef2c4f5");
+    pub const UUID: Uuid = uuid!("110c1120-4526-4757-ae4d-fbc5cef2c4f5");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -31,7 +33,11 @@ impl Uid for Filter {
 }
 impl<T: Expression> Applicable<T> for Filter
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<CollectHashMap>
+        + From<CollectHashSet>
+        + From<CollectFilterResults>
+        + From<CollectList>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -57,7 +63,7 @@ where
                     .map(|item| item.as_deref())
                     .cloned(),
                 &predicate,
-                Stdlib::CollectList,
+                CollectList,
                 factory,
                 allocator,
             ))
@@ -65,7 +71,7 @@ where
             Some(collect_filter_results(
                 get_hashmap_entries(target, factory, allocator),
                 &predicate,
-                Stdlib::CollectHashMap,
+                CollectHashMap,
                 factory,
                 allocator,
             ))
@@ -73,7 +79,7 @@ where
             Some(collect_filter_results(
                 target.values().map(|item| item.as_deref()).cloned(),
                 &predicate,
-                Stdlib::CollectHashSet,
+                CollectHashSet,
                 factory,
                 allocator,
             ))
@@ -93,12 +99,12 @@ where
 fn collect_filter_results<T: Expression>(
     items: impl IntoIterator<Item = T>,
     predicate: &T,
-    collect: Stdlib,
+    collect: impl Into<T::Builtin>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<CollectFilterResults> + From<CollectList>,
 {
     let (items, results): (Vec<_>, Vec<_>) = items
         .into_iter()
@@ -111,11 +117,11 @@ where
         })
         .unzip();
     factory.create_application_term(
-        factory.create_builtin_term(Stdlib::CollectFilterResults),
+        factory.create_builtin_term(CollectFilterResults),
         allocator.create_triple(
             factory.create_list_term(allocator.create_list(items)),
             factory.create_application_term(
-                factory.create_builtin_term(Stdlib::CollectList),
+                factory.create_builtin_term(CollectList),
                 allocator.create_list(results),
             ),
             factory.create_builtin_term(collect),
@@ -123,9 +129,9 @@ where
     )
 }
 
-pub struct CollectFilterResults {}
+pub struct CollectFilterResults;
 impl CollectFilterResults {
-    pub(crate) const UUID: Uuid = uuid!("36517ace-60b4-4c2f-8768-9717cf262b90");
+    pub const UUID: Uuid = uuid!("36517ace-60b4-4c2f-8768-9717cf262b90");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
         optional: [],

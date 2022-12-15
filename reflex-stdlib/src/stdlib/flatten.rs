@@ -6,9 +6,9 @@ use reflex::core::{
     ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 
-pub struct Flatten {}
+pub struct Flatten;
 impl Flatten {
-    pub(crate) const UUID: Uuid = uuid!("da2105be-0212-4de0-89b2-b63478292c7a");
+    pub const UUID: Uuid = uuid!("da2105be-0212-4de0-89b2-b63478292c7a");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

@@ -13,9 +13,9 @@ use reflex::{
     hash::FnvHashMap,
 };
 
-pub struct Merge {}
+pub struct Merge;
 impl Merge {
-    pub(crate) const UUID: Uuid = uuid!("7093b95b-630d-4ad2-8d55-7d1bbaf0968a");
+    pub const UUID: Uuid = uuid!("7093b95b-630d-4ad2-8d55-7d1bbaf0968a");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

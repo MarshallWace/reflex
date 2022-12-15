@@ -7,9 +7,9 @@ use reflex::core::{
     Uuid,
 };
 
-pub struct Match {}
+pub struct Match;
 impl Match {
-    pub(crate) const UUID: Uuid = uuid!("5ce9c4e5-68ff-49c8-acb7-83d9213ca3fd");
+    pub const UUID: Uuid = uuid!("5ce9c4e5-68ff-49c8-acb7-83d9213ca3fd");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

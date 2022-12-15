@@ -121,3 +121,34 @@ impl std::fmt::Display for Stdlib {
         write!(f, "<handlers:{:?}>", self)
     }
 }
+
+impl From<Scan> for Stdlib {
+    fn from(_value: Scan) -> Self {
+        Self::Scan
+    }
+}
+impl From<ToRequest> for Stdlib {
+    fn from(_value: ToRequest) -> Self {
+        Self::ToRequest
+    }
+}
+impl From<GetVariable> for Stdlib {
+    fn from(_value: GetVariable) -> Self {
+        Self::GetVariable
+    }
+}
+impl From<SetVariable> for Stdlib {
+    fn from(_value: SetVariable) -> Self {
+        Self::SetVariable
+    }
+}
+impl From<IncrementVariable> for Stdlib {
+    fn from(_value: IncrementVariable) -> Self {
+        Self::IncrementVariable
+    }
+}
+impl From<DecrementVariable> for Stdlib {
+    fn from(_value: DecrementVariable) -> Self {
+        Self::DecrementVariable
+    }
+}

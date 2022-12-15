@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
-use reflex_json::stdlib::Stdlib as JsonStdlib;
-use reflex_stdlib::Stdlib;
+use reflex::core::{Builtin, Expression, ExpressionFactory, HeapAllocator};
+use reflex_json::stdlib::JsonDeserialize;
+use reflex_stdlib::{Effect, Get, Lt, Map, ResolveDeep};
 
-use crate::stdlib::Stdlib as HandlersStdlib;
+use crate::stdlib::{
+    DecrementVariable, GetVariable, IncrementVariable, Scan, SetVariable, ToRequest,
+};
 
 pub(crate) mod http;
 pub(crate) mod loader;
@@ -17,12 +19,45 @@ pub use self::loader::import_loader;
 pub use self::state::import_state;
 pub use self::time::import_time;
 
+pub trait HandlerImportsBuiltin:
+    Builtin
+    + From<DecrementVariable>
+    + From<Effect>
+    + From<Get>
+    + From<GetVariable>
+    + From<IncrementVariable>
+    + From<JsonDeserialize>
+    + From<Lt>
+    + From<Map>
+    + From<ResolveDeep>
+    + From<Scan>
+    + From<SetVariable>
+    + From<ToRequest>
+{
+}
+impl<T> HandlerImportsBuiltin for T where
+    T: Builtin
+        + From<DecrementVariable>
+        + From<Effect>
+        + From<Get>
+        + From<GetVariable>
+        + From<IncrementVariable>
+        + From<JsonDeserialize>
+        + From<Lt>
+        + From<Map>
+        + From<ResolveDeep>
+        + From<Scan>
+        + From<SetVariable>
+        + From<ToRequest>
+{
+}
+
 pub fn handler_imports<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Vec<(&'static str, T)>
 where
-    T::Builtin: From<Stdlib> + From<JsonStdlib> + From<HandlersStdlib>,
+    T::Builtin: HandlerImportsBuiltin,
 {
     vec![
         ("reflex::http", import_http(factory, allocator)),

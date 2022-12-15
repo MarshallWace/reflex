@@ -6,12 +6,12 @@ use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
-use reflex_stdlib::Stdlib;
 
-use crate::stdlib::Stdlib as GraphQlStdlib;
-pub struct DynamicQueryBranch {}
+use super::CollectQueryListItems;
+
+pub struct DynamicQueryBranch;
 impl DynamicQueryBranch {
-    pub(crate) const UUID: Uuid = uuid!("58dd19b7-c9f0-473b-84c5-34af607c176b");
+    pub const UUID: Uuid = uuid!("58dd19b7-c9f0-473b-84c5-34af607c176b");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -28,7 +28,7 @@ impl Uid for DynamicQueryBranch {
 }
 impl<T: Expression> Applicable<T> for DynamicQueryBranch
 where
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: From<CollectQueryListItems> + From<DynamicQueryBranch>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -50,7 +50,7 @@ where
             Ok(target)
         } else if let Some(list) = factory.match_list_term(&target) {
             Ok(factory.create_application_term(
-                factory.create_builtin_term(GraphQlStdlib::CollectQueryListItems),
+                factory.create_builtin_term(CollectQueryListItems),
                 allocator.create_list(
                     list.items()
                         .as_deref()
@@ -58,7 +58,7 @@ where
                         .map(|item| item.as_deref())
                         .map(|item| {
                             factory.create_application_term(
-                                factory.create_builtin_term(GraphQlStdlib::DynamicQueryBranch),
+                                factory.create_builtin_term(DynamicQueryBranch),
                                 allocator.create_pair(item.clone(), shape.clone()),
                             )
                         }),

@@ -5,16 +5,16 @@
 use std::iter::once;
 
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, GraphNode, HashmapTermType, HashsetTermType, HeapAllocator,
     ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
-use crate::Stdlib;
+use crate::{CollectHashSet, CollectList, CollectRecord, ConstructHashMap};
 
-pub struct ResolveDeep {}
+pub struct ResolveDeep;
 impl ResolveDeep {
-    pub(crate) const UUID: Uuid = uuid!("cf0f60ad-2182-43fb-ba9d-6763f1aaf6dd");
+    pub const UUID: Uuid = uuid!("cf0f60ad-2182-43fb-ba9d-6763f1aaf6dd");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -31,7 +31,12 @@ impl Uid for ResolveDeep {
 }
 impl<T: Expression> Applicable<T> for ResolveDeep
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<CollectHashSet>
+        + From<CollectList>
+        + From<CollectRecord>
+        + From<ConstructHashMap>
+        + From<ResolveDeep>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -55,7 +60,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectRecord),
+                    factory.create_builtin_term(CollectRecord),
                     allocator.create_sized_list(
                         value.values().as_deref().len() + 1,
                         once(factory.create_constructor_term(
@@ -72,7 +77,7 @@ where
                                         field.clone()
                                     } else {
                                         factory.create_application_term(
-                                            factory.create_builtin_term(Stdlib::ResolveDeep),
+                                            factory.create_builtin_term(ResolveDeep),
                                             allocator.create_list(once(field.clone())),
                                         )
                                     }
@@ -86,7 +91,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectList),
+                    factory.create_builtin_term(CollectList),
                     allocator.create_list(
                         value
                             .items()
@@ -98,7 +103,7 @@ where
                                     item.clone()
                                 } else {
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::ResolveDeep),
+                                        factory.create_builtin_term(ResolveDeep),
                                         allocator.create_list(once(item.clone())),
                                     )
                                 }
@@ -115,14 +120,14 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectHashSet),
+                    factory.create_builtin_term(CollectHashSet),
                     allocator.create_list(value.values().map(|item| item.as_deref()).cloned().map(
                         |item| {
                             if item.is_atomic() {
                                 item
                             } else {
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::ResolveDeep),
+                                    factory.create_builtin_term(ResolveDeep),
                                     allocator.create_list(once(item)),
                                 )
                             }
@@ -143,7 +148,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ConstructHashMap),
+                    factory.create_builtin_term(ConstructHashMap),
                     allocator.create_pair(
                         if keys_are_atomic {
                             factory.create_list_term(
@@ -152,7 +157,7 @@ where
                             )
                         } else {
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectList),
+                                factory.create_builtin_term(CollectList),
                                 allocator.create_list(
                                     value
                                         .keys()
@@ -163,8 +168,7 @@ where
                                                 item
                                             } else {
                                                 factory.create_application_term(
-                                                    factory
-                                                        .create_builtin_term(Stdlib::ResolveDeep),
+                                                    factory.create_builtin_term(ResolveDeep),
                                                     allocator.create_list(once(item)),
                                                 )
                                             }
@@ -180,7 +184,7 @@ where
                             )
                         } else {
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectList),
+                                factory.create_builtin_term(CollectList),
                                 allocator.create_list(
                                     value.values().map(|item| item.as_deref()).cloned().map(
                                         |item| {
@@ -188,8 +192,7 @@ where
                                                 item
                                             } else {
                                                 factory.create_application_term(
-                                                    factory
-                                                        .create_builtin_term(Stdlib::ResolveDeep),
+                                                    factory.create_builtin_term(ResolveDeep),
                                                     allocator.create_list(once(item)),
                                                 )
                                             }

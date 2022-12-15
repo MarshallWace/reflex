@@ -7,9 +7,9 @@ use reflex::core::{
     RecordTermType, RefType, StructPrototypeType, Uid, Uuid,
 };
 
-pub struct Keys {}
+pub struct Keys;
 impl Keys {
-    pub(crate) const UUID: Uuid = uuid!("05812cb5-1a05-49c0-be1a-cc715f620a77");
+    pub const UUID: Uuid = uuid!("05812cb5-1a05-49c0-be1a-cc715f620a77");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

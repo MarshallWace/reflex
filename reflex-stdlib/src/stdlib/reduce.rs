@@ -7,9 +7,9 @@ use reflex::core::{
     ListTermType, RefType, Uid, Uuid,
 };
 
-pub struct Reduce {}
+pub struct Reduce;
 impl Reduce {
-    pub(crate) const UUID: Uuid = uuid!("f8312370-a299-457e-b9fb-f902f84f71b2");
+    pub const UUID: Uuid = uuid!("f8312370-a299-457e-b9fb-f902f84f71b2");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Lazy],
         optional: [],

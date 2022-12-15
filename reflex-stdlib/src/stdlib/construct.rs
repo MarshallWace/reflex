@@ -7,9 +7,9 @@ use reflex::core::{
     HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 
-pub struct ConstructRecord {}
+pub struct ConstructRecord;
 impl ConstructRecord {
-    pub(crate) const UUID: Uuid = uuid!("f3a1b7ad-fe7d-444b-adf3-6945332e03b7");
+    pub const UUID: Uuid = uuid!("f3a1b7ad-fe7d-444b-adf3-6945332e03b7");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -76,9 +76,9 @@ impl<T: Expression> Applicable<T> for ConstructRecord {
     }
 }
 
-pub struct ConstructHashMap {}
+pub struct ConstructHashMap;
 impl ConstructHashMap {
-    pub(crate) const UUID: Uuid = uuid!("e9d74f69-3722-47f0-810b-76730129d6d3");
+    pub const UUID: Uuid = uuid!("e9d74f69-3722-47f0-810b-76730129d6d3");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],
@@ -164,9 +164,9 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
     }
 }
 
-pub struct ConstructHashSet {}
+pub struct ConstructHashSet;
 impl ConstructHashSet {
-    pub(crate) const UUID: Uuid = uuid!("d2772dad-f42c-49a1-9707-e1df4b07b1ae");
+    pub const UUID: Uuid = uuid!("d2772dad-f42c-49a1-9707-e1df4b07b1ae");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],
@@ -204,9 +204,9 @@ impl<T: Expression> Applicable<T> for ConstructHashSet {
     }
 }
 
-pub struct ConstructList {}
+pub struct ConstructList;
 impl ConstructList {
-    pub(crate) const UUID: Uuid = uuid!("ecdf265f-d628-415b-80d5-5977e10a1141");
+    pub const UUID: Uuid = uuid!("ecdf265f-d628-415b-80d5-5977e10a1141");
     const ARITY: FunctionArity<0, 0> = FunctionArity {
         required: [],
         optional: [],

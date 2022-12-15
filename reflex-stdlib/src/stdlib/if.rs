@@ -6,9 +6,9 @@ use reflex::core::{
     ExpressionFactory, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct If {}
+pub struct If;
 impl If {
-    pub(crate) const UUID: Uuid = uuid!("9c8fc3a1-2d55-420e-bf81-3098932f8cf0");
+    pub const UUID: Uuid = uuid!("9c8fc3a1-2d55-420e-bf81-3098932f8cf0");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Lazy, ArgType::Lazy],
         optional: [],

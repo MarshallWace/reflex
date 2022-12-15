@@ -752,7 +752,7 @@ mod test {
     use super::*;
     use crate::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
     use reflex::core::SignalType;
-    use reflex_stdlib::Stdlib;
+    use reflex_stdlib::{Multiply, Stdlib};
 
     #[test]
     fn serialization() {
@@ -781,10 +781,10 @@ mod test {
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Multiply),
+                        factory.create_builtin_term(Multiply),
                         allocator.create_pair(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Multiply),
+                                factory.create_builtin_term(Multiply),
                                 allocator.create_pair(
                                     factory.create_int_term(2),
                                     factory.create_int_term(3),

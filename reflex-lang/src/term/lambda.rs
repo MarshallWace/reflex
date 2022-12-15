@@ -285,7 +285,7 @@ mod tests {
             Rewritable, StateCache,
         },
     };
-    use reflex_stdlib::Stdlib;
+    use reflex_stdlib::{Add, Stdlib};
 
     #[test]
     fn hoist_lambda_variables() {
@@ -301,10 +301,10 @@ mod tests {
                 factory.create_lambda_term(
                     0,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Add),
+                        factory.create_builtin_term(Add),
                         allocator.create_pair(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_variable_term(1),
@@ -325,10 +325,10 @@ mod tests {
                     factory.create_lambda_term(
                         3,
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Add),
+                                    factory.create_builtin_term(Add),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_variable_term(1),
@@ -377,13 +377,13 @@ mod tests {
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Add),
+                        factory.create_builtin_term(Add),
                         allocator.create_pair(
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Add),
+                                factory.create_builtin_term(Add),
                                 allocator.create_pair(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Add),
+                                        factory.create_builtin_term(Add),
                                         allocator.create_pair(
                                             factory.create_variable_term(0),
                                             factory.create_variable_term(1),
@@ -407,13 +407,13 @@ mod tests {
                     factory.create_lambda_term(
                         4,
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Add),
+                                    factory.create_builtin_term(Add),
                                     allocator.create_pair(
                                         factory.create_application_term(
-                                            factory.create_builtin_term(Stdlib::Add),
+                                            factory.create_builtin_term(Add),
                                             allocator.create_pair(
                                                 factory.create_variable_term(0),
                                                 factory.create_variable_term(1),
@@ -471,20 +471,19 @@ mod tests {
                     factory.create_lambda_term(
                         2,
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Add),
+                                    factory.create_builtin_term(Add),
                                     allocator.create_pair(
                                         factory.create_application_term(
-                                            factory.create_builtin_term(Stdlib::Add),
+                                            factory.create_builtin_term(Add),
                                             allocator.create_pair(
                                                 factory.create_application_term(
-                                                    factory.create_builtin_term(Stdlib::Add),
+                                                    factory.create_builtin_term(Add),
                                                     allocator.create_pair(
                                                         factory.create_application_term(
-                                                            factory
-                                                                .create_builtin_term(Stdlib::Add),
+                                                            factory.create_builtin_term(Add),
                                                             allocator.create_pair(
                                                                 factory.create_variable_term(0),
                                                                 factory.create_variable_term(1),
@@ -518,19 +517,19 @@ mod tests {
                             factory.create_lambda_term(
                                 6,
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Stdlib::Add),
+                                    factory.create_builtin_term(Add),
                                     allocator.create_pair(
                                         factory.create_application_term(
-                                            factory.create_builtin_term(Stdlib::Add),
+                                            factory.create_builtin_term(Add),
                                             allocator.create_pair(
                                                 factory.create_application_term(
-                                                    factory.create_builtin_term(Stdlib::Add),
+                                                    factory.create_builtin_term(Add),
                                                     allocator.create_pair(
                                                         factory.create_application_term(
-                                                            factory.create_builtin_term(Stdlib::Add),
+                                                            factory.create_builtin_term(Add),
                                                             allocator.create_pair(
                                                                 factory.create_application_term(
-                                                                    factory.create_builtin_term(Stdlib::Add),
+                                                                    factory.create_builtin_term(Add),
                                                                     allocator.create_pair(
                                                                         factory.create_variable_term(0),
                                                                         factory.create_variable_term(1),

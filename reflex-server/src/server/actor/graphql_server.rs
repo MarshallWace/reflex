@@ -27,9 +27,8 @@ use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_graphql::{
-    graphql_variables_are_equal, stdlib::Stdlib as GraphQlStdlib, GraphQlOperation,
-};
+use reflex_graphql::GraphQlParserBuiltin;
+use reflex_graphql::{graphql_variables_are_equal, GraphQlOperation};
 use reflex_json::JsonValue;
 use reflex_macros::{dispatcher, Named};
 use reflex_runtime::action::evaluate::{
@@ -39,7 +38,6 @@ use reflex_runtime::action::query::{
     QueryEmitAction, QuerySubscribeAction, QueryUnsubscribeAction,
 };
 use reflex_runtime::actor::query_manager::create_query_evaluate_effect;
-use reflex_stdlib::Stdlib;
 
 use crate::server::action::graphql_server::{
     GraphQlServerEmitAction, GraphQlServerModifyAction, GraphQlServerParseErrorAction,
@@ -185,7 +183,7 @@ where
 pub struct GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
 where
     T: Expression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TQueryLabel: GraphQlServerQueryLabel,
@@ -206,7 +204,7 @@ impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
     GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
 where
     T: Expression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TQueryLabel: GraphQlServerQueryLabel,
@@ -432,7 +430,7 @@ dispatcher!({
         for GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
     where
         T: Expression,
-        T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+        T::Builtin: GraphQlParserBuiltin,
         TFactory: ExpressionFactory<T>,
         TAllocator: HeapAllocator<T>,
         TQueryLabel: GraphQlServerQueryLabel,
@@ -602,7 +600,7 @@ impl<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
     GraphQlServer<T, TFactory, TAllocator, TQueryLabel, TMetricLabels, TTracer>
 where
     T: Expression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T>,
     TAllocator: HeapAllocator<T>,
     TQueryLabel: GraphQlServerQueryLabel,

@@ -10,11 +10,11 @@ use reflex::core::{
     ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
-use crate::Stdlib;
+use crate::{CollectHashSet, CollectList, CollectRecord, ConstructHashMap};
 
-pub struct ResolveRecord {}
+pub struct ResolveRecord;
 impl ResolveRecord {
-    pub(crate) const UUID: Uuid = uuid!("0e580200-7a85-415b-ba8e-ac854dc51ec7");
+    pub const UUID: Uuid = uuid!("0e580200-7a85-415b-ba8e-ac854dc51ec7");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -31,7 +31,7 @@ impl Uid for ResolveRecord {
 }
 impl<T: Expression> Applicable<T> for ResolveRecord
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<CollectRecord>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -59,7 +59,7 @@ where
             } else {
                 let values = value.values().as_deref();
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectRecord),
+                    factory.create_builtin_term(CollectRecord),
                     allocator.create_sized_list(
                         values.len() + 1,
                         once(factory.create_constructor_term(
@@ -75,9 +75,9 @@ where
     }
 }
 
-pub struct ResolveList {}
+pub struct ResolveList;
 impl ResolveList {
-    pub(crate) const UUID: Uuid = uuid!("6d324a63-2138-41ad-8775-ad4931043700");
+    pub const UUID: Uuid = uuid!("6d324a63-2138-41ad-8775-ad4931043700");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -94,7 +94,7 @@ impl Uid for ResolveList {
 }
 impl<T: Expression> Applicable<T> for ResolveList
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<CollectList>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -121,7 +121,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectList),
+                    factory.create_builtin_term(CollectList),
                     allocator.create_list(
                         value
                             .items()
@@ -138,9 +138,9 @@ where
     }
 }
 
-pub struct ResolveHashSet {}
+pub struct ResolveHashSet;
 impl ResolveHashSet {
-    pub(crate) const UUID: Uuid = uuid!("8c3c802c-8092-4dbf-9d5f-393b8144d39e");
+    pub const UUID: Uuid = uuid!("8c3c802c-8092-4dbf-9d5f-393b8144d39e");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -157,7 +157,7 @@ impl Uid for ResolveHashSet {
 }
 impl<T: Expression> Applicable<T> for ResolveHashSet
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<CollectHashSet>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -182,7 +182,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectHashSet),
+                    factory.create_builtin_term(CollectHashSet),
                     allocator.create_list(value.values().map(|item| item.as_deref()).cloned()),
                 ))
             }
@@ -192,9 +192,9 @@ where
     }
 }
 
-pub struct ResolveHashMap {}
+pub struct ResolveHashMap;
 impl ResolveHashMap {
-    pub(crate) const UUID: Uuid = uuid!("15ccc11f-31e9-4f8d-abb9-cf9dff0b26bd");
+    pub const UUID: Uuid = uuid!("15ccc11f-31e9-4f8d-abb9-cf9dff0b26bd");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -211,7 +211,7 @@ impl Uid for ResolveHashMap {
 }
 impl<T: Expression> Applicable<T> for ResolveHashMap
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<ConstructHashMap> + From<CollectList>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -236,10 +236,10 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ConstructHashMap),
+                    factory.create_builtin_term(ConstructHashMap),
                     allocator.create_pair(
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::CollectList),
+                            factory.create_builtin_term(CollectList),
                             allocator
                                 .create_list(value.keys().map(|item| item.as_deref()).cloned()),
                         ),

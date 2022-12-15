@@ -7,9 +7,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, RecordTermType, Uid, Uuid,
 };
 
-pub struct StructTypeFactory {}
+pub struct StructTypeFactory;
 impl StructTypeFactory {
-    pub(crate) const UUID: Uuid = uuid!("69fdfb4f-7a4a-4414-8140-ededbdc9368c");
+    pub const UUID: Uuid = uuid!("69fdfb4f-7a4a-4414-8140-ededbdc9368c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

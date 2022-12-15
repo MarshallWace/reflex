@@ -8,9 +8,9 @@ use reflex::core::{
     FunctionArity, HashmapTermType, HeapAllocator, RefType, Uid, Uuid,
 };
 
-pub struct Insert {}
+pub struct Insert;
 impl Insert {
-    pub(crate) const UUID: Uuid = uuid!("177d4614-e261-47e8-93be-645427627dae");
+    pub const UUID: Uuid = uuid!("177d4614-e261-47e8-93be-645427627dae");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Lazy],
         optional: [],

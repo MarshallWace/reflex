@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::stdlib::Stdlib as JsStdlib;
+use crate::stdlib::StructTypeFactory;
 use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 
 pub(crate) fn import_types<T: Expression>(
@@ -9,7 +9,7 @@ pub(crate) fn import_types<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<JsStdlib>,
+    T::Builtin: From<StructTypeFactory>,
 {
     let null = factory.create_nil_term();
     create_record(
@@ -32,7 +32,7 @@ where
             ),
             (
                 factory.create_string_term(allocator.create_static_string("Shape")),
-                factory.create_builtin_term(JsStdlib::StructTypeFactory),
+                factory.create_builtin_term(StructTypeFactory),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("Fn")),
@@ -67,7 +67,7 @@ mod tests {
         },
     };
     use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
-    use reflex_stdlib::Stdlib;
+    use reflex_stdlib::Add;
 
     #[test]
     fn struct_types() {
@@ -231,21 +231,21 @@ mod tests {
                     ])),
                     allocator.create_list(vec![
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_float_term(3.0),
                                 factory.create_float_term(1.0),
                             ),
                         ),
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_float_term(4.0),
                                 factory.create_float_term(1.0),
                             ),
                         ),
                         factory.create_application_term(
-                            factory.create_builtin_term(Stdlib::Add),
+                            factory.create_builtin_term(Add),
                             allocator.create_pair(
                                 factory.create_float_term(5.0),
                                 factory.create_float_term(1.0),

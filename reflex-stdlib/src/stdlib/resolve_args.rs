@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use crate::Stdlib;
+use crate::{Apply, CollectList, Sequence};
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, Builtin, BuiltinTermType, CompiledFunctionTermType,
@@ -9,9 +9,9 @@ use reflex::core::{
     HeapAllocator, LambdaTermType, PartialApplicationTermType, RefType, Uid, Uuid,
 };
 
-pub struct ResolveArgs {}
+pub struct ResolveArgs;
 impl ResolveArgs {
-    pub(crate) const UUID: Uuid = uuid!("3d67b92a-e64e-419b-a4a9-8e49bd1eae92");
+    pub const UUID: Uuid = uuid!("3d67b92a-e64e-419b-a4a9-8e49bd1eae92");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -28,7 +28,7 @@ impl Uid for ResolveArgs {
 }
 impl<T: Expression> Applicable<T> for ResolveArgs
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<Apply> + From<CollectList> + From<Sequence>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -58,7 +58,7 @@ where
                 Ok(factory.create_lambda_term(
                     1,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Sequence),
+                        factory.create_builtin_term(Sequence),
                         allocator.create_pair(factory.create_variable_term(0), target),
                     ),
                 ))
@@ -66,11 +66,11 @@ where
                 Ok(factory.create_lambda_term(
                     num_args,
                     factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Apply),
+                        factory.create_builtin_term(Apply),
                         allocator.create_pair(
                             target,
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectList),
+                                factory.create_builtin_term(CollectList),
                                 allocator.create_sized_list(
                                     num_args,
                                     (0..num_args).map(|index| {

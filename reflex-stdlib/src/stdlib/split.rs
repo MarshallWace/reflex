@@ -6,9 +6,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
-pub struct Split {}
+pub struct Split;
 impl Split {
-    pub(crate) const UUID: Uuid = uuid!("806bc218-7b0e-4594-b948-2382f2f8738a");
+    pub const UUID: Uuid = uuid!("806bc218-7b0e-4594-b948-2382f2f8738a");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

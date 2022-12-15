@@ -12,9 +12,8 @@ use http::StatusCode;
 use logger::ActionLogger;
 use opentelemetry::trace::Tracer;
 use reflex::core::{ExpressionFactory, HeapAllocator};
-use reflex_graphql::stdlib::Stdlib as GraphQlStdlib;
+use reflex_graphql::GraphQlParserBuiltin;
 use reflex_runtime::{actor::RuntimeMetricNames, runtime_actors, AsyncExpression};
-use reflex_stdlib::Stdlib;
 use server::{
     GraphQlServerOperationMetricLabels, GraphQlServerQueryLabel,
     HttpGraphQlServerQueryMetricLabels, WebSocketGraphQlServerConnectionMetricLabels,
@@ -112,7 +111,7 @@ pub fn server_actors<
 >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,

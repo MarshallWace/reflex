@@ -20,7 +20,7 @@ use reflex_interpreter::{
 };
 use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
 use reflex_lisp::parse;
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::{Add, Collect, Map, Stdlib};
 use test::Bencher;
 
 #[bench]
@@ -207,7 +207,7 @@ fn deeply_nested_function_application(b: &mut Bencher) {
             factory.create_lambda_term(
                 1,
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Add),
+                    factory.create_builtin_term(Add),
                     allocator.create_list(vec![factory.create_variable_term(0), acc]),
                 ),
             ),
@@ -251,7 +251,7 @@ fn list_transforms(b: &mut Bencher) {
     let allocator = DefaultAllocator::default();
     let collection = factory.create_list_term(allocator.create_list((0..1000).map(|index| {
         factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Add),
+            factory.create_builtin_term(Add),
             allocator.create_list(vec![
                 factory.create_int_term(index),
                 factory.create_int_term(1),
@@ -260,9 +260,9 @@ fn list_transforms(b: &mut Bencher) {
     })));
     let transform = parse("(lambda (value) (+ value 2))", &factory, &allocator).unwrap();
     let expression = factory.create_application_term(
-        factory.create_builtin_term(Stdlib::Collect),
+        factory.create_builtin_term(Collect),
         allocator.create_list(once(factory.create_application_term(
-            factory.create_builtin_term(Stdlib::Map),
+            factory.create_builtin_term(Map),
             allocator.create_list(vec![collection, transform]),
         ))),
     );

@@ -6,9 +6,9 @@ use reflex::core::{
     FloatTermType, FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct Round {}
+pub struct Round;
 impl Round {
-    pub(crate) const UUID: Uuid = uuid!("8abe6c68-60e8-45e7-8497-d91b845d6e7e");
+    pub const UUID: Uuid = uuid!("8abe6c68-60e8-45e7-8497-d91b845d6e7e");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

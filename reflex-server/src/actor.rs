@@ -10,14 +10,13 @@ use reflex_dispatcher::{
     Action, Actor, ActorEvents, Handler, HandlerContext, MessageData, Named, SchedulerMode,
     SchedulerTransition, TaskFactory, TaskInbox, Worker,
 };
-use reflex_graphql::{stdlib::Stdlib as GraphQlStdlib, validate::ValidateQueryGraphQlTransform};
+use reflex_graphql::{validate::ValidateQueryGraphQlTransform, GraphQlParserBuiltin};
 use reflex_macros::blanket_trait;
 use reflex_runtime::{
     actor::{RuntimeAction, RuntimeActor, RuntimeActorState},
     task::evaluate_handler::EvaluateHandlerTask,
     AsyncExpression,
 };
-use reflex_stdlib::Stdlib;
 
 use crate::server::{
     task::websocket_graphql_server::{
@@ -57,7 +56,7 @@ pub enum ServerActor<
     TTracer,
 > where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -122,7 +121,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -171,7 +170,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -231,7 +230,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -406,7 +405,7 @@ pub enum ServerActorEvents<
     TTask,
 > where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -492,7 +491,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -545,7 +544,7 @@ pub enum ServerActorDispose<
     TTask,
 > where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -626,7 +625,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -682,7 +681,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,
@@ -818,7 +817,7 @@ impl<
     >
 where
     T: AsyncExpression,
-    T::Builtin: From<Stdlib> + From<GraphQlStdlib>,
+    T::Builtin: GraphQlParserBuiltin,
     TFactory: ExpressionFactory<T> + Clone,
     TAllocator: HeapAllocator<T> + Clone,
     TTransformHttp: HttpGraphQlServerQueryTransform,

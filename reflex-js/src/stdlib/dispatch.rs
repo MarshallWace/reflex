@@ -5,14 +5,17 @@
 use std::iter::once;
 
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::{
+    Contains, Entries, Filter, Flatten, Get, Insert, Keys, Map, Push, PushFront, Reduce, Replace,
+    ResolveShallow, Sequence, Slice, Split, Values,
+};
 
-pub struct Dispatch {}
+pub struct Dispatch;
 impl Dispatch {
-    pub(crate) const UUID: Uuid = uuid!("f37c66ee-cd73-496d-8420-1ce83ab924ad");
+    pub const UUID: Uuid = uuid!("f37c66ee-cd73-496d-8420-1ce83ab924ad");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict, ArgType::Lazy],
         optional: [],
@@ -29,7 +32,24 @@ impl Uid for Dispatch {
 }
 impl<T: Expression> Applicable<T> for Dispatch
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<Contains>
+        + From<Entries>
+        + From<Filter>
+        + From<Flatten>
+        + From<Get>
+        + From<Insert>
+        + From<Keys>
+        + From<Map>
+        + From<Push>
+        + From<PushFront>
+        + From<Reduce>
+        + From<Replace>
+        + From<ResolveShallow>
+        + From<Sequence>
+        + From<Slice>
+        + From<Split>
+        + From<Values>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -74,7 +94,24 @@ pub(crate) fn get_builtin_field<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<Contains>
+        + From<Entries>
+        + From<Filter>
+        + From<Flatten>
+        + From<Get>
+        + From<Insert>
+        + From<Keys>
+        + From<Map>
+        + From<Push>
+        + From<PushFront>
+        + From<Reduce>
+        + From<Replace>
+        + From<ResolveShallow>
+        + From<Sequence>
+        + From<Slice>
+        + From<Split>
+        + From<Values>,
 {
     None.or_else(|| {
         if target.is_none()
@@ -127,11 +164,11 @@ fn get_builtin_string_field<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<Replace> + From<Split>,
 {
     match method {
-        "replace" => Some(factory.create_builtin_term(Stdlib::Replace)),
-        "split" => Some(factory.create_builtin_term(Stdlib::Split)),
+        "replace" => Some(factory.create_builtin_term(Replace)),
+        "split" => Some(factory.create_builtin_term(Split)),
         _ => None,
     }
 }
@@ -142,21 +179,32 @@ fn get_builtin_list_field<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<Entries>
+        + From<Filter>
+        + From<Keys>
+        + From<Map>
+        + From<Flatten>
+        + From<ResolveShallow>
+        + From<Push>
+        + From<Reduce>
+        + From<Slice>
+        + From<PushFront>
+        + From<Values>,
 {
     match method {
-        "entries" => Some(factory.create_builtin_term(Stdlib::Entries)),
-        "filter" => Some(factory.create_builtin_term(Stdlib::Filter)),
-        "keys" => Some(factory.create_builtin_term(Stdlib::Keys)),
-        "map" => Some(factory.create_builtin_term(Stdlib::Map)),
+        "entries" => Some(factory.create_builtin_term(Entries)),
+        "filter" => Some(factory.create_builtin_term(Filter)),
+        "keys" => Some(factory.create_builtin_term(Keys)),
+        "map" => Some(factory.create_builtin_term(Map)),
         "flatMap" => Some(factory.create_lambda_term(
             2,
             factory.create_application_term(
-                factory.create_builtin_term(Stdlib::Flatten),
+                factory.create_builtin_term(Flatten),
                 allocator.create_unit_list(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ResolveShallow),
+                    factory.create_builtin_term(ResolveShallow),
                     allocator.create_unit_list(factory.create_application_term(
-                        factory.create_builtin_term(Stdlib::Map),
+                        factory.create_builtin_term(Map),
                         allocator.create_pair(
                             factory.create_variable_term(1),
                             factory.create_variable_term(0),
@@ -165,11 +213,11 @@ where
                 )),
             ),
         )),
-        "push" => Some(factory.create_builtin_term(Stdlib::Push)),
-        "reduce" => Some(factory.create_builtin_term(Stdlib::Reduce)),
-        "slice" => Some(factory.create_builtin_term(Stdlib::Slice)),
-        "unshift" => Some(factory.create_builtin_term(Stdlib::PushFront)),
-        "values" => Some(factory.create_builtin_term(Stdlib::Values)),
+        "push" => Some(factory.create_builtin_term(Push)),
+        "reduce" => Some(factory.create_builtin_term(Reduce)),
+        "slice" => Some(factory.create_builtin_term(Slice)),
+        "unshift" => Some(factory.create_builtin_term(PushFront)),
+        "values" => Some(factory.create_builtin_term(Values)),
         _ => None,
     }
 }
@@ -180,23 +228,30 @@ fn get_builtin_hashmap_field<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<Contains>
+        + From<Entries>
+        + From<Get>
+        + From<Insert>
+        + From<Keys>
+        + From<Sequence>
+        + From<Values>,
 {
     match method {
-        "entries" => Some(factory.create_builtin_term(Stdlib::Entries)),
-        "get" => Some(factory.create_builtin_term(Stdlib::Get)),
-        "has" => Some(factory.create_builtin_term(Stdlib::Contains)),
-        "keys" => Some(factory.create_builtin_term(Stdlib::Keys)),
+        "entries" => Some(factory.create_builtin_term(Entries)),
+        "get" => Some(factory.create_builtin_term(Get)),
+        "has" => Some(factory.create_builtin_term(Contains)),
+        "keys" => Some(factory.create_builtin_term(Keys)),
         "set" => Some({
             // Ensure value is resolved before inserting into underlying hashmap
             factory.create_lambda_term(
                 3,
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::Sequence),
+                    factory.create_builtin_term(Sequence),
                     allocator.create_pair(
                         factory.create_variable_term(0),
                         factory.create_partial_application_term(
-                            factory.create_builtin_term(Stdlib::Insert),
+                            factory.create_builtin_term(Insert),
                             allocator.create_pair(
                                 factory.create_variable_term(2),
                                 factory.create_variable_term(1),
@@ -206,7 +261,7 @@ where
                 ),
             )
         }),
-        "values" => Some(factory.create_builtin_term(Stdlib::Values)),
+        "values" => Some(factory.create_builtin_term(Values)),
         _ => None,
     }
 }
@@ -216,13 +271,13 @@ fn get_builtin_hashset_field<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<T>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: From<Push> + From<Entries> + From<Contains> + From<Values>,
 {
     match method {
-        "add" => Some(factory.create_builtin_term(Stdlib::Push)),
-        "entries" => Some(factory.create_builtin_term(Stdlib::Entries)),
-        "has" => Some(factory.create_builtin_term(Stdlib::Contains)),
-        "values" => Some(factory.create_builtin_term(Stdlib::Values)),
+        "add" => Some(factory.create_builtin_term(Push)),
+        "entries" => Some(factory.create_builtin_term(Entries)),
+        "has" => Some(factory.create_builtin_term(Contains)),
+        "values" => Some(factory.create_builtin_term(Values)),
         _ => None,
     }
 }

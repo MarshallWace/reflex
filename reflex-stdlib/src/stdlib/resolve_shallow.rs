@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, GraphNode, HashmapTermType, HashsetTermType, HeapAllocator, ListTermType,
     RecordTermType, RefType, Uid, Uuid,
 };
 
-use crate::Stdlib;
+use crate::{CollectHashSet, CollectList, CollectRecord, ConstructHashMap};
 
-pub struct ResolveShallow {}
+pub struct ResolveShallow;
 impl ResolveShallow {
-    pub(crate) const UUID: Uuid = uuid!("475ca53b-e249-418d-8310-a9d54ae7ac0c");
+    pub const UUID: Uuid = uuid!("475ca53b-e249-418d-8310-a9d54ae7ac0c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
@@ -28,7 +28,11 @@ impl Uid for ResolveShallow {
 }
 impl<T: Expression> Applicable<T> for ResolveShallow
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: Builtin
+        + From<CollectRecord>
+        + From<CollectList>
+        + From<CollectHashSet>
+        + From<ConstructHashMap>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -49,7 +53,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectRecord),
+                    factory.create_builtin_term(CollectRecord),
                     allocator.clone_list(value.values()),
                 ))
             }
@@ -58,7 +62,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectList),
+                    factory.create_builtin_term(CollectList),
                     allocator.clone_list(value.items()),
                 ))
             }
@@ -71,7 +75,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::CollectHashSet),
+                    factory.create_builtin_term(CollectHashSet),
                     allocator.create_list(value.values().map(|item| item.as_deref()).cloned()),
                 ))
             }
@@ -88,7 +92,7 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ConstructHashMap),
+                    factory.create_builtin_term(ConstructHashMap),
                     allocator.create_pair(
                         if keys_are_atomic {
                             factory.create_list_term(
@@ -97,7 +101,7 @@ where
                             )
                         } else {
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectList),
+                                factory.create_builtin_term(CollectList),
                                 allocator
                                     .create_list(value.keys().map(|item| item.as_deref()).cloned()),
                             )
@@ -110,7 +114,7 @@ where
                             )
                         } else {
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::CollectList),
+                                factory.create_builtin_term(CollectList),
                                 allocator.create_list(
                                     value.values().map(|item| item.as_deref()).cloned(),
                                 ),

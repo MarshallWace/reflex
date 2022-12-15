@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::path::Path;
 
-use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
-use reflex_stdlib::Stdlib;
+use reflex::core::{create_record, Builtin, Expression, ExpressionFactory, HeapAllocator};
+use reflex_stdlib::{Contains, Effect, Get, If, ResolveDeep};
 
 use crate::{
     actor::EFFECT_TYPE_GRPC,
@@ -12,12 +12,21 @@ use crate::{
     utils::{get_proto_checksum, load_proto_descriptor, ProtoId},
 };
 
+pub trait GrpcLoaderBuiltin:
+    Builtin + From<ResolveDeep> + From<Get> + From<If> + From<Contains> + From<Effect>
+{
+}
+impl<T> GrpcLoaderBuiltin for T where
+    T: Builtin + From<ResolveDeep> + From<Get> + From<If> + From<Contains> + From<Effect>
+{
+}
+
 pub fn create_grpc_loader<T: Expression>(
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>>
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: GrpcLoaderBuiltin,
 {
     let factory = factory.clone();
     let allocator = allocator.clone();
@@ -51,7 +60,7 @@ fn create_grpc_exports<'a, T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: GrpcLoaderBuiltin,
 {
     // TODO: generate protobuf message constructors
     // TODO: generate protobuf enum constructors
@@ -78,7 +87,7 @@ fn create_service_constructor<'a, T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> (&'a str, T)
 where
-    T::Builtin: From<Stdlib>,
+    T::Builtin: GrpcLoaderBuiltin,
 {
     (
         service.name(),
@@ -91,14 +100,14 @@ where
                         factory.create_lambda_term(
                             2,
                             factory.create_application_term(
-                                factory.create_builtin_term(Stdlib::Effect),
+                                factory.create_builtin_term(Effect),
                                 allocator.create_list(vec![
                                     factory.create_string_term(
                                         allocator.create_string(EFFECT_TYPE_GRPC),
                                     ),
                                     factory.create_symbol_term(proto_id.into()),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Get),
+                                        factory.create_builtin_term(Get),
                                         allocator.create_pair(
                                             factory.create_variable_term(2),
                                             factory.create_string_term(
@@ -113,14 +122,14 @@ where
                                         allocator.create_string(String::from(method.name())),
                                     ),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::ResolveDeep),
+                                        factory.create_builtin_term(ResolveDeep),
                                         allocator.create_unit_list(factory.create_variable_term(1)),
                                     ),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::If),
+                                        factory.create_builtin_term(If),
                                         allocator.create_triple(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Stdlib::Contains),
+                                                factory.create_builtin_term(Contains),
                                                 allocator.create_pair(
                                                     factory.create_variable_term(0),
                                                     factory.create_string_term(
@@ -131,7 +140,7 @@ where
                                                 ),
                                             ),
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Stdlib::Get),
+                                                factory.create_builtin_term(Get),
                                                 allocator.create_pair(
                                                     factory.create_variable_term(0),
                                                     factory.create_string_term(
@@ -145,7 +154,7 @@ where
                                         ),
                                     ),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Stdlib::Get),
+                                        factory.create_builtin_term(Get),
                                         allocator.create_pair(
                                             factory.create_variable_term(0),
                                             factory.create_string_term(

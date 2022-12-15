@@ -10,9 +10,9 @@ use reflex::core::{
     SignalType, StringTermType, StringValue, Uid, Uuid,
 };
 
-pub struct Throw {}
+pub struct Throw;
 impl Throw {
-    pub(crate) const UUID: Uuid = uuid!("fb9bef4b-da7a-46ef-af03-50ed2984274c");
+    pub const UUID: Uuid = uuid!("fb9bef4b-da7a-46ef-af03-50ed2984274c");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

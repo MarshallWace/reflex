@@ -6,9 +6,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
-pub struct EndsWith {}
+pub struct EndsWith;
 impl EndsWith {
-    pub(crate) const UUID: Uuid = uuid!("dba85cb9-fefd-433f-86a4-abe762a880f9");
+    pub const UUID: Uuid = uuid!("dba85cb9-fefd-433f-86a4-abe762a880f9");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

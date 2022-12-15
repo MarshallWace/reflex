@@ -3,9 +3,9 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use crate::stdlib::Stdlib as JsStdlib;
+use crate::stdlib::FormatErrorMessage;
 use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
-use reflex_stdlib::Stdlib;
+use reflex_stdlib::ResolveList;
 
 pub fn global_error<T: Expression>(
     factory: &impl ExpressionFactory<T>,
@@ -34,7 +34,7 @@ pub fn global_aggregate_error<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Stdlib> + From<JsStdlib>,
+    T::Builtin: From<FormatErrorMessage> + From<ResolveList>,
 {
     // TODO: Add optional JS AggregateError override message
     factory.create_lambda_term(
@@ -47,14 +47,14 @@ where
             .chain(once((
                 factory.create_string_term(allocator.create_static_string("message")),
                 factory.create_application_term(
-                    factory.create_builtin_term(JsStdlib::FormatErrorMessage),
+                    factory.create_builtin_term(FormatErrorMessage),
                     allocator.create_unit_list(factory.create_variable_term(0)),
                 ),
             )))
             .chain(once((
                 factory.create_string_term(allocator.create_static_string("errors")),
                 factory.create_application_term(
-                    factory.create_builtin_term(Stdlib::ResolveList),
+                    factory.create_builtin_term(ResolveList),
                     allocator.create_unit_list(factory.create_variable_term(0)),
                 ),
             ))),

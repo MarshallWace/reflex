@@ -6,9 +6,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-pub struct Sequence {}
+pub struct Sequence;
 impl Sequence {
-    pub(crate) const UUID: Uuid = uuid!("c19bb80d-f021-4f0d-91af-6584d48a45a6");
+    pub const UUID: Uuid = uuid!("c19bb80d-f021-4f0d-91af-6584d48a45a6");
     const ARITY: FunctionArity<2, 0> = FunctionArity {
         required: [ArgType::Strict, ArgType::Strict],
         optional: [],

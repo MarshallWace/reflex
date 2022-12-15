@@ -6,9 +6,9 @@ use reflex::core::{
     FunctionArity, HeapAllocator, RecordTermType, Uid, Uuid,
 };
 
-pub struct GraphQlResolver {}
+pub struct GraphQlResolver;
 impl GraphQlResolver {
-    pub(crate) const UUID: Uuid = uuid!("34f0156e-4a64-40f5-bd01-e297b9086ee7");
+    pub const UUID: Uuid = uuid!("34f0156e-4a64-40f5-bd01-e297b9086ee7");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],

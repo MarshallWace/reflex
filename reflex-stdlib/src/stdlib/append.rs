@@ -10,9 +10,9 @@ use reflex::core::{
     HashsetTermType, HeapAllocator, ListTermType, RefType, Uid, Uuid,
 };
 
-pub struct Append {}
+pub struct Append;
 impl Append {
-    pub(crate) const UUID: Uuid = uuid!("d5a4e3e7-0bef-45e8-bb6b-69b09fbd7666");
+    pub const UUID: Uuid = uuid!("d5a4e3e7-0bef-45e8-bb6b-69b09fbd7666");
     const ARITY: FunctionArity<1, 0> = FunctionArity {
         required: [ArgType::Strict],
         optional: [],
