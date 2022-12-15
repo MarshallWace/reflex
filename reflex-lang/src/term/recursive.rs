@@ -72,7 +72,10 @@ impl<T: Expression> CompoundNode<T> for RecursiveTerm<T> {
         where
             T: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        T: 'a,
+    {
         once((&self.factory).into())
     }
 }

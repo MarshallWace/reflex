@@ -398,12 +398,16 @@ impl<'a, T: Expression + 'a> Iterator for TermChildren<'a, T> {
 impl<T: Expression> CompoundNode<T> for Term<T>
 where
     T::String: Hash,
+    for<'a> T::Ref<'a, T>: From<&'a T>,
 {
     type Children<'a> = TermChildren<'a, T>
         where
             T: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        T: 'a,
+    {
         match self {
             Self::Let(term) => TermChildren::Let(term.children()),
             Self::Lambda(term) => TermChildren::Lambda(term.children()),

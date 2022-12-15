@@ -446,11 +446,14 @@ impl<TBuiltin: Builtin> GraphNode for CachedSharedTerm<TBuiltin> {
         self.value.is_complex()
     }
 }
-impl<TStdlib: Builtin> CompoundNode<Self> for CachedSharedTerm<TStdlib> {
+impl<TStdlib: Builtin + 'static> CompoundNode<Self> for CachedSharedTerm<TStdlib> {
     type Children<'a> = TermChildren<'a, Self>
     where
         Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        Self: 'a,
+    {
         self.value.children()
     }
 }

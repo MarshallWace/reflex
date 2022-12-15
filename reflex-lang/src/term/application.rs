@@ -129,7 +129,10 @@ impl<T: Expression> CompoundNode<T> for ApplicationTerm<T> {
         where
             T: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        T: 'a,
+    {
         once((&self.target).into()).chain(self.args.iter())
     }
 }

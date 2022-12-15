@@ -83,7 +83,10 @@ impl<T: Expression> CompoundNode<T> for ListTerm<T> {
         where
             T: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        T: 'a,
+    {
         self.items.iter()
     }
 }

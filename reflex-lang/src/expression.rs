@@ -131,7 +131,10 @@ impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<
         where
             TWrapper: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        TWrapper: 'a,
+    {
         self.value.children()
     }
 }
@@ -415,7 +418,10 @@ impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<
         where
             TWrapper: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        TWrapper: 'a,
+    {
         self.value.children()
     }
 }

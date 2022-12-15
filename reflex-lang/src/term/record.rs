@@ -113,7 +113,10 @@ impl<T: Expression> CompoundNode<T> for RecordTerm<T> {
         where
             T: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        T: 'a,
+    {
         self.values.iter()
     }
 }

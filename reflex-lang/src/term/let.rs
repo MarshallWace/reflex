@@ -96,7 +96,10 @@ impl<T: Expression> CompoundNode<T> for LetTerm<T> {
         where
             T: 'a,
             Self: 'a;
-    fn children<'a>(&'a self) -> Self::Children<'a> {
+    fn children<'a>(&'a self) -> Self::Children<'a>
+    where
+        T: 'a,
+    {
         once((&self.initializer).into()).chain(once((&self.body).into()))
     }
 }
