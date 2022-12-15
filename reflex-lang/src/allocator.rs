@@ -80,10 +80,7 @@ impl<
     fn create_pair(&self, left: T, right: T) -> T::ExpressionList<T> {
         self.sized_iterator_list([left, right])
     }
-    fn clone_list<'a>(
-        &self,
-        expressions: T::Ref<'a, T::ExpressionList<T>>,
-    ) -> T::ExpressionList<T> {
+    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a, T>) -> T::ExpressionList<T> {
         expressions.as_deref().clone()
     }
     fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList<T> {
@@ -100,14 +97,14 @@ impl<
     }
     fn clone_struct_prototype<'a>(
         &self,
-        prototype: T::Ref<'a, T::StructPrototype<T>>,
+        prototype: T::StructPrototypeRef<'a, T>,
     ) -> T::StructPrototype<T> {
         prototype.as_deref().clone()
     }
     fn create_signal(&self, signal_type: SignalType, args: T::ExpressionList<T>) -> T::Signal<T> {
         Signal::new(signal_type, args)
     }
-    fn clone_signal<'a>(&self, signal: T::Ref<'a, T::Signal<T>>) -> T::Signal<T> {
+    fn clone_signal<'a>(&self, signal: T::SignalRef<'a, T>) -> T::Signal<T> {
         signal.as_deref().clone()
     }
     fn create_string(&self, value: impl Into<String>) -> T::String {
@@ -117,7 +114,7 @@ impl<
         T::String::from_static(Option::<T::String>::None, value)
             .unwrap_or_else(|| self.create_string(value))
     }
-    fn clone_string<'a>(&self, value: T::Ref<'a, T::String>) -> T::String {
+    fn clone_string<'a>(&self, value: T::StringRef<'a>) -> T::String {
         value.as_deref().clone()
     }
 }

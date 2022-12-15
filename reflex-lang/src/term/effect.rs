@@ -25,7 +25,7 @@ impl<T: Expression> std::hash::Hash for EffectTerm<T> {
     }
 }
 impl<T: Expression> EffectTermType<T> for EffectTerm<T> {
-    fn condition<'a>(&'a self) -> T::Ref<'a, T::Signal<T>>
+    fn condition<'a>(&'a self) -> T::SignalRef<'a, T>
     where
         T::Signal<T>: 'a,
         T: 'a,

@@ -34,13 +34,13 @@ impl<T: Expression> PartialApplicationTerm<T> {
     }
 }
 impl<T: Expression> PartialApplicationTermType<T> for PartialApplicationTerm<T> {
-    fn target<'a>(&'a self) -> T::Ref<'a, T>
+    fn target<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a,
     {
         (&self.target).into()
     }
-    fn args<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    fn args<'a>(&'a self) -> T::ExpressionListRef<'a, T>
     where
         T::ExpressionList<T>: 'a,
         T: 'a,
@@ -127,7 +127,7 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for PartialApplicationTerm<T> {
-    type Children<'a> = std::iter::Chain<std::iter::Once<T::Ref<'a, T>>, ExpressionListIter<'a, T>>
+    type Children<'a> = std::iter::Chain<std::iter::Once<T::ExpressionRef<'a>>, ExpressionListIter<'a, T>>
         where
             T: 'a,
             Self: 'a;

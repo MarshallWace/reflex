@@ -130,7 +130,38 @@ where
     type HashsetTerm<TWrapper: Expression> = HashSetTerm<TWrapper>;
     type SignalTerm<TWrapper: Expression> = SignalTerm<TWrapper>;
 
-    type Ref<'a, TTarget> = T::Ref<'a, TTarget> where TTarget: 'a, Self: 'a;
+    type StringRef<'a> = &'a <Self as Expression>::String
+    where
+        <Self as Expression>::String: 'a,
+        Self: 'a;
+
+    type SignalRef<'a, TWrapper: Expression> = &'a <Self as Expression>::Signal<TWrapper>
+    where
+        TWrapper: 'a,
+        <Self as Expression>::Signal<TWrapper>: 'a,
+        Self: 'a;
+
+    type StructPrototypeRef<'a, TWrapper: Expression> = &'a <Self as Expression>::StructPrototype<TWrapper>
+    where
+        TWrapper: 'a,
+        <Self as Expression>::StructPrototype<TWrapper>: 'a,
+        Self: 'a;
+
+    type SignalListRef<'a, TWrapper: Expression> = &'a <Self as Expression>::SignalList<TWrapper>
+    where
+        TWrapper: 'a,
+        <Self as Expression>::SignalList<TWrapper>: 'a,
+        Self: 'a;
+
+    type ExpressionListRef<'a, TWrapper: Expression> = &'a <Self as Expression>::ExpressionList<TWrapper>
+    where
+        TWrapper: 'a,
+        <Self as Expression>::ExpressionList<TWrapper>: 'a,
+        Self: 'a;
+
+    type ExpressionRef<'a> = &'a Self
+    where
+        Self: 'a;
 
     fn id(&self) -> HashId {
         hash_object(self)
@@ -379,7 +410,7 @@ pub enum TermChildren<'a, T: Expression + 'a> {
     Empty,
 }
 impl<'a, T: Expression + 'a> Iterator for TermChildren<'a, T> {
-    type Item = T::Ref<'a, T>;
+    type Item = T::ExpressionRef<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Let(iter) => iter.next(),
@@ -398,7 +429,7 @@ impl<'a, T: Expression + 'a> Iterator for TermChildren<'a, T> {
 impl<T: Expression> CompoundNode<T> for Term<T>
 where
     T::String: Hash,
-    for<'a> T::Ref<'a, T>: From<&'a T>,
+    for<'a> T::ExpressionRef<'a>: From<&'a T>,
 {
     type Children<'a> = TermChildren<'a, T>
         where

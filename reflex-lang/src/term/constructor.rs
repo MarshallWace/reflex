@@ -31,7 +31,7 @@ impl<T: Expression> ConstructorTerm<T> {
     }
 }
 impl<T: Expression> ConstructorTermType<T> for ConstructorTerm<T> {
-    fn prototype<'a>(&'a self) -> T::Ref<'a, T::StructPrototype<T>>
+    fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a, T>
     where
         T::StructPrototype<T>: 'a,
         T: 'a,

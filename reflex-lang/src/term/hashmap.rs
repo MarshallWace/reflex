@@ -141,7 +141,7 @@ impl<T: Expression> HashmapTermType<T> for HashMapTerm<T> {
     {
         self.values.iter()
     }
-    fn get<'a>(&'a self, key: &T) -> Option<T::Ref<'a, T>>
+    fn get<'a>(&'a self, key: &T) -> Option<T::ExpressionRef<'a>>
     where
         T: 'a,
     {

@@ -60,14 +60,14 @@ impl<T: Expression> ExpressionList<T> {
 }
 
 impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
-    type Iterator<'a> = IntoRefTypeIterator<T, T::Ref<'a, T>, std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
+    type Iterator<'a> = IntoRefTypeIterator<T, T::ExpressionRef<'a>, std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
     fn id(&self) -> HashId {
         self.id
     }
     fn len(&self) -> usize {
         self.items.len()
     }
-    fn get<'a>(&'a self, index: usize) -> Option<T::Ref<'a, T>>
+    fn get<'a>(&'a self, index: usize) -> Option<T::ExpressionRef<'a>>
     where
         T: 'a,
     {
@@ -198,7 +198,7 @@ where
     }
 }
 impl<T: Expression> ConditionListType<T> for SignalList<T> {
-    type Iterator<'a> = IntoRefTypeIterator<T::Signal<T>, T::Ref<'a, T::Signal<T>>, std::collections::btree_set::Iter<'a, T::Signal<T>>>
+    type Iterator<'a> = IntoRefTypeIterator<T::Signal<T>, T::SignalRef<'a, T>, std::collections::btree_set::Iter<'a, T::Signal<T>>>
         where
             T::Signal<T>: 'a,
             T: 'a,
@@ -465,7 +465,7 @@ impl<T: Expression> StructPrototype<T> {
     }
 }
 impl<T: Expression> StructPrototypeType<T> for StructPrototype<T> {
-    fn keys<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    fn keys<'a>(&'a self) -> T::ExpressionListRef<'a, T>
     where
         T::ExpressionList<T>: 'a,
         T: 'a,

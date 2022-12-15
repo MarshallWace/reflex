@@ -31,7 +31,7 @@ impl<T: Expression> RecursiveTerm<T> {
     }
 }
 impl<T: Expression> RecursiveTermType<T> for RecursiveTerm<T> {
-    fn factory<'a>(&'a self) -> T::Ref<'a, T>
+    fn factory<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a,
     {
@@ -68,7 +68,7 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for RecursiveTerm<T> {
-    type Children<'a> = std::iter::Once<T::Ref<'a, T>>
+    type Children<'a> = std::iter::Once<T::ExpressionRef<'a>>
         where
             T: 'a,
             Self: 'a;

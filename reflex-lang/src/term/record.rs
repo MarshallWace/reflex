@@ -43,21 +43,21 @@ impl<T: Expression> RecordTerm<T> {
     }
 }
 impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
-    fn prototype<'a>(&'a self) -> T::Ref<'a, T::StructPrototype<T>>
+    fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a, T>
     where
         T::StructPrototype<T>: 'a,
         T: 'a,
     {
         (&self.prototype).into()
     }
-    fn values<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    fn values<'a>(&'a self) -> T::ExpressionListRef<'a, T>
     where
         T::ExpressionList<T>: 'a,
         T: 'a,
     {
         (&self.values).into()
     }
-    fn get<'a>(&'a self, key: &T) -> Option<T::Ref<'a, T>>
+    fn get<'a>(&'a self, key: &T) -> Option<T::ExpressionRef<'a>>
     where
         T: 'a,
     {

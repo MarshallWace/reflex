@@ -30,7 +30,7 @@ impl<T: Expression> SignalTerm<T> {
     }
 }
 impl<T: Expression> SignalTermType<T> for SignalTerm<T> {
-    fn signals<'a>(&'a self) -> T::Ref<'a, T::SignalList<T>>
+    fn signals<'a>(&'a self) -> T::SignalListRef<'a, T>
     where
         T::SignalList<T>: 'a,
         T: 'a,

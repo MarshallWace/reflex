@@ -33,13 +33,13 @@ impl<T: Expression> LetTerm<T> {
     }
 }
 impl<'term, T: Expression + 'term> LetTermType<T> for LetTerm<T> {
-    fn initializer<'a>(&'a self) -> T::Ref<'a, T>
+    fn initializer<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a,
     {
         (&self.initializer).into()
     }
-    fn body<'a>(&'a self) -> T::Ref<'a, T>
+    fn body<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a,
     {
@@ -92,7 +92,7 @@ impl<T: Expression> GraphNode for LetTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for LetTerm<T> {
-    type Children<'a> = std::iter::Chain<std::iter::Once<T::Ref<'a, T>>, std::iter::Once<T::Ref<'a, T>>>
+    type Children<'a> = std::iter::Chain<std::iter::Once<T::ExpressionRef<'a>>, std::iter::Once<T::ExpressionRef<'a>>>
         where
             T: 'a,
             Self: 'a;

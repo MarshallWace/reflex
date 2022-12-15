@@ -40,7 +40,7 @@ impl<T: Expression> LambdaTermType<T> for LambdaTerm<T> {
     fn num_args(&self) -> StackOffset {
         self.num_args
     }
-    fn body<'a>(&'a self) -> T::Ref<'a, T>
+    fn body<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a,
     {
@@ -92,7 +92,7 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for LambdaTerm<T> {
-    type Children<'a> = std::iter::Once<T::Ref<'a, T>>
+    type Children<'a> = std::iter::Once<T::ExpressionRef<'a>>
         where
             T: 'a,
             Self: 'a;

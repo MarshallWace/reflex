@@ -33,7 +33,7 @@ impl<T: Expression> std::hash::Hash for ListTerm<T> {
 }
 
 impl<T: Expression> ListTermType<T> for ListTerm<T> {
-    fn items<'a>(&'a self) -> T::Ref<'a, T::ExpressionList<T>>
+    fn items<'a>(&'a self) -> T::ExpressionListRef<'a, T>
     where
         T::ExpressionList<T>: 'a,
         T: 'a,

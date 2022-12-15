@@ -33,7 +33,7 @@ impl<T: Expression> StringTerm<T> {
     }
 }
 impl<T: Expression> StringTermType<T> for StringTerm<T> {
-    fn value<'a>(&'a self) -> T::Ref<'a, T::String>
+    fn value<'a>(&'a self) -> T::StringRef<'a>
     where
         T::String: 'a,
         T: 'a,
