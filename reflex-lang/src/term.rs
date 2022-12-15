@@ -721,9 +721,6 @@ where
     }
 
     fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
-        if self.id() == target.id() {
-            return Ok(None);
-        }
         match (self, target) {
             (Self::Nil(term), Self::Nil(other)) => term.patch(other),
             (Self::Boolean(term), Self::Boolean(other)) => term.patch(other),

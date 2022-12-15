@@ -310,6 +310,9 @@ impl<T: Expression> SerializeJson for CachedExpression<T> {
         self.value().to_json()
     }
     fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
+        if self.hash == target.hash {
+            return Ok(None);
+        }
         self.value().patch(target.value())
     }
 }
