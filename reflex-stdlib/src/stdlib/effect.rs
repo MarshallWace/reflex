@@ -12,10 +12,10 @@ use reflex::core::{
 pub struct Effect;
 impl Effect {
     pub const UUID: Uuid = uuid!("5bf0a450-0055-474f-ae42-ddb25e2d4d4d");
-    const ARITY: FunctionArity<1, 0> = FunctionArity {
-        required: [ArgType::Strict],
+    const ARITY: FunctionArity<3, 0> = FunctionArity {
+        required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
         optional: [],
-        variadic: Some(ArgType::Strict),
+        variadic: None,
     };
     pub fn arity() -> Arity {
         Arity::from(&Self::ARITY)
@@ -41,10 +41,13 @@ impl<T: Expression> Applicable<T> for Effect {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let signal_type = args.next().unwrap();
+        let payload = args.next().unwrap();
+        let token = args.next().unwrap();
         if let Some(signal_type) = factory.match_string_term(&signal_type) {
             Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(signal_type.value().as_deref().as_str())),
-                allocator.create_list(args),
+                payload,
+                token,
             )))
         } else {
             Err(format!(

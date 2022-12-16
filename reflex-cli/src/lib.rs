@@ -3,13 +3,12 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::{iter::once, path::Path, str::FromStr};
+use std::{path::Path, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use reflex::core::{
     Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory, HeapAllocator,
-    InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, SignalType, StringTermType,
-    StringValue,
+    InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, SignalType,
 };
 use reflex_handlers::imports::HandlerImportsBuiltin;
 use reflex_interpreter::compiler::{
@@ -151,89 +150,28 @@ fn compile_graph_root<T: Expression + Rewritable<T> + Reducible<T> + Applicable<
     Ok((program, InstructionPointer::default()))
 }
 
-pub fn format_signal_result<T: Expression>(
-    result: &T::SignalTerm<T>,
-    factory: &impl ExpressionFactory<T>,
+pub fn format_signal_result<T: Expression<SignalTerm<T> = V>, V: SignalTermType<T>>(
+    result: &V,
 ) -> String {
     result
         .signals()
         .as_deref()
         .iter()
         .map(|item| item.as_deref())
-        .map(|signal| format_signal(signal, factory))
+        .map(|signal| format_signal::<T>(signal))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_signal<T: Expression>(
-    signal: &T::Signal<T>,
-    factory: &impl ExpressionFactory<T>,
-) -> String {
+fn format_signal<T: Expression>(signal: &T::Signal<T>) -> String {
     match signal.signal_type() {
         SignalType::Error => {
-            let (message, args) = {
-                let mut args = signal.args().map(|value| value.as_deref());
-                let (message, remaining_args, unused_args) = {
-                    let first_arg = args.next();
-                    let num_remaining_args = args.len();
-                    match first_arg {
-                        None => (None, None, None),
-                        Some(arg) => match factory.match_string_term(arg) {
-                            Some(message) => (
-                                Some(String::from(message.value().as_deref().as_str())),
-                                if num_remaining_args > 0 {
-                                    Some(args)
-                                } else {
-                                    None
-                                },
-                                None,
-                            ),
-                            None => (None, None, Some(once(arg).chain(args))),
-                        },
-                    }
-                };
-                (
-                    message,
-                    match (remaining_args, unused_args) {
-                        (None, None) => None,
-                        (remaining_args, unused_args) => Some(
-                            remaining_args
-                                .into_iter()
-                                .flatten()
-                                .chain(unused_args.into_iter().flatten()),
-                        ),
-                    },
-                )
-            };
-            format!(
-                "Error: {}",
-                match message {
-                    Some(message) => match args {
-                        None => format!("{}", message),
-                        Some(args) => format!(
-                            "{} {}",
-                            message,
-                            args.map(|arg| format!("{}", arg))
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        ),
-                    },
-                    None => String::from("<unknown>"),
-                }
-            )
+            format!("Error: {}", signal.payload().as_deref())
         }
         SignalType::Custom(signal_type) => format!(
             "<{}>{}",
             signal_type,
-            format!(
-                " {}",
-                signal
-                    .args()
-                    .map(|item| item.as_deref())
-                    .map(|arg| format!("{}", arg))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
+            format!(" {}", signal.payload().as_deref())
         ),
         SignalType::Pending => String::from("<pending>"),
     }

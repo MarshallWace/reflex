@@ -2141,7 +2141,7 @@ mod tests {
             messages.into_iter().map(|message| {
                 allocator.create_signal(
                     SignalType::Error,
-                    allocator.create_unit_list(create_record(
+                    create_record(
                         once((
                             factory.create_string_term(allocator.create_static_string("name")),
                             factory.create_string_term(allocator.create_static_string("Error")),
@@ -2152,7 +2152,8 @@ mod tests {
                         ))),
                         factory,
                         allocator,
-                    )),
+                    ),
+                    factory.create_nil_term(),
                 )
             }),
         ));
@@ -2166,14 +2167,7 @@ mod tests {
             .map(|item| item.as_deref())
             .map(|signal| {
                 let message = factory
-                    .match_record_term(
-                        signal
-                            .as_deref()
-                            .args()
-                            .map(|item| item.as_deref())
-                            .next()
-                            .unwrap(),
-                    )
+                    .match_record_term(signal.as_deref().payload().as_deref())
                     .unwrap()
                     .get(&factory.create_string_term(allocator.create_static_string("message")))
                     .map(|item| item.as_deref())
@@ -4596,7 +4590,7 @@ mod tests {
                             .map(|message| {
                                 allocator.create_signal(
                                     SignalType::Error,
-                                    allocator.create_unit_list(create_record(
+                                    create_record(
                                         once((
                                             factory.create_string_term(
                                                 allocator.create_static_string("name"),
@@ -4615,7 +4609,8 @@ mod tests {
                                         ))),
                                         &factory,
                                         &allocator,
-                                    )),
+                                    ),
+                                    factory.create_nil_term(),
                                 )
                             }),
                     )

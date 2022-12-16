@@ -52,7 +52,8 @@ where
         if let Some(_) = factory.match_symbol_term(&state_token) {
             Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_GET)),
-                allocator.create_pair(state_token, initial_value),
+                factory.create_list_term(allocator.create_pair(state_token, initial_value)),
+                factory.create_nil_term(),
             )))
         } else {
             Err(format!(
@@ -107,7 +108,8 @@ where
         ) {
             (Some(_), Some(_)) => Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_SET)),
-                allocator.create_triple(state_token, value, update_token),
+                factory.create_list_term(allocator.create_pair(state_token, value)),
+                update_token,
             ))),
             _ => Err(format!(
                 "Expected (Symbol, <any>, Symbol), received ({}, {}, {})",
@@ -160,7 +162,8 @@ where
         ) {
             (Some(_), Some(_)) => Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_INCREMENT)),
-                allocator.create_pair(state_token, update_token),
+                factory.create_list_term(allocator.create_unit_list(state_token)),
+                update_token,
             ))),
             _ => Err(format!(
                 "Expected (Symbol, Symbol), received ({}, {})",
@@ -213,7 +216,8 @@ where
         ) {
             (Some(_), Some(_)) => Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_DECREMENT)),
-                allocator.create_pair(state_token, update_token),
+                factory.create_list_term(allocator.create_unit_list(state_token)),
+                update_token,
             ))),
             _ => Err(format!(
                 "Expected (Symbol, Symbol), received ({}, {})",

@@ -58,7 +58,7 @@ pub fn eval<T: Expression + Evaluate<T>>(
         .unwrap_or_else(|| EvaluationResult::new(expression.clone(), DependencyList::empty()))
         .into_parts();
     let output = if let Some(result) = factory.match_signal_term(&result) {
-        format_signal_result(result, factory)
+        format_signal_result(result)
     } else {
         format!("{}", result)
     };

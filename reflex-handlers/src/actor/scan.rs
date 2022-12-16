@@ -10,7 +10,8 @@ use std::{
 
 use metrics::{describe_counter, describe_gauge, gauge, increment_gauge, SharedString, Unit};
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, HeapAllocator, RefType, SignalType, StateToken,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType,
+    RefType, SignalType, StateToken,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -250,28 +251,30 @@ where
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
             .iter()
-            .filter_map(|effect| match parse_scan_effect_args(effect) {
-                Ok(args) => {
-                    if let Some(action) = self.subscribe_scan_effect(state, effect, args) {
-                        Some((
-                            (
-                                effect.id(),
-                                create_pending_expression(&self.factory, &self.allocator),
-                            ),
-                            Some(SchedulerCommand::Send(self.main_pid, action)),
-                        ))
-                    } else {
-                        None
+            .filter_map(
+                |effect| match parse_scan_effect_args(effect, &self.factory) {
+                    Ok(args) => {
+                        if let Some(action) = self.subscribe_scan_effect(state, effect, args) {
+                            Some((
+                                (
+                                    effect.id(),
+                                    create_pending_expression(&self.factory, &self.allocator),
+                                ),
+                                Some(SchedulerCommand::Send(self.main_pid, action)),
+                            ))
+                        } else {
+                            None
+                        }
                     }
-                }
-                Err(err) => Some((
-                    (
-                        effect.id(),
-                        create_error_expression(err, &self.factory, &self.allocator),
-                    ),
-                    None,
-                )),
-            })
+                    Err(err) => Some((
+                        (
+                            effect.id(),
+                            create_error_expression(err, &self.factory, &self.allocator),
+                        ),
+                        None,
+                    )),
+                },
+            )
             .unzip();
         let initial_values_action = if initial_values.is_empty() {
             None
@@ -432,13 +435,21 @@ where
                 } = args;
                 let source_value_effect = self.allocator.create_signal(
                     SignalType::Custom(String::from(EVENT_TYPE_SCAN_SOURCE)),
-                    self.allocator
-                        .create_triple(target.clone(), seed.clone(), iteratee.clone()),
+                    self.factory.create_list_term(self.allocator.create_triple(
+                        target.clone(),
+                        seed.clone(),
+                        iteratee.clone(),
+                    )),
+                    self.factory.create_nil_term(),
                 );
                 let state_value_effect = self.allocator.create_signal(
                     SignalType::Custom(String::from(EVENT_TYPE_SCAN_STATE)),
-                    self.allocator
-                        .create_triple(target.clone(), seed.clone(), iteratee.clone()),
+                    self.factory.create_list_term(self.allocator.create_triple(
+                        target.clone(),
+                        seed.clone(),
+                        iteratee.clone(),
+                    )),
+                    self.factory.create_nil_term(),
                 );
                 let source_label = format!("{}:{} [scan]", target.id(), iteratee.id());
                 let reducer_label = format!("{}:{} [reducer]", target.id(), iteratee.id());
@@ -573,18 +584,23 @@ struct ScanEffectArgs<T: Expression> {
 
 fn parse_scan_effect_args<T: Expression>(
     effect: &T::Signal<T>,
+    factory: &impl ExpressionFactory<T>,
 ) -> Result<ScanEffectArgs<T>, String> {
-    let args = effect.args();
-    if args.len() != 3 {
-        return Err(format!(
-            "Invalid scan signal: Expected 3 arguments, received {}",
-            args.len()
-        ));
-    }
-    let mut remaining_args = args.map(|item| item.as_deref());
-    let target = remaining_args.next().unwrap();
-    let seed = remaining_args.next().unwrap();
-    let iteratee = remaining_args.next().unwrap();
+    let payload = effect.payload().as_deref();
+    let args = factory
+        .match_list_term(payload)
+        .map(|term| term.items().as_deref())
+        .filter(|args| args.len() == 3)
+        .ok_or_else(|| {
+            format!(
+                "Invalid scan signal: Expected 3 arguments, received {}",
+                payload
+            )
+        })?;
+    let mut args = args.iter().map(|iter| iter.as_deref());
+    let target = args.next().unwrap();
+    let seed = args.next().unwrap();
+    let iteratee = args.next().unwrap();
     Ok(ScanEffectArgs {
         target: target.clone(),
         seed: seed.clone(),
@@ -596,9 +612,11 @@ fn create_pending_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Pending,
+        factory.create_nil_term(),
+        factory.create_nil_term(),
+    ))))
 }
 
 fn create_error_expression<T: Expression>(
@@ -608,6 +626,7 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_string_term(allocator.create_string(message))),
+        factory.create_string_term(allocator.create_string(message)),
+        factory.create_nil_term(),
     ))))
 }

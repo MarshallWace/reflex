@@ -311,7 +311,9 @@ fn create_error_signal_term<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Error, allocator.create_unit_list(data)),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Error,
+        data,
+        factory.create_nil_term(),
+    ))))
 }

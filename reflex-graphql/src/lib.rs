@@ -471,16 +471,12 @@ pub fn serialize_json_signal_errors<TTerm: SignalTermType<T>, T: Expression>(
             _ => false,
         })
         .map(|signal| {
-            signal
-                .args()
-                .map(|item| item.as_deref())
-                .next()
-                .and_then(|arg| sanitize(arg).ok())
+            sanitize(signal.payload().as_deref())
                 .map(|value| match value {
                     JsonValue::String(message) => create_json_error_object(message, None),
                     _ => value,
                 })
-                .unwrap_or_else(|| JsonValue::Null)
+                .unwrap_or_else(|_| JsonValue::Null)
         })
         .collect()
 }

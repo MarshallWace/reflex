@@ -198,22 +198,9 @@ fn serialize_effect<T: Expression>(effect: &impl ConditionType<T>) -> JsonValue 
             SignalType::Error => JsonValue::String(String::from("error")),
             SignalType::Pending => JsonValue::String(String::from("pending")),
         },
-        "args": serialize_json_list(effect.args().map(|item| item.as_deref()))
+        "payload": reflex_json::sanitize(effect.payload().as_deref()).unwrap_or_else(|_| json!({})),
+        "token": reflex_json::sanitize(effect.token().as_deref()).unwrap_or_else(|_| json!({})),
     })
-}
-
-fn serialize_json_list<'a, T: Expression + 'a>(
-    items: impl IntoIterator<Item = &'a T>,
-) -> JsonValue {
-    JsonValue::Array(
-        items
-            .into_iter()
-            .map(|value| match reflex_json::sanitize(value) {
-                Ok(value) => value,
-                Err(_) => json!({}),
-            })
-            .collect(),
-    )
 }
 
 dispatcher!({

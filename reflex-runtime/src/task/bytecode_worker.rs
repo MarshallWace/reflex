@@ -463,7 +463,8 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_string_term(allocator.create_string(message))),
+        factory.create_string_term(allocator.create_string(message)),
+        factory.create_nil_term(),
     ))))
 }
 
@@ -555,10 +556,10 @@ fn create_query_entry_point_function(
 
 fn create_compiler_error_program(message: String) -> (CompiledProgram, InstructionPointer) {
     let instructions = create_main_function([
+        Instruction::PushNil,
         Instruction::PushString { value: message },
         Instruction::ConstructCondition {
             signal_type: SignalType::Error,
-            num_args: 1,
         },
         Instruction::Return,
     ]);

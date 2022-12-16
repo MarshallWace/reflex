@@ -147,12 +147,13 @@ pub fn create_evaluate_effect<T: Expression>(
 ) -> T::Signal<T> {
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
-        allocator.create_list([
+        factory.create_list_term(allocator.create_list([
             factory.create_string_term(allocator.create_string(label)),
             query,
             evaluation_mode.serialize(factory),
             invalidation_strategy.serialize(factory),
-        ]),
+        ])),
+        factory.create_nil_term(),
     )
 }
 
@@ -160,11 +161,12 @@ pub fn parse_evaluate_effect_query<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
-    let args = effect.args();
-    if args.len() != 4 {
-        return None;
-    }
-    let mut args = args.map(|value| value.as_deref());
+    let payload = effect.payload().as_deref();
+    let args = factory
+        .match_list_term(payload)
+        .map(|term| term.items().as_deref())
+        .filter(|args| args.len() == 4)?;
+    let mut args = args.iter().map(|value| value.as_deref());
     let label = args.next().unwrap();
     let query = args.next().unwrap();
     let evaluation_mode = args.next().unwrap();

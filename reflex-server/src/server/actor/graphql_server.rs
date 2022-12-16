@@ -1440,21 +1440,10 @@ fn parse_error_message<'a, T: Expression + 'a>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<&'a str> {
-    error
-        .args()
-        .map(|item| item.as_deref())
-        .next()
-        .and_then(|arg| parse_error_payload_message(arg, factory, allocator))
-}
-
-fn parse_error_payload_message<'a, T: Expression + 'a>(
-    value: &'a T,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> Option<&'a str> {
-    if let Some(term) = factory.match_string_term(value) {
+    let payload = error.payload().as_deref();
+    if let Some(term) = factory.match_string_term(payload) {
         Some(term.value().as_deref().as_str())
-    } else if let Some(term) = factory.match_record_term(value) {
+    } else if let Some(term) = factory.match_record_term(payload) {
         parse_error_object_payload_message(term, factory, allocator)
     } else {
         None
@@ -1538,7 +1527,6 @@ impl GraphQlQueryStatus {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::iter::empty;
 
     use metrics_exporter_prometheus::PrometheusHandle;
 
@@ -1550,8 +1538,7 @@ mod tests {
     };
     use reflex_handlers::utils::tls::hyper_tls;
     use reflex_json::{JsonMap, JsonValue};
-    use reflex_lang::allocator::DefaultAllocator;
-    use reflex_lang::{CachedSharedTerm, ExpressionList, SharedTermFactory};
+    use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
     use reflex_utils::reconnect::NoopReconnectTimeout;
 
     use crate::action::ServerCliAction;
@@ -1591,8 +1578,16 @@ mod tests {
         //       error and pending maps to error
         let mixed_result = EvaluationResult::new(
             factory.create_signal_term(allocator.create_signal_list(vec![
-                allocator.create_signal(SignalType::Pending, ExpressionList::new(empty())),
-                allocator.create_signal(SignalType::Error, ExpressionList::new(empty())),
+                allocator.create_signal(
+                    SignalType::Pending,
+                    factory.create_nil_term(),
+                    factory.create_nil_term(),
+                ),
+                allocator.create_signal(
+                    SignalType::Error,
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_nil_term(),
+                ),
             ])),
             DependencyList::empty(),
         );
@@ -2447,7 +2442,11 @@ mod tests {
     ) -> EvaluationResult<CachedSharedTerm<ServerBuiltins>> {
         EvaluationResult::new(
             factory.create_signal_term(allocator.create_signal_list(vec![
-                allocator.create_signal(SignalType::Error, ExpressionList::new(empty())),
+                allocator.create_signal(
+                    SignalType::Error,
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                    factory.create_nil_term(),
+                ),
             ])),
             DependencyList::empty(),
         )
@@ -2465,7 +2464,11 @@ mod tests {
     ) -> EvaluationResult<CachedSharedTerm<ServerBuiltins>> {
         EvaluationResult::new(
             factory.create_signal_term(allocator.create_signal_list(vec![
-                allocator.create_signal(SignalType::Pending, ExpressionList::new(empty())),
+                allocator.create_signal(
+                    SignalType::Pending,
+                    factory.create_nil_term(),
+                    factory.create_nil_term(),
+                ),
             ])),
             DependencyList::empty(),
         )
@@ -2479,7 +2482,8 @@ mod tests {
             factory.create_signal_term(allocator.create_signal_list(vec![
                 allocator.create_signal(
                     SignalType::Custom(String::from("foo")),
-                    ExpressionList::new(empty()),
+                    factory.create_string_term(allocator.create_static_string("bar")),
+                    factory.create_symbol_term(123),
                 ),
             ])),
             DependencyList::empty(),

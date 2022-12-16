@@ -191,7 +191,6 @@ pub enum Instruction {
     },
     ConstructCondition {
         signal_type: SignalType,
-        num_args: usize,
     },
     CombineSignals {
         count: usize,

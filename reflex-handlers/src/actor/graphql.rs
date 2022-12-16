@@ -20,7 +20,7 @@ use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType,
     RecordTermType, RefType, SignalType, StateToken, StringTermType, StringValue,
     StructPrototypeType, Uuid,
 };
@@ -1378,21 +1378,24 @@ fn parse_graphql_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
-    let args = effect.args();
-    if args.len() != 7 {
-        return Err(format!(
-            "Invalid graphql signal: Expected 7 arguments, received {}",
-            args.len()
-        ));
-    }
-    let mut args = args.map(|item| item.as_deref());
+    let payload = effect.payload().as_deref();
+    let args = factory
+        .match_list_term(payload)
+        .map(|term| term.items().as_deref())
+        .filter(|args| args.len() == 6)
+        .ok_or_else(|| {
+            format!(
+                "Invalid graphql signal: Expected 6 arguments, received {}",
+                payload
+            )
+        })?;
+    let mut args = args.iter().map(|iter| iter.as_deref());
     let url = parse_string_arg(args.next().unwrap(), factory);
     let query = parse_string_arg(args.next().unwrap(), factory);
     let operation_name = parse_optional_string_arg(args.next().unwrap(), factory);
     let variables = parse_optional_object_arg(args.next().unwrap(), factory)?;
     let extensions = parse_optional_object_arg(args.next().unwrap(), factory)?;
     let headers = parse_optional_object_arg(args.next().unwrap(), factory)?;
-    let _token = args.next().unwrap();
     match (url, query, operation_name, variables, extensions, headers) {
         (
             Some(url),
@@ -1411,15 +1414,7 @@ fn parse_graphql_effect_args<T: Expression>(
             },
             headers: headers.map(|headers| headers.into_iter().collect()),
         }),
-        _ => Err(format!(
-            "Invalid graphql signal arguments: {}",
-            effect
-                .args()
-                .map(|item| item.as_deref())
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(", "),
-        )),
+        _ => Err(format!("Invalid graphql signal arguments: {}", payload)),
     }
 }
 
@@ -1490,9 +1485,11 @@ fn create_pending_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Pending,
+        factory.create_nil_term(),
+        factory.create_nil_term(),
+    ))))
 }
 
 fn create_error_message_expression<T: Expression>(
@@ -1522,7 +1519,7 @@ fn create_aggregate_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(
         allocator.create_signal_list(payload.into_iter().map(|payload| {
-            allocator.create_signal(SignalType::Error, allocator.create_unit_list(payload))
+            allocator.create_signal(SignalType::Error, payload, factory.create_nil_term())
         })),
     )
 }

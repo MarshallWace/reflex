@@ -21,12 +21,14 @@ use pin_project::pin_project;
 use reflex::{
     cache::SubstitutionCache,
     core::{
-        Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory, HeapAllocator,
-        InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, StateCache,
+        Applicable, ConditionType, Expression, ExpressionFactory, HeapAllocator,
+        InstructionPointer, Reducible, Rewritable, StateCache,
     },
     env::inject_env_vars,
 };
-use reflex_cli::{builtins::CliBuiltins, create_parser, repl, Syntax, SyntaxParser};
+use reflex_cli::{
+    builtins::CliBuiltins, create_parser, format_signal_result, repl, Syntax, SyntaxParser,
+};
 use reflex_dispatcher::{
     Action, Actor, ActorEvents, AsyncScheduler, Handler, HandlerContext, Matcher, MessageData,
     Named, ProcessId, Redispatcher, SchedulerMode, SchedulerTransition, SerializableAction,
@@ -62,9 +64,7 @@ use reflex_interpreter::{
     execute, DefaultInterpreterCache, InterpreterOptions,
 };
 use reflex_json::{JsonMap, JsonValue};
-use reflex_lang::{
-    allocator::DefaultAllocator, term::SignalTerm, CachedSharedTerm, SharedTermFactory,
-};
+use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_macros::{blanket_trait, task_factory_enum, Matcher, Named};
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
@@ -321,11 +321,7 @@ pub async fn main() -> Result<()> {
                 while let Some(value) = results_stream.next().await {
                     let output = match factory.match_signal_term(&value) {
                         None => format!("{}", value),
-                        Some(signal) => format_signal_errors(signal, &factory)
-                            .into_iter()
-                            .map(|error| format!(" - {}", error))
-                            .collect::<Vec<_>>()
-                            .join("\n"),
+                        Some(signal) => format_signal_result(signal),
                     };
                     println!("{}{}", clear_escape_sequence(), output);
                 }
@@ -446,23 +442,6 @@ where
         self.log(action);
     }
     fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
-}
-
-fn format_signal_errors<'a, T: Expression>(
-    signal: &'a SignalTerm<T>,
-    factory: &'a impl ExpressionFactory<T>,
-) -> impl IntoIterator<Item = String> + 'a {
-    signal
-        .signals()
-        .as_deref()
-        .iter()
-        .map(|item| item.as_deref())
-        .map(
-            |signal| match signal.args().map(|item| item.as_deref()).next() {
-                Some(payload) => format!("{}", payload),
-                None => format!("{}", factory.create_nil_term()),
-            },
-        )
 }
 
 fn load_tls_cert(path: &Path) -> Result<Certificate> {

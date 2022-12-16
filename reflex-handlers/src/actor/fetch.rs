@@ -16,7 +16,7 @@ use metrics::{
     decrement_gauge, describe_counter, describe_gauge, increment_counter, increment_gauge, Unit,
 };
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType,
     RecordTermType, RefType, SignalType, StateToken, StringTermType, StringValue,
     StructPrototypeType, Uuid,
 };
@@ -503,14 +503,18 @@ fn parse_fetch_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<FetchRequest, String> {
-    let args = effect.args();
-    if args.len() != 4 {
-        return Err(format!(
-            "Invalid fetch signal: Expected 4 arguments, received {}",
-            args.len()
-        ));
-    }
-    let mut args = args.map(|iter| iter.as_deref());
+    let payload = effect.payload().as_deref();
+    let args = factory
+        .match_list_term(payload)
+        .map(|term| term.items().as_deref())
+        .filter(|args| args.len() == 4)
+        .ok_or_else(|| {
+            format!(
+                "Invalid fetch signal: Expected 4 arguments, received {}",
+                payload
+            )
+        })?;
+    let mut args = args.iter().map(|iter| iter.as_deref());
     let url = parse_string_arg(args.next().unwrap(), factory);
     let method = parse_string_arg(args.next().unwrap(), factory);
     let headers = parse_key_values_arg(args.next().unwrap(), factory);
@@ -525,15 +529,7 @@ fn parse_fetch_effect_args<T: Expression>(
                 body: body.map(Bytes::from),
             })
         }
-        _ => Err(format!(
-            "Invalid fetch signal arguments: {}",
-            effect
-                .args()
-                .map(|item| item.as_deref())
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(", "),
-        )),
+        _ => Err(format!("Invalid fetch signal arguments: {}", payload)),
     }
 }
 
@@ -612,9 +608,11 @@ fn create_pending_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Pending,
+        factory.create_nil_term(),
+        factory.create_nil_term(),
+    ))))
 }
 
 fn create_error_expression<T: Expression>(
@@ -624,6 +622,7 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_string_term(allocator.create_string(message))),
+        factory.create_string_term(allocator.create_string(message)),
+        factory.create_nil_term(),
     ))))
 }

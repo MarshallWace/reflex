@@ -65,16 +65,17 @@ impl<T: Expression> Applicable<T> for IfError {
             } else {
                 Ok(factory.create_application_term(
                     handler,
-                    allocator.create_unit_list(factory.create_list_term(allocator.create_list(
-                        error_signals.into_iter().map(|signal| {
-                            signal
-                                .args()
-                                .map(|item| item.as_deref())
-                                .next()
-                                .cloned()
-                                .unwrap_or_else(|| factory.create_nil_term())
-                        }),
-                    ))),
+                    allocator.create_unit_list(
+                        factory.create_list_term(
+                            allocator.create_list(
+                                error_signals
+                                    .into_iter()
+                                    .map(|signal| signal.payload())
+                                    .map(|item| item.as_deref())
+                                    .cloned(),
+                            ),
+                        ),
+                    ),
                 ))
             }
         } else {

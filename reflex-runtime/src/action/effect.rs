@@ -153,14 +153,12 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
                             JsonValue::Object(JsonMap::from_iter([
                                 (String::from("id"), JsonValue::from(signal.id())),
                                 (
-                                    String::from("args"),
-                                    JsonValue::Array(
-                                        signal
-                                            .args()
-                                            .map(|item| item.as_deref())
-                                            .map(sanitize_expression)
-                                            .collect(),
-                                    ),
+                                    String::from("payload"),
+                                    sanitize_expression(signal.payload().as_deref()),
+                                ),
+                                (
+                                    String::from("token"),
+                                    sanitize_expression(signal.token().as_deref()),
                                 ),
                             ]))
                         })
@@ -194,14 +192,12 @@ impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
                             JsonValue::Object(JsonMap::from_iter([
                                 (String::from("id"), JsonValue::from(signal.id())),
                                 (
-                                    String::from("args"),
-                                    JsonValue::Array(
-                                        signal
-                                            .args()
-                                            .map(|item| item.as_deref())
-                                            .map(sanitize_expression)
-                                            .collect(),
-                                    ),
+                                    String::from("payload"),
+                                    sanitize_expression(signal.payload().as_deref()),
+                                ),
+                                (
+                                    String::from("token"),
+                                    sanitize_expression(signal.token().as_deref()),
                                 ),
                             ]))
                         })

@@ -2171,8 +2171,8 @@ mod tests {
     ) -> T::Signal<T> {
         allocator.create_signal(
             SignalType::Error,
-            allocator
-                .create_unit_list(factory.create_string_term(allocator.create_string(message))),
+            factory.create_string_term(allocator.create_string(message)),
+            factory.create_nil_term(),
         )
     }
 

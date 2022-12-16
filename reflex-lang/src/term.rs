@@ -799,7 +799,8 @@ mod test {
         let input =
             factory.create_signal_term(allocator.create_signal_list([allocator.create_signal(
                 SignalType::Custom(String::from("foo")),
-                allocator.create_unit_list(factory.create_int_term(3)),
+                factory.create_int_term(3),
+                factory.create_symbol_term(123),
             )]));
         let serialized = serde_json::to_string(&input).unwrap();
         let deserialized: CachedSharedTerm<Stdlib> = serde_json::from_str(&serialized).unwrap();

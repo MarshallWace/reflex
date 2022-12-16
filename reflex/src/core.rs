@@ -209,15 +209,10 @@ pub trait SignalTermType<T: Expression> {
 pub trait ConditionType<T: Expression>:
     Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug
 {
-    type Args<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
-    where
-        T: 'a,
-        Self: 'a;
     fn id(&self) -> StateToken;
     fn signal_type(&self) -> SignalType;
-    fn args<'a>(&'a self) -> Self::Args<'a>
-    where
-        T: 'a;
+    fn payload<'a>(&'a self) -> T::ExpressionRef<'a>;
+    fn token<'a>(&'a self) -> T::ExpressionRef<'a>;
 }
 
 pub type ExpressionListIter<'a, T> =
@@ -1155,7 +1150,7 @@ pub trait HeapAllocator<T: Expression> {
         &self,
         prototype: T::StructPrototypeRef<'a, T>,
     ) -> T::StructPrototype<T>;
-    fn create_signal(&self, signal_type: SignalType, args: T::ExpressionList<T>) -> T::Signal<T>;
+    fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal<T>;
     fn clone_signal<'a>(&self, signal: T::SignalRef<'a, T>) -> T::Signal<T>;
     fn create_string(&self, value: impl Into<String>) -> T::String;
     fn create_static_string(&self, value: &'static str) -> T::String;
@@ -1566,9 +1561,11 @@ pub fn create_pending_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Pending,
+        factory.create_nil_term(),
+        factory.create_nil_term(),
+    ))))
 }
 
 pub fn create_error_expression<T: Expression>(
@@ -1576,9 +1573,11 @@ pub fn create_error_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Error, allocator.create_unit_list(payload)),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Error,
+        payload,
+        factory.create_nil_term(),
+    ))))
 }
 
 pub fn get_short_circuit_signal<T: Expression>(

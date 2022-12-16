@@ -948,24 +948,23 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
-        Instruction::ConstructCondition {
-            signal_type,
-            num_args,
-        } => {
+        Instruction::ConstructCondition { signal_type } => {
             trace!(instruction = "Instruction::ConstructCondition");
-            let num_args = *num_args;
-            if stack.len() < num_args {
-                Err(format!(
-                    "Unable to construct {} signal: insufficient arguments on stack",
+            match stack
+                .pop()
+                .and_then(|payload| stack.pop().map(|token| (payload, token)))
+            {
+                None => Err(format!(
+                    "Unable to construct {} condition: insufficient arguments on stack",
                     signal_type,
-                ))
-            } else {
-                let args = stack.pop_multiple(num_args).into_iter();
-                let signal = factory.create_signal_term(allocator.create_signal_list(once(
-                    allocator.create_signal(signal_type.clone(), allocator.create_list(args)),
-                )));
-                stack.push(signal);
-                Ok((ExecutionResult::Advance, DependencyList::empty()))
+                )),
+                Some((payload, token)) => {
+                    let signal = factory.create_signal_term(allocator.create_signal_list(once(
+                        allocator.create_signal(signal_type.clone(), payload, token),
+                    )));
+                    stack.push(signal);
+                    Ok((ExecutionResult::Advance, DependencyList::empty()))
+                }
             }
         }
         Instruction::CombineSignals { count } => {
@@ -1701,7 +1700,8 @@ mod tests {
         let target = parse("(lambda (foo bar) (+ foo bar))", &factory, &allocator).unwrap();
         let condition = allocator.create_signal(
             SignalType::Custom(String::from("foo")),
-            allocator.create_empty_list(),
+            factory.create_string_term(allocator.create_string("bar")),
+            factory.create_symbol_term(123),
         );
         let expression = factory.create_application_term(
             target,

@@ -16,8 +16,8 @@ use metrics::{
 use prost::Message;
 use reflex::core::{
     create_record, ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-    RecordTermType, Reducible, RefType, Rewritable, SignalType, StateToken, StringTermType,
-    StringValue, StructPrototypeType, SymbolId, SymbolTermType,
+    ListTermType, RecordTermType, Reducible, RefType, Rewritable, SignalType, StateToken,
+    StringTermType, StringValue, StructPrototypeType, SymbolId, SymbolTermType,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -1277,21 +1277,24 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
-    let args = effect.args();
-    if args.len() != 7 {
-        return Err(format!(
-            "Invalid grpc signal: Expected 7 arguments, received {}",
-            args.len()
-        ));
-    }
-    let mut args = args.map(|item| item.as_deref());
+    let payload = effect.payload().as_deref();
+    let args = factory
+        .match_list_term(payload)
+        .map(|term| term.items().as_deref())
+        .filter(|args| args.len() == 6)
+        .ok_or_else(|| {
+            format!(
+                "Invalid grpc signal: Expected 6 arguments, received {}",
+                payload
+            )
+        })?;
+    let mut args = args.iter().map(|iter| iter.as_deref());
     let proto_id = parse_symbol_arg(args.next().unwrap(), factory);
     let url = parse_string_arg(args.next().unwrap(), factory);
     let service = parse_string_arg(args.next().unwrap(), factory);
     let method = parse_string_arg(args.next().unwrap(), factory);
     let input = args.next().unwrap().clone();
     let metadata = parse_optional_object_arg(args.next().unwrap(), factory)?;
-    let _token = args.next().unwrap();
     match (proto_id, url, service, method, input, metadata) {
         (
             Some(protocol),
@@ -1315,15 +1318,7 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
                 })
                 .collect(),
         }),
-        _ => Err(format!(
-            "Invalid grpc signal arguments: {}",
-            effect
-                .args()
-                .map(|item| item.as_deref())
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(", "),
-        )),
+        _ => Err(format!("Invalid grpc signal arguments: {}", payload)),
     }
 }
 
@@ -1391,9 +1386,11 @@ fn create_pending_expression<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
-    factory.create_signal_term(allocator.create_signal_list(once(
-        allocator.create_signal(SignalType::Pending, allocator.create_empty_list()),
-    )))
+    factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
+        SignalType::Pending,
+        factory.create_nil_term(),
+        factory.create_nil_term(),
+    ))))
 }
 
 fn format_grpc_error_message(
@@ -1459,7 +1456,7 @@ fn create_aggregate_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(
         allocator.create_signal_list(payload.into_iter().map(|payload| {
-            allocator.create_signal(SignalType::Error, allocator.create_unit_list(payload))
+            allocator.create_signal(SignalType::Error, payload, factory.create_nil_term())
         })),
     )
 }

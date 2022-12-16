@@ -50,7 +50,8 @@ impl<T: Expression> Applicable<T> for Scan {
         } else {
             Ok(factory.create_effect_term(allocator.create_signal(
                 SignalType::Custom(String::from(EFFECT_TYPE_SCAN)),
-                allocator.create_list([target, seed, iteratee]),
+                factory.create_list_term(allocator.create_list([target, seed, iteratee])),
+                factory.create_nil_term(),
             )))
         }
     }

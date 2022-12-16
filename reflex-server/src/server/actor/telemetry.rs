@@ -11,6 +11,7 @@ use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, EvaluationResult, Expression,
         ExpressionFactory, HeapAllocator, RefType, SignalTermType, SignalType, StateToken,
+        SymbolTermType,
     },
     hash::HashId,
 };
@@ -43,10 +44,7 @@ use crate::{
             TelemetryTransaction,
         },
     },
-    utils::{
-        sanitize::sanitize_json_value,
-        traceparent::{parse_traceparent, Traceparent},
-    },
+    utils::traceparent::{parse_traceparent, Traceparent},
 };
 
 #[derive(Named, Clone)]
@@ -532,7 +530,7 @@ where
                 Entry::Vacant(entry) => {
                     let transaction_id = Traceparent::generate();
                     let effect_name = format_effect_label(effect);
-                    let effect_attributes = format_effect_attributes(effect);
+                    let effect_attributes = format_effect_attributes(effect, &self.factory);
                     entry.insert(TelemetryMiddlewareEffectState {
                         effect: effect.clone(),
                         transaction_id: Some(transaction_id),
@@ -563,7 +561,7 @@ where
                                     .cloned()
                                     .collect(),
                                 name: format_effect_label(effect),
-                                attributes: format_effect_attributes(effect),
+                                attributes: format_effect_attributes(effect, &self.factory),
                             }),
                             None => None,
                         }
@@ -839,7 +837,7 @@ where
                                 transaction_id: effect_transaction_id,
                                 parent_ids: once(update_transaction_id).collect(),
                                 name: format_effect_label(&effect),
-                                attributes: format_effect_attributes(&effect),
+                                attributes: format_effect_attributes(&effect, &self.factory),
                             },
                         )
                     })
@@ -874,7 +872,10 @@ where
                             transaction_id: query_transaction_id,
                             parent_ids: updated_dependency_ids,
                             name: format_effect_label(&query_effect_state.effect),
-                            attributes: format_effect_attributes(&query_effect_state.effect),
+                            attributes: format_effect_attributes(
+                                &query_effect_state.effect,
+                                &self.factory,
+                            ),
                         })
                     } else {
                         return None;
@@ -1012,26 +1013,29 @@ fn format_async_update_batch_label(batch_size: usize) -> String {
     }
 }
 
-fn format_effect_attributes<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
-    effect: &V,
+fn format_effect_attributes<T: Expression>(
+    effect: &T::Signal<T>,
+    factory: &impl ExpressionFactory<T>,
 ) -> Vec<(String, String)> {
+    let payload = effect.payload().as_deref();
+    let token = effect.token().as_deref();
     vec![
         (String::from("effect.id"), format!("{}", effect.id())),
         (String::from("effect.type"), format_effect_label(effect)),
         (
-            String::from("effect.args"),
-            sanitize_json_value(JsonValue::Array(
-                effect
-                    .args()
-                    .map(|item| item.as_deref())
-                    .map(|arg| {
-                        reflex_json::sanitize(arg).unwrap_or_else(|_| {
-                            JsonValue::String(format!("<expression:{}>", arg.id()))
-                        })
-                    })
-                    .collect(),
-            ))
-            .to_string(),
+            String::from("effect.payload"),
+            reflex_json::sanitize(payload)
+                .map(|json| json.to_string())
+                .unwrap_or_else(|_| format!("<expression:{}>", payload.id())),
+        ),
+        (
+            String::from("effect.token"),
+            match factory.match_symbol_term(token) {
+                Some(symbol) => format!("<symbol:{}>", symbol.id()),
+                None => reflex_json::sanitize(token)
+                    .map(|json| json.to_string())
+                    .unwrap_or_else(|_| format!("<expression:{}>", token.id())),
+            },
         ),
     ]
 }

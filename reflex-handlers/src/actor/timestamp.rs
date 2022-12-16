@@ -10,8 +10,8 @@ use std::{
 };
 
 use reflex::core::{
-    ConditionType, Expression, ExpressionFactory, FloatTermType, HeapAllocator, IntTermType,
-    RefType, SignalType, StateToken, Uuid,
+    ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
+    IntTermType, ListTermType, RefType, SignalType, StateToken, Uuid,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -335,26 +335,22 @@ fn parse_timestamp_effect_args<T: Expression>(
     effect: &T::Signal<T>,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Duration, String> {
-    let args = effect.args();
-    if args.len() != 1 {
-        return Err(format!(
-            "Invalid timestamp signal: Expected 1 argument, received {}",
-            args.len()
-        ));
-    }
-    let mut args = args.map(|item| item.as_deref());
+    let payload = effect.payload().as_deref();
+    let args = factory
+        .match_list_term(payload)
+        .map(|term| term.items().as_deref())
+        .filter(|args| args.len() == 1)
+        .ok_or_else(|| {
+            format!(
+                "Invalid timestamp signal: Expected 1 argument, received {}",
+                payload
+            )
+        })?;
+    let mut args = args.iter().map(|item| item.as_deref());
     let interval = parse_duration_millis_arg(args.next().unwrap(), factory);
     match interval {
         Some(interval) if interval.as_millis() >= 1 => Ok(interval),
-        _ => Err(format!(
-            "Invalid timestamp signal arguments: {}",
-            effect
-                .args()
-                .map(|item| item.as_deref())
-                .map(|arg| format!("{}", arg))
-                .collect::<Vec<_>>()
-                .join(", "),
-        )),
+        _ => Err(format!("Invalid timestamp signal arguments: {}", payload)),
     }
 }
 
@@ -392,6 +388,7 @@ fn create_error_expression<T: Expression>(
 ) -> T {
     factory.create_signal_term(allocator.create_signal_list(once(allocator.create_signal(
         SignalType::Error,
-        allocator.create_unit_list(factory.create_string_term(allocator.create_string(message))),
+        factory.create_string_term(allocator.create_string(message)),
+        factory.create_nil_term(),
     ))))
 }

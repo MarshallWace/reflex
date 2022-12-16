@@ -12,12 +12,13 @@ use crate::{
 const EVENT_TYPE_ENV: &'static str = "reflex::env";
 
 pub fn create_env_args_accessor<T: Expression>(
-    _factory: &impl ExpressionFactory<T>,
+    factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T::Signal<T> {
     allocator.create_signal(
         SignalType::Custom(String::from(EVENT_TYPE_ENV)),
-        allocator.create_empty_list(),
+        factory.create_list_term(allocator.create_empty_list()),
+        factory.create_nil_term(),
     )
 }
 
