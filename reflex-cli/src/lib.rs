@@ -7,8 +7,8 @@ use std::{path::Path, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use reflex::core::{
-    Applicable, ConditionListType, ConditionType, Expression, ExpressionFactory, HeapAllocator,
-    InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, SignalType,
+    Applicable, Builtin, ConditionListType, ConditionType, Expression, ExpressionFactory,
+    HeapAllocator, InstructionPointer, Reducible, RefType, Rewritable, SignalTermType, SignalType,
 };
 use reflex_handlers::imports::HandlerImportsBuiltin;
 use reflex_interpreter::compiler::{
@@ -109,6 +109,15 @@ impl<T: Expression> SyntaxParser<T> for GenericSyntaxParser<T> {
     }
 }
 
+pub trait CliParserBuiltin:
+    Builtin + JsParserBuiltin + JsGlobalsBuiltin + LispParserBuiltin
+{
+}
+impl<T> CliParserBuiltin for T where
+    T: Builtin + JsParserBuiltin + JsGlobalsBuiltin + LispParserBuiltin
+{
+}
+
 pub fn compile_entry_point<T, TLoader>(
     path: &Path,
     syntax: Syntax,
@@ -120,7 +129,7 @@ pub fn compile_entry_point<T, TLoader>(
 ) -> Result<(CompiledProgram, InstructionPointer)>
 where
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T> + 'static,
-    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + LispParserBuiltin,
+    T::Builtin: CliParserBuiltin,
     TLoader: Fn(&str, &Path) -> Option<Result<T, String>> + 'static,
 {
     match syntax {
