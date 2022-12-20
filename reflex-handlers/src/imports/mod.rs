@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{Builtin, Expression, ExpressionFactory, HeapAllocator};
 use reflex_json::stdlib::JsonDeserialize;
-use reflex_stdlib::{Effect, Get, Lt, Map, ResolveDeep};
+use reflex_stdlib::{CollectList, Contains, Effect, Get, If, Lt, Map, ResolveDeep};
 
 use crate::stdlib::{
     DecrementVariable, GetVariable, IncrementVariable, Scan, SetVariable, ToRequest,
@@ -21,10 +21,13 @@ pub use self::time::import_time;
 
 pub trait HandlerImportsBuiltin:
     Builtin
+    + From<CollectList>
+    + From<Contains>
     + From<DecrementVariable>
     + From<Effect>
     + From<Get>
     + From<GetVariable>
+    + From<If>
     + From<IncrementVariable>
     + From<JsonDeserialize>
     + From<Lt>
@@ -37,10 +40,13 @@ pub trait HandlerImportsBuiltin:
 }
 impl<T> HandlerImportsBuiltin for T where
     T: Builtin
+        + From<CollectList>
+        + From<Contains>
         + From<DecrementVariable>
         + From<Effect>
         + From<Get>
         + From<GetVariable>
+        + From<If>
         + From<IncrementVariable>
         + From<JsonDeserialize>
         + From<Lt>

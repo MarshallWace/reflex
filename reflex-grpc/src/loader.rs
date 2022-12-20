@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use reflex::core::{create_record, Builtin, Expression, ExpressionFactory, HeapAllocator};
-use reflex_stdlib::{Contains, Effect, Get, If, ResolveDeep};
+use reflex_stdlib::{CollectList, Contains, Effect, Get, If, ResolveDeep};
 
 use crate::{
     actor::EFFECT_TYPE_GRPC,
@@ -13,11 +13,23 @@ use crate::{
 };
 
 pub trait GrpcLoaderBuiltin:
-    Builtin + From<ResolveDeep> + From<Get> + From<If> + From<Contains> + From<Effect>
+    Builtin
+    + From<CollectList>
+    + From<Contains>
+    + From<Effect>
+    + From<Get>
+    + From<If>
+    + From<ResolveDeep>
 {
 }
 impl<T> GrpcLoaderBuiltin for T where
-    T: Builtin + From<ResolveDeep> + From<Get> + From<If> + From<Contains> + From<Effect>
+    T: Builtin
+        + From<CollectList>
+        + From<Contains>
+        + From<Effect>
+        + From<Get>
+        + From<If>
+        + From<ResolveDeep>
 {
 }
 
@@ -101,57 +113,40 @@ where
                             2,
                             factory.create_application_term(
                                 factory.create_builtin_term(Effect),
-                                allocator.create_list(vec![
+                                allocator.create_triple(
                                     factory.create_string_term(
                                         allocator.create_string(EFFECT_TYPE_GRPC),
                                     ),
-                                    factory.create_symbol_term(proto_id.into()),
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Get),
-                                        allocator.create_pair(
-                                            factory.create_variable_term(2),
-                                            factory.create_string_term(
-                                                allocator.create_string(String::from("url")),
-                                            ),
-                                        ),
-                                    ),
-                                    factory.create_string_term(
-                                        allocator.create_string(String::from(service.name())),
-                                    ),
-                                    factory.create_string_term(
-                                        allocator.create_string(String::from(method.name())),
-                                    ),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(ResolveDeep),
-                                        allocator.create_unit_list(factory.create_variable_term(1)),
-                                    ),
-                                    factory.create_application_term(
-                                        factory.create_builtin_term(If),
-                                        allocator.create_triple(
-                                            factory.create_application_term(
-                                                factory.create_builtin_term(Contains),
-                                                allocator.create_pair(
-                                                    factory.create_variable_term(0),
-                                                    factory.create_string_term(
-                                                        allocator.create_string(String::from(
-                                                            "accumulate",
-                                                        )),
-                                                    ),
-                                                ),
-                                            ),
+                                        factory.create_builtin_term(CollectList),
+                                        allocator.create_list([
+                                            factory.create_symbol_term(proto_id.into()),
                                             factory.create_application_term(
                                                 factory.create_builtin_term(Get),
                                                 allocator.create_pair(
-                                                    factory.create_variable_term(0),
+                                                    factory.create_variable_term(2),
                                                     factory.create_string_term(
-                                                        allocator.create_string(String::from(
-                                                            "accumulate",
-                                                        )),
+                                                        allocator
+                                                            .create_string(String::from("url")),
                                                     ),
                                                 ),
                                             ),
+                                            factory.create_string_term(
+                                                allocator
+                                                    .create_string(String::from(service.name())),
+                                            ),
+                                            factory.create_string_term(
+                                                allocator
+                                                    .create_string(String::from(method.name())),
+                                            ),
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(ResolveDeep),
+                                                allocator.create_unit_list(
+                                                    factory.create_variable_term(1),
+                                                ),
+                                            ),
                                             factory.create_nil_term(),
-                                        ),
+                                        ]),
                                     ),
                                     factory.create_application_term(
                                         factory.create_builtin_term(Get),
@@ -162,7 +157,7 @@ where
                                             ),
                                         ),
                                     ),
-                                ]),
+                                ),
                             ),
                         ),
                     )

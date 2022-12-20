@@ -5,16 +5,28 @@ use std::{fs, iter::once, path::Path};
 
 use reflex::core::{create_record, Builtin, Expression, ExpressionFactory, HeapAllocator};
 use reflex_graphql::graphql_parser::{self, schema::Document};
-use reflex_stdlib::{Contains, Effect, Get, If, ResolveDeep};
+use reflex_stdlib::{CollectList, Contains, Effect, Get, If, ResolveDeep};
 
 use crate::actor::graphql::EFFECT_TYPE_GRAPHQL;
 
 pub trait GraphQlLoaderBuiltin:
-    Builtin + From<Contains> + From<Effect> + From<Get> + From<If> + From<ResolveDeep>
+    Builtin
+    + From<CollectList>
+    + From<Contains>
+    + From<Effect>
+    + From<Get>
+    + From<If>
+    + From<ResolveDeep>
 {
 }
 impl<T> GraphQlLoaderBuiltin for T where
-    T: Builtin + From<Contains> + From<Effect> + From<Get> + From<If> + From<ResolveDeep>
+    T: Builtin
+        + From<CollectList>
+        + From<Contains>
+        + From<Effect>
+        + From<Get>
+        + From<If>
+        + From<ResolveDeep>
 {
 }
 
@@ -111,61 +123,68 @@ where
                     1,
                     factory.create_application_term(
                         factory.create_builtin_term(Effect),
-                        allocator.create_list(vec![
+                        allocator.create_triple(
                             factory.create_string_term(
                                 allocator.create_static_string(EFFECT_TYPE_GRAPHQL),
                             ),
-                            factory.create_variable_term(1),
-                            get_struct_field(
-                                factory.create_variable_term(0),
-                                factory.create_string_term(allocator.create_static_string("query")),
-                                factory,
-                                allocator,
-                            ),
-                            get_optional_record_field(
-                                factory.create_variable_term(0),
-                                factory.create_string_term(
-                                    allocator.create_static_string("operationName"),
-                                ),
-                                factory.create_nil_term(),
-                                factory,
-                                allocator,
-                            ),
                             factory.create_application_term(
-                                factory.create_builtin_term(ResolveDeep),
-                                allocator.create_unit_list(get_optional_record_field(
-                                    factory.create_variable_term(0),
-                                    factory.create_string_term(
-                                        allocator.create_static_string("variables"),
+                                factory.create_builtin_term(CollectList),
+                                allocator.create_list([
+                                    factory.create_variable_term(1),
+                                    get_struct_field(
+                                        factory.create_variable_term(0),
+                                        factory.create_string_term(
+                                            allocator.create_static_string("query"),
+                                        ),
+                                        factory,
+                                        allocator,
                                     ),
-                                    factory.create_nil_term(),
-                                    factory,
-                                    allocator,
-                                )),
-                            ),
-                            factory.create_application_term(
-                                factory.create_builtin_term(ResolveDeep),
-                                allocator.create_unit_list(get_optional_record_field(
-                                    factory.create_variable_term(0),
-                                    factory.create_string_term(
-                                        allocator.create_static_string("extensions"),
+                                    get_optional_record_field(
+                                        factory.create_variable_term(0),
+                                        factory.create_string_term(
+                                            allocator.create_static_string("operationName"),
+                                        ),
+                                        factory.create_nil_term(),
+                                        factory,
+                                        allocator,
                                     ),
-                                    factory.create_nil_term(),
-                                    factory,
-                                    allocator,
-                                )),
-                            ),
-                            factory.create_application_term(
-                                factory.create_builtin_term(ResolveDeep),
-                                allocator.create_unit_list(get_optional_record_field(
-                                    factory.create_variable_term(0),
-                                    factory.create_string_term(
-                                        allocator.create_static_string("headers"),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(ResolveDeep),
+                                        allocator.create_unit_list(get_optional_record_field(
+                                            factory.create_variable_term(0),
+                                            factory.create_string_term(
+                                                allocator.create_static_string("variables"),
+                                            ),
+                                            factory.create_nil_term(),
+                                            factory,
+                                            allocator,
+                                        )),
                                     ),
-                                    factory.create_nil_term(),
-                                    factory,
-                                    allocator,
-                                )),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(ResolveDeep),
+                                        allocator.create_unit_list(get_optional_record_field(
+                                            factory.create_variable_term(0),
+                                            factory.create_string_term(
+                                                allocator.create_static_string("extensions"),
+                                            ),
+                                            factory.create_nil_term(),
+                                            factory,
+                                            allocator,
+                                        )),
+                                    ),
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(ResolveDeep),
+                                        allocator.create_unit_list(get_optional_record_field(
+                                            factory.create_variable_term(0),
+                                            factory.create_string_term(
+                                                allocator.create_static_string("headers"),
+                                            ),
+                                            factory.create_nil_term(),
+                                            factory,
+                                            allocator,
+                                        )),
+                                    ),
+                                ]),
                             ),
                             get_optional_record_field(
                                 factory.create_variable_term(0),
@@ -174,7 +193,7 @@ where
                                 factory,
                                 allocator,
                             ),
-                        ]),
+                        ),
                     ),
                 ),
             )],
