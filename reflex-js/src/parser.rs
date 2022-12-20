@@ -14,10 +14,10 @@ use reflex::{
     },
 };
 use reflex_stdlib::{
-    Add, And, Append, Apply, Concat, Contains, Divide, Entries, Eq, Filter, Flatten, Get, Gt, Gte,
-    If, IfError, Insert, Keys, Lt, Lte, Map, Merge, Multiply, Not, Or, Pow, Push, PushFront,
-    Reduce, Remainder, Replace, ResolveDeep, ResolveList, ResolveShallow, Sequence, Slice, Split,
-    Subtract, Values,
+    Add, And, Append, Apply, CollectList, Concat, Contains, Divide, Entries, Eq, Filter, Flatten,
+    Get, Gt, Gte, If, IfError, Insert, Keys, Lt, Lte, Map, Merge, Multiply, Not, Or, Pow, Push,
+    PushFront, Reduce, Remainder, Replace, ResolveDeep, ResolveList, ResolveShallow, Sequence,
+    Slice, Split, Subtract, Values,
 };
 use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
@@ -44,6 +44,7 @@ pub trait JsParserBuiltin:
     + From<And>
     + From<Append>
     + From<Apply>
+    + From<CollectList>
     + From<Concat>
     + From<Construct>
     + From<Contains>
@@ -96,6 +97,7 @@ impl<T> JsParserBuiltin for T where
         + From<And>
         + From<Append>
         + From<Apply>
+        + From<CollectList>
         + From<Concat>
         + From<Construct>
         + From<Contains>
@@ -1198,7 +1200,10 @@ where
     Ok(if field_sets.len() >= 2 {
         factory.create_application_term(
             factory.create_builtin_term(Merge),
-            allocator.create_unit_list(factory.create_list_term(allocator.create_list(field_sets))),
+            allocator.create_unit_list(factory.create_application_term(
+                factory.create_builtin_term(CollectList),
+                allocator.create_list(field_sets),
+            )),
         )
     } else {
         field_sets.into_iter().next().unwrap_or_else(|| {
@@ -2118,8 +2123,9 @@ mod tests {
         cache::SubstitutionCache,
         core::{
             create_record, evaluate, ConditionListType, ConditionType, DependencyList,
-            EvaluationResult, Expression, ExpressionFactory, HeapAllocator, InstructionPointer,
-            RecordTermType, SignalTermType, SignalType, StateCache, StringValue,
+            EvaluationResult, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
+            InstructionPointer, RecordTermType, SignalTermType, SignalType, StateCache,
+            StringValue,
         },
         env::inject_env_vars,
     };
