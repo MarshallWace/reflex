@@ -104,7 +104,7 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
         &self,
         mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
+        _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let keys = args.next().unwrap();
@@ -137,26 +137,26 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
                     let keys = keys.items();
                     let values = values.items();
                     // FIXME: prevent unnecessary vector allocations
-                    let (keys, values) = match deduplicate_hashmap_entries(
-                        &keys
+                    let entries = {
+                        let keys = keys
                             .as_deref()
                             .iter()
                             .map(|item| item.as_deref())
                             .cloned()
-                            .collect::<Vec<_>>(),
-                        &values
+                            .collect::<Vec<_>>();
+                        let values = values
                             .as_deref()
                             .iter()
                             .map(|item| item.as_deref())
                             .cloned()
-                            .collect::<Vec<_>>(),
-                    ) {
-                        Some((keys, values)) => {
-                            (allocator.create_list(keys), allocator.create_list(values))
-                        }
-                        None => (allocator.clone_list(keys), allocator.clone_list(values)),
+                            .collect::<Vec<_>>();
+                        let entries = match deduplicate_hashmap_entries(&keys, &values) {
+                            Some(entries) => entries,
+                            None => keys.into_iter().zip(values).collect::<Vec<_>>(),
+                        };
+                        entries
                     };
-                    Ok(factory.create_hashmap_term(keys, values))
+                    Ok(factory.create_hashmap_term(entries))
                 }
             }
             None => Err(format!("Invalid property values: {}", values)),

@@ -62,17 +62,22 @@ impl<T: Expression> Applicable<T> for Map {
                 ),
             )
         } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(factory.create_hashmap_term(
-                allocator.create_list(target.keys().map(|item| item.as_deref()).cloned()),
-                allocator.create_list(target.values().map(|item| item.as_deref()).cloned().map(
-                    |value| {
-                        factory.create_application_term(
-                            iteratee.clone(),
-                            allocator.create_unit_list(value),
-                        )
-                    },
-                )),
-            ))
+            Some(
+                factory.create_hashmap_term(
+                    target.keys().map(|item| item.as_deref()).cloned().zip(
+                        target
+                            .values()
+                            .map(|item| item.as_deref())
+                            .cloned()
+                            .map(|value| {
+                                factory.create_application_term(
+                                    iteratee.clone(),
+                                    allocator.create_unit_list(value),
+                                )
+                            }),
+                    ),
+                ),
+            )
         } else {
             None
         };

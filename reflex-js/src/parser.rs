@@ -2123,9 +2123,8 @@ mod tests {
         cache::SubstitutionCache,
         core::{
             create_record, evaluate, ConditionListType, ConditionType, DependencyList,
-            EvaluationResult, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-            InstructionPointer, RecordTermType, SignalTermType, SignalType, StateCache,
-            StringValue,
+            EvaluationResult, Expression, ExpressionFactory, HeapAllocator, InstructionPointer,
+            RecordTermType, SignalTermType, SignalType, StateCache, StringValue,
         },
         env::inject_env_vars,
     };

@@ -928,9 +928,10 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                     size,
                 ))
             } else {
-                let values = allocator.create_list(stack.pop_multiple(size));
-                let keys = allocator.create_list(stack.pop_multiple(size));
-                stack.push(factory.create_hashmap_term(keys, values));
+                let values = stack.pop_multiple(size).into_iter().collect::<Vec<_>>();
+                let keys = stack.pop_multiple(size).into_iter().collect::<Vec<_>>();
+                let entries = keys.into_iter().zip(values);
+                stack.push(factory.create_hashmap_term(entries));
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }

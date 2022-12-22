@@ -295,14 +295,14 @@ where
         }
         .unzip();
         // FIXME: prevent unnecessary vector allocations
-        let (keys, values) = match deduplicate_hashmap_entries(
-            &keys.iter().cloned().collect::<Vec<_>>(),
-            &values.iter().cloned().collect::<Vec<_>>(),
-        ) {
-            Some((keys, values)) => (keys, values),
-            None => (keys, values),
+        let entries = {
+            let entries = match deduplicate_hashmap_entries(&keys, &values) {
+                Some(entries) => entries,
+                None => keys.into_iter().zip(values).collect::<Vec<_>>(),
+            };
+            entries
         };
-        Ok(factory.create_hashmap_term(allocator.create_list(keys), allocator.create_list(values)))
+        Ok(factory.create_hashmap_term(entries))
     }
 }
 

@@ -150,10 +150,18 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     }
     fn create_hashmap_term(
         &self,
-        keys: ExpressionList<CachedSharedTerm<TBuiltin>>,
-        values: ExpressionList<CachedSharedTerm<TBuiltin>>,
+        entries: impl IntoIterator<
+            Item = (CachedSharedTerm<TBuiltin>, CachedSharedTerm<TBuiltin>),
+            IntoIter = impl ExactSizeIterator<
+                Item = (CachedSharedTerm<TBuiltin>, CachedSharedTerm<TBuiltin>),
+            >,
+        >,
     ) -> CachedSharedTerm<TBuiltin> {
-        self.create_expression(Term::HashMap(HashMapTerm::new(keys, values)))
+        let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+        self.create_expression(Term::HashMap(HashMapTerm::new(
+            ExpressionList::new(keys),
+            ExpressionList::new(values),
+        )))
     }
     fn create_hashset_term(
         &self,

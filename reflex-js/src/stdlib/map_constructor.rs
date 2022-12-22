@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::iter::empty;
+
 use reflex::core::{
     deduplicate_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
@@ -46,8 +48,7 @@ where
         let mut args = args.into_iter();
         let entries = args.next().unwrap();
         if is_nil_term(&entries, factory) {
-            Ok(factory
-                .create_hashmap_term(allocator.create_empty_list(), allocator.create_empty_list()))
+            Ok(factory.create_hashmap_term(empty()))
         } else if let Some(entries) = factory.match_list_term(&entries) {
             let entries = entries
                 .items()
@@ -95,14 +96,11 @@ where
                             ),
                         ))
                     } else {
-                        let (keys, values) = match deduplicate_hashmap_entries(&keys, &values) {
-                            Some((keys, values)) => (keys, values),
-                            None => (keys, values),
+                        let entries = match deduplicate_hashmap_entries(&keys, &values) {
+                            Some(entries) => entries,
+                            None => keys.into_iter().zip(values).collect::<Vec<_>>(),
                         };
-                        Ok(factory.create_hashmap_term(
-                            allocator.create_list(keys),
-                            allocator.create_list(values),
-                        ))
+                        Ok(factory.create_hashmap_term(entries))
                     }
                 }
             }
@@ -153,20 +151,11 @@ mod tests {
     use reflex::{
         cache::SubstitutionCache,
         core::{
-            evaluate, DependencyList, EvaluationResult, Expression, ExpressionFactory,
-            HeapAllocator, StateCache,
+            evaluate, DependencyList, EvaluationResult, ExpressionFactory, HeapAllocator,
+            StateCache,
         },
     };
     use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
-
-    fn create_hashmap_term<T: Expression>(
-        entries: impl IntoIterator<Item = (T, T)>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-    ) -> T {
-        let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
-        factory.create_hashmap_term(allocator.create_list(keys), allocator.create_list(values))
-    }
 
     #[test]
     fn map_constructor() {
@@ -180,7 +169,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_hashmap_term(empty(), &factory, &allocator),
+                factory.create_hashmap_term(empty()),
                 DependencyList::empty(),
             )
         );
@@ -189,7 +178,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_hashmap_term(empty(), &factory, &allocator),
+                factory.create_hashmap_term(empty()),
                 DependencyList::empty(),
             )
         );
@@ -204,24 +193,20 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_hashmap_term(
-                    vec![
-                        (
-                            factory.create_string_term(allocator.create_static_string("one")),
-                            factory.create_float_term(1.0),
-                        ),
-                        (
-                            factory.create_string_term(allocator.create_static_string("two")),
-                            factory.create_float_term(2.0),
-                        ),
-                        (
-                            factory.create_string_term(allocator.create_static_string("three")),
-                            factory.create_float_term(3.0),
-                        ),
-                    ],
-                    &factory,
-                    &allocator
-                ),
+                factory.create_hashmap_term([
+                    (
+                        factory.create_string_term(allocator.create_static_string("one")),
+                        factory.create_float_term(1.0),
+                    ),
+                    (
+                        factory.create_string_term(allocator.create_static_string("two")),
+                        factory.create_float_term(2.0),
+                    ),
+                    (
+                        factory.create_string_term(allocator.create_static_string("three")),
+                        factory.create_float_term(3.0),
+                    ),
+                ]),
                 DependencyList::empty(),
             )
         );
@@ -236,24 +221,20 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                create_hashmap_term(
-                    vec![
-                        (
-                            factory.create_string_term(allocator.create_static_string("one")),
-                            factory.create_float_term(1.0),
-                        ),
-                        (
-                            factory.create_string_term(allocator.create_static_string("two")),
-                            factory.create_float_term(4.0),
-                        ),
-                        (
-                            factory.create_string_term(allocator.create_static_string("three")),
-                            factory.create_float_term(3.0),
-                        ),
-                    ],
-                    &factory,
-                    &allocator
-                ),
+                factory.create_hashmap_term([
+                    (
+                        factory.create_string_term(allocator.create_static_string("one")),
+                        factory.create_float_term(1.0),
+                    ),
+                    (
+                        factory.create_string_term(allocator.create_static_string("two")),
+                        factory.create_float_term(4.0),
+                    ),
+                    (
+                        factory.create_string_term(allocator.create_static_string("three")),
+                        factory.create_float_term(3.0),
+                    ),
+                ]),
                 DependencyList::empty(),
             )
         );

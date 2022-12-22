@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::empty};
 
 use prost_reflect::{DynamicMessage, FieldDescriptor, Kind, MapKey, ReflectMessage, Value};
 use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
@@ -148,8 +148,7 @@ fn deserialize_missing_field_value<T: Expression>(
     if field_type.is_list() {
         Ok(factory.create_list_term(allocator.create_empty_list()))
     } else if field_type.is_map() {
-        Ok(factory
-            .create_hashmap_term(allocator.create_empty_list(), allocator.create_empty_list()))
+        Ok(factory.create_hashmap_term(empty()))
     } else if matches!(field_type.kind(), Kind::Message(_)) {
         Ok(factory.create_nil_term())
     } else {
@@ -186,7 +185,7 @@ fn deserialize_map_field_value<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Result<T, TranscodeError> {
-    let (keys, values): (Vec<T>, Vec<T>) = value
+    let entries = value
         .iter()
         .map(|(key, value)| {
             match (
@@ -199,10 +198,8 @@ fn deserialize_map_field_value<T: Expression>(
             }
             .map_err(|err| err.with_path_prefix(format_map_key(key).into()))
         })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .unzip();
-    Ok(factory.create_hashmap_term(allocator.create_list(keys), allocator.create_list(values)))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(factory.create_hashmap_term(entries))
 }
 
 fn deserialize_map_key<T: Expression>(

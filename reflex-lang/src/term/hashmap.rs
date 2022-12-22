@@ -84,10 +84,15 @@ impl<T: Expression> HashMapTerm<T> {
         };
         match updated_entries {
             None => None,
-            Some((keys, values)) => Some(factory.create_hashmap_term(
-                keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into())),
-                values,
-            )),
+            Some((keys, values)) => Some(
+                factory.create_hashmap_term(
+                    keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
+                        .iter()
+                        .map(|item| item.as_deref())
+                        .cloned()
+                        .zip(values.iter().map(|item| item.as_deref()).cloned()),
+                ),
+            ),
         }
     }
 }
@@ -227,10 +232,21 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
         if keys.is_none() && values.is_none() {
             return None;
         }
-        Some(factory.create_hashmap_term(
-            keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into())),
-            values.unwrap_or_else(|| allocator.clone_list((&self.values).into())),
-        ))
+        Some(
+            factory.create_hashmap_term(
+                keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .cloned()
+                    .zip(
+                        values
+                            .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
+            ),
+        )
     }
     fn substitute_dynamic(
         &self,
@@ -253,10 +269,21 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
         if keys.is_none() && values.is_none() {
             return None;
         }
-        Some(factory.create_hashmap_term(
-            keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into())),
-            values.unwrap_or_else(|| allocator.clone_list((&self.values).into())),
-        ))
+        Some(
+            factory.create_hashmap_term(
+                keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .cloned()
+                    .zip(
+                        values
+                            .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
+            ),
+        )
     }
     fn hoist_free_variables(
         &self,
@@ -272,10 +299,21 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
         if keys.is_none() && values.is_none() {
             return None;
         }
-        Some(factory.create_hashmap_term(
-            keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into())),
-            values.unwrap_or_else(|| allocator.clone_list((&self.values).into())),
-        ))
+        Some(
+            factory.create_hashmap_term(
+                keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .cloned()
+                    .zip(
+                        values
+                            .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
+            ),
+        )
     }
     fn normalize(
         &self,
@@ -292,10 +330,21 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
         if keys.is_none() && values.is_none() {
             return None;
         }
-        Some(factory.create_hashmap_term(
-            keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into())),
-            values.unwrap_or_else(|| allocator.clone_list((&self.values).into())),
-        ))
+        Some(
+            factory.create_hashmap_term(
+                keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
+                    .iter()
+                    .map(|item| item.as_deref())
+                    .cloned()
+                    .zip(
+                        values
+                            .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
+                            .iter()
+                            .map(|item| item.as_deref())
+                            .cloned(),
+                    ),
+            ),
+        )
     }
 }
 

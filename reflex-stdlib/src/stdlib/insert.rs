@@ -36,7 +36,7 @@ impl<T: Expression> Applicable<T> for Insert {
         &self,
         mut args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
+        _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
@@ -59,10 +59,12 @@ impl<T: Expression> Applicable<T> for Insert {
                 } else {
                     None
                 };
-                let (keys, values) = if let Some(existing_index) = existing_index {
-                    (
-                        allocator.create_list(existing.keys().map(|item| item.as_deref()).cloned()),
-                        allocator.create_list(
+                let entries = if let Some(existing_index) = existing_index {
+                    existing
+                        .keys()
+                        .map(|item| item.as_deref())
+                        .cloned()
+                        .zip(
                             existing
                                 .values()
                                 .map(|item| item.as_deref())
@@ -75,23 +77,24 @@ impl<T: Expression> Applicable<T> for Insert {
                                     }
                                 })
                                 .cloned(),
-                        ),
-                    )
+                        )
+                        .collect::<Vec<_>>()
                 } else {
-                    let existing_keys = existing.keys().map(|item| item.as_deref());
-                    let existing_values = existing.values().map(|item| item.as_deref());
-                    (
-                        allocator.create_sized_list(
-                            existing_keys.len() + 1,
-                            existing_keys.cloned().chain(once(key)),
-                        ),
-                        allocator.create_sized_list(
-                            existing_values.len() + 1,
-                            existing_values.cloned().chain(once(value)),
-                        ),
-                    )
+                    existing
+                        .keys()
+                        .map(|item| item.as_deref())
+                        .cloned()
+                        .chain(once(key))
+                        .zip(
+                            existing
+                                .values()
+                                .map(|item| item.as_deref())
+                                .cloned()
+                                .chain(once(value)),
+                        )
+                        .collect::<Vec<_>>()
                 };
-                factory.create_hashmap_term(keys, values)
+                factory.create_hashmap_term(entries)
             })
         } else {
             Err(format!(

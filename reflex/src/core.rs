@@ -1082,7 +1082,10 @@ pub trait ExpressionFactory<T: Expression> {
     fn create_record_term(&self, prototype: T::StructPrototype, fields: T::ExpressionList) -> T;
     fn create_constructor_term(&self, prototype: T::StructPrototype) -> T;
     fn create_list_term(&self, items: T::ExpressionList) -> T;
-    fn create_hashmap_term(&self, keys: T::ExpressionList, values: T::ExpressionList) -> T;
+    fn create_hashmap_term(
+        &self,
+        entries: impl IntoIterator<Item = (T, T), IntoIter = impl ExactSizeIterator<Item = (T, T)>>,
+    ) -> T;
     fn create_hashset_term(&self, values: T::ExpressionList) -> T;
     fn create_signal_term(&self, signals: T::SignalList) -> T;
 
@@ -1693,34 +1696,26 @@ pub fn get_hashmap_entries<'a, T: Expression + 'a>(
         .map(move |(key, value)| factory.create_list_term(allocator.create_pair(key, value)))
 }
 
-pub fn deduplicate_hashmap_entries<T: Expression>(
-    keys: &[T],
-    values: &[T],
-) -> Option<(Vec<T>, Vec<T>)> {
+pub fn deduplicate_hashmap_entries<T: Expression>(keys: &[T], values: &[T]) -> Option<Vec<(T, T)>> {
     let lookup = build_hashmap_lookup_table(keys.iter());
     if lookup.len() == keys.len() {
         None
     } else {
-        let (keys, values, _) = keys.iter().fold(
-            (
-                Vec::with_capacity(lookup.len()),
-                Vec::with_capacity(lookup.len()),
-                HashSet::new(),
-            ),
+        let (entries, _) = keys.iter().fold(
+            (Vec::with_capacity(lookup.len()), HashSet::new()),
             |results, key| {
-                let (mut deduplicated_keys, mut deduplicated_values, mut processed_keys) = results;
+                let (mut deduplicated_entries, mut processed_keys) = results;
                 let key_hash = key.id();
                 if !processed_keys.contains(&key_hash) {
                     let target_index = *lookup.get(&key_hash).unwrap();
                     let value = values.get(target_index).unwrap();
-                    deduplicated_keys.push(key.clone());
-                    deduplicated_values.push(value.clone());
+                    deduplicated_entries.push((key.clone(), value.clone()));
                     processed_keys.insert(key_hash);
                 }
-                (deduplicated_keys, deduplicated_values, processed_keys)
+                (deduplicated_entries, processed_keys)
             },
         );
-        Some((keys, values))
+        Some(entries)
     }
 }
 
