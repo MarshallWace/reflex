@@ -1086,7 +1086,10 @@ pub trait ExpressionFactory<T: Expression> {
         &self,
         entries: impl IntoIterator<Item = (T, T), IntoIter = impl ExactSizeIterator<Item = (T, T)>>,
     ) -> T;
-    fn create_hashset_term(&self, values: T::ExpressionList) -> T;
+    fn create_hashset_term(
+        &self,
+        values: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
+    ) -> T;
     fn create_signal_term(&self, signals: T::SignalList) -> T;
 
     fn match_nil_term<'a>(&self, expression: &'a T) -> Option<&'a T::NilTerm>;

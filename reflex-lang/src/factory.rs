@@ -165,9 +165,12 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     }
     fn create_hashset_term(
         &self,
-        values: ExpressionList<CachedSharedTerm<TBuiltin>>,
+        values: impl IntoIterator<
+            Item = CachedSharedTerm<TBuiltin>,
+            IntoIter = impl ExactSizeIterator<Item = CachedSharedTerm<TBuiltin>>,
+        >,
     ) -> CachedSharedTerm<TBuiltin> {
-        self.create_expression(Term::HashSet(HashSetTerm::new(values)))
+        self.create_expression(Term::HashSet(HashSetTerm::new(ExpressionList::new(values))))
     }
     fn create_signal_term(
         &self,

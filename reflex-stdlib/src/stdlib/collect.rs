@@ -211,7 +211,7 @@ impl<T: Expression> Applicable<T> for CollectHashSet {
         &self,
         args: impl ExactSizeIterator<Item = T>,
         factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
+        _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let values = args.collect::<Vec<_>>();
@@ -219,7 +219,7 @@ impl<T: Expression> Applicable<T> for CollectHashSet {
             Some(values) => values,
             None => values,
         };
-        Ok(factory.create_hashset_term(allocator.create_list(deduplicated_values)))
+        Ok(factory.create_hashset_term(deduplicated_values))
     }
 }
 

@@ -109,7 +109,9 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
         transform_expression_list(&self.values, allocator, |value| {
             value.substitute_static(substitutions, factory, allocator, cache)
         })
-        .map(|values| factory.create_hashset_term(values))
+        .map(|values| {
+            factory.create_hashset_term(values.iter().map(|item| item.as_deref()).cloned())
+        })
     }
     fn substitute_dynamic(
         &self,

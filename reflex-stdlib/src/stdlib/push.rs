@@ -62,13 +62,11 @@ impl<T: Expression> Applicable<T> for Push {
             } else {
                 let values = collection.values();
                 factory.create_hashset_term(
-                    allocator.create_sized_list(
-                        values.len() + 1,
-                        values
-                            .map(|item| item.as_deref())
-                            .cloned()
-                            .chain(once(value)),
-                    ),
+                    values
+                        .map(|item| item.as_deref())
+                        .cloned()
+                        .chain(once(value))
+                        .collect::<Vec<_>>(),
                 )
             })
         } else {

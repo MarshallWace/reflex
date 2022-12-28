@@ -73,7 +73,7 @@ impl<T: Expression> Applicable<T> for Append {
                 Some(values) => values,
                 None => values,
             };
-            Ok(factory.create_hashset_term(allocator.create_list(deduplicated_values)))
+            Ok(factory.create_hashset_term(deduplicated_values))
         } else {
             Err(format!(
                 "Expected (List, ...) or (HashSet, ...), received ({})",
