@@ -6,6 +6,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
     marker::PhantomData,
+    ops::Deref,
     str::FromStr,
     time::Duration,
 };
@@ -1337,7 +1338,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value().as_deref().as_str())),
+        Some(term) => Some(String::from(term.value().as_deref().as_str().deref())),
         _ => None,
     }
 }
@@ -1358,8 +1359,9 @@ fn parse_object_arg<T: Expression>(
                 .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
                 .filter_map(|(key, value)| {
                     factory.match_string_term(key).map(|key| {
-                        reflex_json::sanitize(value)
-                            .map(|value| (String::from(key.value().as_deref().as_str()), value))
+                        reflex_json::sanitize(value).map(|value| {
+                            (String::from(key.value().as_deref().as_str().deref()), value)
+                        })
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;

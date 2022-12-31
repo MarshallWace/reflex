@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
@@ -47,7 +49,7 @@ impl<T: Expression> Applicable<T> for EndsWith {
                 left.value()
                     .as_deref()
                     .as_str()
-                    .ends_with(right.value().as_deref().as_str()),
+                    .ends_with(right.value().as_deref().as_str().deref()),
             )),
             _ => Err(format!(
                 "Expected (String, String), received ({}, {})",

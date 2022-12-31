@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
@@ -40,8 +42,12 @@ impl<T: Expression> Applicable<T> for JsonDeserialize {
         let mut args = args.into_iter();
         let source = args.next().unwrap();
         match factory.match_string_term(&source) {
-            Some(source) => crate::parse(source.value().as_deref().as_str(), factory, allocator)
-                .map_err(|error| format!("JSON deserialization failed: {}", error)),
+            Some(source) => crate::parse(
+                source.value().as_deref().as_str().deref(),
+                factory,
+                allocator,
+            )
+            .map_err(|error| format!("JSON deserialization failed: {}", error)),
             _ => Err(format!(
                 "JSON deserialization failed: expected string argument, received {}",
                 source

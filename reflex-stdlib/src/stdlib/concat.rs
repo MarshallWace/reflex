@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use reflex::core::{
     match_typed_expression_list, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
     ExpressionFactory, FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid,
@@ -43,7 +45,7 @@ impl<T: Expression> Applicable<T> for Concat {
             args.iter(),
             |arg| {
                 if let Some(term) = factory.match_string_term(arg) {
-                    Some(term.value().as_deref().as_str())
+                    Some(String::from(term.value().as_deref().as_str().deref()))
                 } else {
                     None
                 }

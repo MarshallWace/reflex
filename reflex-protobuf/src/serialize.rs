@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref};
 
 use prost_reflect::{
     DynamicMessage, EnumDescriptor, FieldDescriptor, Kind, MapKey, MessageDescriptor,
@@ -233,7 +233,7 @@ fn serialize_map_key<T: Expression>(
 ) -> Result<MapKey, TranscodeError> {
     if let Some(term) = factory.match_string_term(value) {
         Ok(MapKey::String(String::from(
-            term.value().as_deref().as_str(),
+            term.value().as_deref().as_str().deref(),
         )))
     } else if let Some(term) = factory.match_int_term(value) {
         Ok(MapKey::I32(term.value()))
@@ -296,7 +296,7 @@ fn serialize_enum_field_value<T: Expression>(
         Ok(Value::EnumNumber(enum_type.default_value().number()))
     } else if let Some(term) = factory.match_string_term(value) {
         enum_type
-            .get_value_by_name(term.value().as_deref().as_str())
+            .get_value_by_name(term.value().as_deref().as_str().deref())
             .map(|value| Value::EnumNumber(value.number()))
             .ok_or_else(|| {
                 TranscodeError::from(format!("Invalid {} variant: {}", enum_type.name(), value))
@@ -370,7 +370,7 @@ fn parse_string_value<T: Expression>(
     if let Some(_) = factory.match_nil_term(value) {
         Ok(Default::default())
     } else if let Some(term) = factory.match_string_term(value) {
-        Ok(String::from(term.value().as_deref().as_str()))
+        Ok(String::from(term.value().as_deref().as_str().deref()))
     } else {
         Err(TranscodeError::from(format!(
             "Expected String, received {}",

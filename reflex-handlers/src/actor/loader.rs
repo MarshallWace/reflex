@@ -6,6 +6,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::once,
     marker::PhantomData,
+    ops::Deref,
 };
 
 use metrics::{decrement_gauge, describe_gauge, increment_gauge, Unit};
@@ -789,7 +790,7 @@ fn prefix_error_message_effects<T: Expression>(
                             factory.create_string_term(allocator.create_string(format!(
                                 "{}{}",
                                 prefix,
-                                message.as_str()
+                                message.as_str().deref(),
                             ))),
                             signal.token().as_deref().clone(),
                         )
@@ -846,7 +847,7 @@ fn parse_loader_effect_args<T: Expression + Applicable<T>>(
         .ok_or(name);
     match (name, loader.arity()) {
         (Ok(name), Some(arity)) if is_valid_loader_signature(&arity) => Ok(LoaderEffectArgs {
-            name: String::from(name),
+            name: String::from(name.deref()),
             loader: loader.clone(),
             key: key.clone(),
         }),

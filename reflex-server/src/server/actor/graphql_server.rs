@@ -5,6 +5,7 @@
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::time::SystemTime;
 use std::{iter::once, marker::PhantomData, time::Instant};
 
@@ -1133,9 +1134,8 @@ where
             );
         }
         let result_status = if let Some(err) = error_result {
-            Err(String::from(
-                parse_error_message(err, &self.factory, &self.allocator).unwrap_or("Error"),
-            ))
+            Err(parse_error_message(err, &self.factory, &self.allocator)
+                .unwrap_or_else(|| String::from("Error")))
         } else {
             Ok(())
         };
@@ -1439,10 +1439,10 @@ fn parse_error_message<'a, T: Expression + 'a>(
     error: &'a T::Signal,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Option<&'a str> {
+) -> Option<String> {
     let payload = error.payload().as_deref();
     if let Some(term) = factory.match_string_term(payload) {
-        Some(term.value().as_deref().as_str())
+        Some(String::from(term.value().as_deref().as_str().deref()))
     } else if let Some(term) = factory.match_record_term(payload) {
         parse_error_object_payload_message(term, factory, allocator)
     } else {
@@ -1454,12 +1454,12 @@ fn parse_error_object_payload_message<'a, T: Expression + 'a>(
     value: &'a T::RecordTerm,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Option<&'a str> {
+) -> Option<String> {
     let message = value
         .get(&factory.create_string_term(allocator.create_static_string("message")))
         .map(|value| value.as_deref())?;
     let term = factory.match_string_term(message)?;
-    Some(term.value().as_deref().as_str())
+    Some(String::from(term.value().as_deref().as_str().deref()))
 }
 
 fn is_error_result_payload<T: Expression>(

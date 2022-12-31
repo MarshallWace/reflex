@@ -7,6 +7,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter::once,
     marker::PhantomData,
+    ops::Deref,
     time::{Duration, Instant},
 };
 
@@ -177,7 +178,7 @@ pub fn parse_evaluate_effect_query<T: Expression>(
         QueryInvalidationStrategy::deserialize(invalidation_strategy, factory),
     ) {
         (Some(label), Some(evaluation_mode), Some(invalidation_strategy)) => Some((
-            String::from(label.value().as_deref().as_str()),
+            String::from(label.value().as_deref().as_str().deref()),
             query.clone(),
             evaluation_mode,
             invalidation_strategy,

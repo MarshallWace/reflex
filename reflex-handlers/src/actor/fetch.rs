@@ -6,6 +6,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
+    ops::Deref,
     str::FromStr,
 };
 
@@ -555,7 +556,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value().as_deref().as_str())),
+        Some(term) => Some(String::from(term.value().as_deref().as_str().deref())),
         _ => None,
     }
 }
@@ -565,7 +566,7 @@ fn parse_optional_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
     match factory.match_string_term(value) {
-        Some(term) => Some(Some(String::from(term.value().as_deref().as_str()))),
+        Some(term) => Some(Some(String::from(term.value().as_deref().as_str().deref()))),
         _ => match factory.match_nil_term(value) {
             Some(_) => Some(None),
             _ => None,
@@ -592,8 +593,8 @@ fn parse_key_values_arg<T: Expression>(
                     factory.match_string_term(value),
                 ) {
                     (Some(key), Some(value)) => Some((
-                        String::from(key.value().as_deref().as_str()),
-                        String::from(value.value().as_deref().as_str()),
+                        String::from(key.value().as_deref().as_str().deref()),
+                        String::from(value.value().as_deref().as_str().deref()),
                     )),
                     _ => None,
                 }

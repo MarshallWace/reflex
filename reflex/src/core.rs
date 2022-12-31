@@ -9,6 +9,7 @@ use std::{
     hash::{Hash, Hasher},
     iter::{once, repeat, FromIterator},
     marker::PhantomData,
+    ops::Deref,
     rc::Rc,
     sync::Arc,
 };
@@ -893,15 +894,21 @@ pub trait StringValue:
 where
     Self: std::marker::Sized,
 {
+    type StringRef<'a>: Deref<Target = str> + Into<String>
+    where
+        Self: 'a;
     fn id(&self) -> HashId;
-    fn as_str(&self) -> &str;
+    fn as_str<'a>(&'a self) -> Self::StringRef<'a>;
     fn from_static(_self: Option<Self>, value: &'static str) -> Option<Self>;
 }
 impl StringValue for String {
+    type StringRef<'a> = &'a str
+        where
+            Self: 'a;
     fn id(&self) -> HashId {
         hash_object(self)
     }
-    fn as_str(&self) -> &str {
+    fn as_str<'a>(&'a self) -> Self::StringRef<'a> {
         self.as_str()
     }
     fn from_static(_self: Option<Self>, value: &'static str) -> Option<Self> {

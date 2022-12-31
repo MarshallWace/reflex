@@ -6,6 +6,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::{empty, once},
     marker::PhantomData,
+    ops::Deref,
     string::FromUtf8Error,
     time::Duration,
 };
@@ -1423,7 +1424,7 @@ fn parse_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<String> {
     match factory.match_string_term(value) {
-        Some(term) => Some(String::from(term.value().as_deref().as_str())),
+        Some(term) => Some(String::from(term.value().as_deref().as_str().deref())),
         _ => None,
     }
 }
@@ -1433,7 +1434,7 @@ fn parse_optional_string_arg<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<Option<String>> {
     match factory.match_string_term(value) {
-        Some(term) => Some(Some(String::from(term.value().as_deref().as_str()))),
+        Some(term) => Some(Some(String::from(term.value().as_deref().as_str().deref()))),
         _ => match factory.match_nil_term(value) {
             Some(_) => Some(None),
             _ => None,
@@ -1457,8 +1458,9 @@ fn parse_object_arg<T: Expression>(
                 .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
                 .filter_map(|(key, value)| {
                     factory.match_string_term(key).map(|key| {
-                        reflex_json::sanitize(value)
-                            .map(|value| (String::from(key.value().as_deref().as_str()), value))
+                        reflex_json::sanitize(value).map(|value| {
+                            (String::from(key.value().as_deref().as_str().deref()), value)
+                        })
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;

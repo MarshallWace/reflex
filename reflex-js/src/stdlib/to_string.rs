@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::ops::Deref;
+
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, BooleanTermType, EvaluationCache, Expression,
     ExpressionFactory, FloatTermType, FunctionArity, HeapAllocator, IntTermType, RefType,
@@ -64,7 +66,7 @@ pub fn format_value<T: Expression>(
     } else if let Some(term) = factory.match_float_term(value) {
         Some(format!("{}", term.value()))
     } else if let Some(term) = factory.match_string_term(value) {
-        Some(String::from(term.value().as_deref().as_str()))
+        Some(String::from(term.value().as_deref().as_str().deref()))
     } else if let Some(term) = factory.match_symbol_term(value) {
         Some(format!("{}", term.id()))
     } else {

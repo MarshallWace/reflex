@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::ops::Deref;
+
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RecordTermType, RefType,
@@ -101,7 +103,7 @@ fn parse_error_message<T: Expression>(
             .and_then(|value| {
                 factory
                     .match_string_term(value)
-                    .map(|message| String::from(message.value().as_deref().as_str()))
+                    .map(|message| String::from(message.value().as_deref().as_str().deref()))
             })
     } else {
         None

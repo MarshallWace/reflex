@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
+use std::{iter::once, ops::Deref};
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -45,7 +44,9 @@ impl<T: Expression> Applicable<T> for Effect {
         let token = args.next().unwrap();
         if let Some(signal_type) = factory.match_string_term(&signal_type) {
             Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(signal_type.value().as_deref().as_str())),
+                SignalType::Custom(String::from(
+                    signal_type.value().as_deref().as_str().deref(),
+                )),
                 payload,
                 token,
             )))

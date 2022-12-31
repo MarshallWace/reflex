@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
+use std::{iter::once, ops::Deref};
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
@@ -75,7 +75,7 @@ fn parse_aggregate_error<'a, T: Expression + 'a>(
             .map(|item| item.as_deref())
             .and_then(|error_type| {
                 factory.match_string_term(error_type).and_then(|name| {
-                    if name.value().as_deref().as_str() == "AggregateError" {
+                    if name.value().as_deref().as_str().deref() == "AggregateError" {
                         target
                             .get(
                                 &factory

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use chrono::{DateTime, NaiveDateTime};
 use reflex::core::{
     create_record, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
@@ -46,7 +48,7 @@ impl<T: Expression> Applicable<T> for DateConstructor {
         } else if let Some(term) = factory.match_float_term(&value) {
             Some(term.value().trunc() as i64)
         } else if let Some(term) = factory.match_string_term(&value) {
-            parse_string_timestamp(term.value().as_deref().as_str())
+            parse_string_timestamp(term.value().as_deref().as_str().deref())
         } else {
             None
         };

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, RefType, StringTermType, StringValue, Uid, Uuid,
@@ -49,7 +51,7 @@ impl<T: Expression> Applicable<T> for Split {
                         .value()
                         .as_deref()
                         .as_str()
-                        .split(separator.value().as_deref().as_str())
+                        .split(separator.value().as_deref().as_str().deref())
                         .map(|value| factory.create_string_term(allocator.create_string(value))),
                 ),
             )),

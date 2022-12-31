@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
+use std::{iter::once, ops::Deref};
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
@@ -71,7 +71,7 @@ where
         let builtin_method = match factory.match_string_term(&method_name) {
             Some(method_name) => get_builtin_field(
                 Some(&target),
-                method_name.value().as_deref().as_str(),
+                method_name.value().as_deref().as_str().deref(),
                 factory,
                 allocator,
             ),

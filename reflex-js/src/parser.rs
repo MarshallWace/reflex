@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
-use std::{iter::once, path::Path};
+use std::{iter::once, ops::Deref, path::Path};
 
 use reflex::{
     cache::NoopCache,
@@ -837,7 +837,7 @@ where
         PropName::Computed(key) => {
             let dynamic_key = parse_expression(&key.expr, scope, env, factory, allocator)?;
             if let Some(term) = factory.match_string_term(&dynamic_key) {
-                Ok(String::from(term.value().as_deref().as_str()))
+                Ok(String::from(term.value().as_deref().as_str().deref()))
             } else if let Some(_) = factory.match_nil_term(&dynamic_key) {
                 Ok(format!("{}", dynamic_key))
             } else if let Some(_) = factory.match_boolean_term(&dynamic_key) {
@@ -2183,7 +2183,8 @@ mod tests {
                         .unwrap()
                         .value()
                         .as_deref()
-                        .as_str(),
+                        .as_str()
+                        .deref(),
                 )
             })
             .collect()

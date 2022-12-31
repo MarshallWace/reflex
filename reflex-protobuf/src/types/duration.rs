@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use prost_reflect::{DynamicMessage, MessageDescriptor, Value};
 use reflex::core::{
     Expression, ExpressionFactory, HeapAllocator, RefType, StringTermType, StringValue,
@@ -23,7 +25,7 @@ impl CustomType for DurationMessage {
         factory: &impl ExpressionFactory<T>,
     ) -> Result<DynamicMessage, String> {
         if let Some(term) = factory.match_string_term(value) {
-            match parse_duration(term.value().as_deref().as_str()) {
+            match parse_duration(term.value().as_deref().as_str().deref()) {
                 None => Err(format!("Invalid duration: {}", value)),
                 Some((seconds, nanos)) => {
                     let mut message = DynamicMessage::new(message_type.clone());

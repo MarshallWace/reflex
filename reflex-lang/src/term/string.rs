@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
-// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+// SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::{collections::HashSet, hash::Hash};
+use std::{collections::HashSet, hash::Hash, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -90,7 +90,7 @@ impl<T: Expression> std::fmt::Debug for StringTerm<T> {
 }
 impl<T: Expression> SerializeJson for StringTerm<T> {
     fn to_json(&self) -> Result<JsonValue, String> {
-        Ok(JsonValue::String(String::from(self.value.as_str())))
+        Ok(JsonValue::String(String::from(self.value.as_str().deref())))
     }
     fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
         if self.value == target.value {

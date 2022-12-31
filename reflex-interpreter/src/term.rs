@@ -663,7 +663,7 @@ impl<T: Expression + Compile<T>> Compile<T> for StringTerm<T> {
         _compiler: &mut Compiler,
     ) -> Result<Program, String> {
         Ok(Program::new(once(Instruction::PushString {
-            value: String::from(self.value().as_deref().as_str()),
+            value: Into::<String>::into(self.value().as_deref().as_str()),
         })))
     }
 }
