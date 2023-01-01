@@ -42,10 +42,10 @@ impl<T: Expression> Applicable<T> for Append {
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
         let target = args.next().unwrap();
+        let variadic_args = args.collect::<Vec<_>>();
         if let Some(collection) = factory.match_list_term(&target) {
-            let args = args.collect::<Vec<_>>();
             let additional_collections = match_typed_expression_list(
-                args.iter(),
+                variadic_args.iter(),
                 |term| factory.match_list_term(term),
                 |arg| format!("Expected List, received {}", arg),
             )?;
@@ -57,9 +57,8 @@ impl<T: Expression> Applicable<T> for Append {
             });
             Ok(factory.create_list_term(allocator.create_list(combined_items)))
         } else if let Some(collection) = factory.match_hashset_term(&target) {
-            let args = args.collect::<Vec<_>>();
             let additional_collections = match_typed_expression_list(
-                args.iter(),
+                variadic_args.iter(),
                 |term| factory.match_hashset_term(term),
                 |arg| format!("Expected HashSet, received {}", arg),
             )?;
@@ -75,7 +74,7 @@ impl<T: Expression> Applicable<T> for Append {
             Err(format!(
                 "Expected (List, ...) or (HashSet, ...), received ({})",
                 once(target)
-                    .chain(args)
+                    .chain(variadic_args)
                     .map(|arg| format!("{}", arg))
                     .collect::<Vec<_>>()
                     .join(", ")
