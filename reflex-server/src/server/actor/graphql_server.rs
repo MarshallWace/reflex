@@ -4,7 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::iter::empty;
 use std::ops::Deref;
 use std::time::SystemTime;
 use std::{iter::once, marker::PhantomData, time::Instant};
@@ -20,7 +21,7 @@ use opentelemetry::{
 };
 use reflex::core::{
     ConditionListType, ConditionType, EvaluationResult, Expression, ExpressionFactory,
-    HeapAllocator, RecordTermType, RefType, SignalTermType, SignalType, StringTermType,
+    HeapAllocator, RecordTermType, RefType, SignalTermType, SignalType, StateToken, StringTermType,
     StringValue, Uuid,
 };
 use reflex::hash::{HashId, IntMap};
@@ -324,9 +325,36 @@ struct GraphQlOperationState<T: Expression, TSpan: Span> {
     start_time: Option<Instant>,
     // Latest emitted result
     result: Option<EvaluationResult<T>>,
+    // Effects this query currently depends on (determined by the most recent evaluation result)
+    active_effects: IntMap<StateToken, GraphQlOperationEffectState<T>>,
     // Mapping from subscription IDs to active subcription state
     subscriptions: HashMap<Uuid, GraphQlSubscriptionState<TSpan>>,
 }
+
+struct GraphQlOperationEffectState<T: Expression> {
+    #[allow(dead_code)]
+    condition: T::Signal,
+    signal_type: SignalType,
+    status: EffectStatus<T>,
+}
+
+enum EffectStatus<T> {
+    /// Effect has not yet had its initial result emitted by the handler
+    Queued,
+    /// Effect has received a placeholder pending result from the handler
+    Pending,
+    /// Effect has resolved to a value
+    Resolved {
+        #[allow(dead_code)]
+        value: T,
+    },
+    /// Effect has resolved to an error
+    Error {
+        #[allow(dead_code)]
+        payload: T,
+    },
+}
+
 struct GraphQlSubscriptionState<TSpan: Span> {
     operation: GraphQlOperation,
     trace: Option<GraphQlTransactionTrace<TSpan>>,
@@ -752,6 +780,7 @@ where
                         metric_labels,
                         start_time: Some(Instant::now()),
                         result: None,
+                        active_effects: Default::default(),
                         subscriptions: HashMap::from([(subscription_id, subscription_state)]),
                     });
                     let transition = SchedulerTransition::new([
@@ -1052,6 +1081,7 @@ where
                                 metric_labels,
                                 start_time: Some(Instant::now()),
                                 result: None,
+                                active_effects: Default::default(),
                                 subscriptions: HashMap::from([(
                                     subscription_id,
                                     subscription_state,
@@ -1223,10 +1253,22 @@ where
         } = action;
         let query_id = state.evaluate_effect_mappings.get(cache_id)?;
         let operation_state = state.operations.get_mut(query_id)?;
+        update_operation_effect_state(
+            state_updates.iter(),
+            &mut operation_state.active_effects,
+            &self.factory,
+        );
         let active_traces = operation_state
             .subscriptions
             .values_mut()
             .filter_map(|subscription| subscription.trace.as_mut());
+        let updated_state_tokens = state_updates
+            .iter()
+            .map(|(state_token, _value)| *state_token);
+        let state_update_effect_type =
+            count_state_updates(updated_state_tokens, &operation_state.active_effects);
+        let effect_status_metrics =
+            get_operation_effect_status_metrics(&operation_state.active_effects);
         for trace in active_traces {
             trace.enter_span(
                 GraphQlOperationPhase::Busy,
@@ -1245,7 +1287,23 @@ where
                         Key::from("state_updates"),
                         Value::from(state_updates.len() as i64),
                     ),
-                ],
+                ]
+                .into_iter()
+                .chain(
+                    state_update_effect_type
+                        .iter()
+                        .filter_map(|(effect_type, count)| match effect_type {
+                            SignalType::Custom(effect_type) => Some((effect_type, count)),
+                            _ => None,
+                        })
+                        .map(|(effect_type, count)| {
+                            KeyValue::new(
+                                Key::from(format!("update::{}", effect_type)),
+                                Value::from(*count as i64),
+                            )
+                        }),
+                )
+                .chain(effect_status_metrics.as_span_labels()),
                 &self.tracer,
             );
         }
@@ -1267,6 +1325,11 @@ where
         } = action;
         let query_id = state.evaluate_effect_mappings.get(cache_id)?;
         let operation_state = state.operations.get_mut(query_id)?;
+        update_operation_effect_mappings(
+            &mut operation_state.active_effects,
+            result,
+            &self.factory,
+        );
         let query_status = GraphQlQueryStatus::get_state(Some(result.result()), &self.factory);
         let updated_phase = match query_status {
             GraphQlQueryStatus::Blocked => Some(GraphQlOperationPhase::Blocked),
@@ -1278,60 +1341,26 @@ where
             .subscriptions
             .values_mut()
             .filter_map(|subscription| subscription.trace.as_mut());
+        let effect_status_metrics =
+            get_operation_effect_status_metrics(&operation_state.active_effects);
         if let Some(updated_phase) = updated_phase {
-            let span_attributes = match updated_phase {
-                GraphQlOperationPhase::Blocked => {
-                    let effect_type_counts =
-                        parse_custom_effect_types(result.result(), &self.factory)
-                            .into_iter()
-                            .fold(
-                                HashMap::<String, usize>::new(),
-                                |mut results, effect_type| {
-                                    match results.entry(effect_type) {
-                                        Entry::Occupied(mut entry) => {
-                                            *entry.get_mut() += 1;
-                                        }
-                                        Entry::Vacant(entry) => {
-                                            entry.insert(1);
-                                        }
-                                    }
-                                    results
-                                },
-                            );
-                    let total_effect_count: usize = effect_type_counts.values().sum();
-                    Some(
-                        once(KeyValue::new("effects", format!("{}", total_effect_count))).chain(
-                            effect_type_counts.into_iter().map(|(effect_type, count)| {
-                                KeyValue::new(
-                                    format!("effect:{}", effect_type),
-                                    format!("{}", count),
-                                )
-                            }),
-                        ),
-                    )
-                }
-                _ => None,
-            }
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
             for trace in active_traces {
-                trace.enter_span(updated_phase, span_attributes.clone(), &self.tracer);
+                trace.enter_span(
+                    updated_phase,
+                    effect_status_metrics.as_span_labels(),
+                    &self.tracer,
+                );
             }
         } else {
-            let result_event = Some(if is_error_result_payload(result.result(), &self.factory) {
-                GraphQlTraceEvent {
-                    event_type: GraphQlTraceEventType::Error,
-                    attributes: Default::default(),
-                }
-            } else {
-                GraphQlTraceEvent {
-                    event_type: GraphQlTraceEventType::Emit,
-                    attributes: Default::default(),
-                }
-            });
+            let event_type = match is_error_result_payload(result.result(), &self.factory) {
+                true => GraphQlTraceEventType::Error,
+                false => GraphQlTraceEventType::Emit,
+            };
             for trace in active_traces {
-                trace.end_active_span(result_event.clone());
+                trace.end_active_span(Some(GraphQlTraceEvent {
+                    event_type,
+                    attributes: effect_status_metrics.as_span_labels().collect(),
+                }));
             }
         }
         None
@@ -1396,21 +1425,156 @@ where
     }
 }
 
-fn parse_custom_effect_types<T: Expression>(
-    result: &T,
+fn update_operation_effect_state<'a, T: Expression + 'a>(
+    updates: impl IntoIterator<Item = &'a (StateToken, T)>,
+    active_effects: &mut IntMap<StateToken, GraphQlOperationEffectState<T>>,
     factory: &impl ExpressionFactory<T>,
-) -> HashSet<String> {
-    match factory.match_signal_term(result) {
-        None => HashSet::new(),
+) {
+    for (state_token, value) in updates {
+        if let Some(effect_state) = active_effects.get_mut(state_token) {
+            effect_state.status = parse_effect_status(value, factory);
+        }
+    }
+}
+
+fn parse_effect_status<T: Expression>(
+    value: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> EffectStatus<T> {
+    if let Some(term) = factory.match_signal_term(value) {
+        let error_payload = term.signals().as_deref().iter().find_map(|effect| {
+            let effect = effect.as_deref();
+            if matches!(effect.signal_type(), SignalType::Error) {
+                Some(effect.payload().as_deref().clone())
+            } else {
+                None
+            }
+        });
+        if let Some(payload) = error_payload {
+            EffectStatus::Error { payload }
+        } else {
+            EffectStatus::Pending
+        }
+    } else {
+        EffectStatus::Resolved {
+            value: value.clone(),
+        }
+    }
+}
+
+fn get_operation_effect_status_metrics<'a, T: Expression>(
+    effect_state: &'a IntMap<StateToken, GraphQlOperationEffectState<T>>,
+) -> EffectStatusMetrics<'a> {
+    let queued =
+        count_item_occurrences(
+            effect_state
+                .iter()
+                .filter_map(|(_, state)| match state.status {
+                    EffectStatus::Queued => Some(&state.signal_type),
+                    _ => None,
+                }),
+        );
+    let pending =
+        count_item_occurrences(
+            effect_state
+                .iter()
+                .filter_map(|(_, state)| match state.status {
+                    EffectStatus::Pending => Some(&state.signal_type),
+                    _ => None,
+                }),
+        );
+    let error =
+        count_item_occurrences(
+            effect_state
+                .iter()
+                .filter_map(|(_, state)| match state.status {
+                    EffectStatus::Error { .. } => Some(&state.signal_type),
+                    _ => None,
+                }),
+        );
+    let resolved =
+        count_item_occurrences(
+            effect_state
+                .iter()
+                .filter_map(|(_, state)| match state.status {
+                    EffectStatus::Resolved { .. } => Some(&state.signal_type),
+                    _ => None,
+                }),
+        );
+    EffectStatusMetrics {
+        queued,
+        pending,
+        error,
+        resolved,
+    }
+}
+
+fn format_effect_status_type_metric_labels<'a>(
+    prefix: &'static str,
+    counts: impl Iterator<Item = (&'a &'a SignalType, &'a usize)> + 'a,
+) -> impl Iterator<Item = KeyValue> + 'a {
+    counts
+        .into_iter()
+        .filter_map(|(effect_type, count)| match effect_type {
+            SignalType::Custom(effect_type) => Some((effect_type, count)),
+            _ => None,
+        })
+        .map(move |(effect_type, count)| {
+            KeyValue::new(
+                Key::from(format!("{}{}", prefix, effect_type)),
+                Value::from(*count as i64),
+            )
+        })
+}
+
+fn count_state_updates<T: Expression>(
+    state_tokens: impl IntoIterator<Item = StateToken>,
+    active_effects: &IntMap<StateToken, GraphQlOperationEffectState<T>>,
+) -> HashMap<&SignalType, usize> {
+    let effect_updates = state_tokens
+        .into_iter()
+        .filter_map(|state_token| active_effects.get(&state_token));
+    let effect_types = effect_updates.map(|effect_state| &effect_state.signal_type);
+    count_item_occurrences(effect_types)
+}
+
+fn update_operation_effect_mappings<T: Expression>(
+    active_effects: &mut IntMap<StateToken, GraphQlOperationEffectState<T>>,
+    result: &EvaluationResult<T>,
+    factory: &impl ExpressionFactory<T>,
+) {
+    // Remove mappings for outdated dependencies
+    let remaining_dependencies = result.dependencies();
+    active_effects.retain(|state_token, _effect| remaining_dependencies.contains(*state_token));
+    // Insert mappings for newly-encountered signals
+    let custom_effects = parse_custom_effects(result.result(), factory);
+    active_effects.extend(custom_effects.into_iter().map(|effect| {
+        (
+            effect.id(),
+            GraphQlOperationEffectState {
+                signal_type: effect.signal_type(),
+                condition: effect,
+                status: EffectStatus::Queued,
+            },
+        )
+    }));
+}
+
+fn parse_custom_effects<T: Expression>(
+    expression: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> Vec<T::Signal> {
+    match factory.match_signal_term(expression) {
+        None => Vec::new(),
         Some(term) => term
             .signals()
             .as_deref()
             .iter()
             .filter_map(|effect| match effect.as_deref().signal_type() {
-                SignalType::Custom(effect_type) => Some(effect_type),
+                SignalType::Custom(_) => Some(effect.as_deref().clone()),
                 _ => None,
             })
-            .collect::<HashSet<_>>(),
+            .collect::<Vec<_>>(),
     }
 }
 
@@ -1493,6 +1657,53 @@ fn is_pending_result_payload<T: Expression>(
                 .any(|effect| matches!(effect.as_deref().signal_type(), SignalType::Pending))
         })
         .unwrap_or(false)
+}
+
+fn count_item_occurrences<T: std::hash::Hash + Eq + PartialEq>(
+    values: impl IntoIterator<Item = T>,
+) -> HashMap<T, usize> {
+    values
+        .into_iter()
+        .fold(HashMap::<T, usize>::default(), |mut results, value| {
+            match results.entry(value) {
+                Entry::Vacant(entry) => {
+                    entry.insert(1);
+                }
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() += 1;
+                }
+            }
+            results
+        })
+}
+
+#[derive(Debug)]
+pub(super) struct EffectStatusMetrics<'a> {
+    queued: HashMap<&'a SignalType, usize>,
+    pending: HashMap<&'a SignalType, usize>,
+    error: HashMap<&'a SignalType, usize>,
+    resolved: HashMap<&'a SignalType, usize>,
+}
+impl<'a> EffectStatusMetrics<'a> {
+    fn as_span_labels(&self) -> impl Iterator<Item = KeyValue> + '_ {
+        empty()
+            .chain(format_effect_status_type_metric_labels(
+                "effects.queued.",
+                self.queued.iter(),
+            ))
+            .chain(format_effect_status_type_metric_labels(
+                "effects.pending.",
+                self.pending.iter(),
+            ))
+            .chain(format_effect_status_type_metric_labels(
+                "effects.error.",
+                self.error.iter(),
+            ))
+            .chain(format_effect_status_type_metric_labels(
+                "effects.resolved.",
+                self.resolved.iter(),
+            ))
+    }
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
@@ -1711,6 +1922,7 @@ mod tests {
                         operation_phase: Default::default(),
                         start_time: None,
                         result,
+                        active_effects: Default::default(),
                         subscriptions: [{
                             let subscription_id = operation_id;
                             (
@@ -1746,6 +1958,7 @@ mod tests {
                         operation_phase: Default::default(),
                         start_time: None,
                         result,
+                        active_effects: Default::default(),
                         subscriptions: [{
                             let subscription_id = operation_id;
                             (
@@ -1781,6 +1994,7 @@ mod tests {
                         operation_phase: Default::default(),
                         start_time: None,
                         result,
+                        active_effects: Default::default(),
                         subscriptions: [{
                             let subscription_id = operation_id;
                             (
@@ -2138,6 +2352,7 @@ mod tests {
                     operation_phase: Default::default(),
                     start_time: None,
                     result,
+                    active_effects: Default::default(),
                     subscriptions: [{
                         let subscription_id = operation_id;
                         (
