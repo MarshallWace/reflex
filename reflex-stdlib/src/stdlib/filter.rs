@@ -59,7 +59,8 @@ where
                 target
                     .items()
                     .as_deref()
-                    .iter(),
+                    .iter()
+                    .map(|item| item.as_deref().clone()),
                 &predicate,
                 CollectList,
                 factory,
@@ -75,7 +76,7 @@ where
             ))
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Some(collect_filter_results(
-                target.values(),
+                target.values().map(|item| item.as_deref().clone()),
                 &predicate,
                 CollectHashSet,
                 factory,
@@ -169,7 +170,17 @@ impl<T: Expression> Applicable<T> for CollectFilterResults {
                 Ok(factory.create_application_term(
                     combine,
                     allocator.create_unsized_list(
-                    items.items().as_deref().iter().zip(results.items().as_deref().iter()).filter_map(|(item, result)| if is_truthy(&result, factory) {
+                    items
+                    .items()
+                    .as_deref()
+                    .iter()
+                    .map(|item| item.as_deref().clone())
+                    .zip(
+                        results.items()
+                        .as_deref()
+                        .iter()
+                        .map(|item| item.as_deref().clone())
+                    ).filter_map(|(item, result)| if is_truthy(&result, factory) {
                         Some(item)
                     } else {
                         None

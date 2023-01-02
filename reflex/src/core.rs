@@ -190,11 +190,11 @@ pub trait ListTermType<T: Expression>: Clone {
 }
 
 pub trait HashmapTermType<T: Expression>: Clone {
-    type KeysIterator<'a>: ExactSizeIterator<Item = T>
+    type KeysIterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
     where
         T: 'a,
         Self: 'a;
-    type ValuesIterator<'a>: ExactSizeIterator<Item = T>
+    type ValuesIterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
     where
         T: 'a,
         Self: 'a;
@@ -210,7 +210,7 @@ pub trait HashmapTermType<T: Expression>: Clone {
 }
 
 pub trait HashsetTermType<T: Expression>: Clone {
-    type ValuesIterator<'a>: ExactSizeIterator<Item = T>
+    type ValuesIterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
     where
         T: 'a,
         Self: 'a;
@@ -242,7 +242,7 @@ pub type ExpressionListIter<'a, T> =
 pub trait ExpressionListType<T: Expression>:
     Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + GraphNode
 {
-    type Iterator<'a>: ExactSizeIterator<Item = T>
+    type Iterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
     where
         T: 'a,
         Self: 'a;
@@ -259,7 +259,7 @@ pub trait ExpressionListType<T: Expression>:
 pub trait ConditionListType<T: Expression>:
     Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug
 {
-    type Iterator<'a>: ExactSizeIterator<Item = T::Signal>
+    type Iterator<'a>: ExactSizeIterator<Item = T::SignalRef<'a>>
     where
         T::Signal: 'a,
         T: 'a,
@@ -299,7 +299,11 @@ pub fn parse_record_values<'a, T: Expression>(
                 .keys()
                 .as_deref()
                 .iter()
-                .map(|key| input_values.get(&key).map(|item| item.as_deref().clone()))
+                .map(|key| {
+                    input_values
+                        .get(key.as_deref())
+                        .map(|item| item.as_deref().clone())
+                })
                 .collect::<Option<Vec<_>>>();
             match values {
                 Some(field_values) => Some(Some(allocator.create_list(field_values))),
@@ -538,7 +542,7 @@ pub trait GraphNode {
 }
 
 pub trait CompoundNode<T: Expression> {
-    type Children<'a>: Iterator<Item = T>
+    type Children<'a>: Iterator<Item = T::ExpressionRef<'a>>
     where
         T: 'a,
         Self: 'a;
@@ -1460,12 +1464,15 @@ pub fn transform_expression_list<T: Expression>(
     // in which case we don't need to allocate a vector
     let mut iter = expressions
         .iter()
-        .map(|item| transform(&item))
+        .map(|item| transform(item.as_deref()))
         .enumerate()
         .filter_map(|(index, result)| result.map(|result| (index, result)));
     // Pull the first value from the iterator, returning if there were no transformed expressions
     let (index, replaced) = iter.next()?;
-    let mut results = expressions.iter().collect::<Vec<_>>();
+    let mut results = expressions
+        .iter()
+        .map(|item| item.as_deref().clone())
+        .collect::<Vec<_>>();
     results[index] = replaced.clone();
     // Post-fill with the remaining transformed expressions
     for (index, replaced) in iter {
@@ -1674,7 +1681,13 @@ pub fn get_combined_short_circuit_signal<T: Expression>(
                     // TODO: avoid unnecessary intermediate allocations
                     Vec::<T::Signal>::new(),
                     |mut results, (_, signal)| {
-                        results.extend(signal.signals().as_deref().iter());
+                        results.extend(
+                            signal
+                                .signals()
+                                .as_deref()
+                                .iter()
+                                .map(|item| item.as_deref().clone()),
+                        );
                         results
                     },
                 ),
@@ -1707,8 +1720,8 @@ pub fn get_hashmap_entries<'a, T: Expression + 'a>(
 ) -> impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T> + 'a> + 'a {
     target
         .keys()
-        .into_iter()
-        .zip(target.values().into_iter())
+        .map(|item| item.as_deref().clone())
+        .zip(target.values().map(|item| item.as_deref().clone()))
         .map(move |(key, value)| factory.create_list_term(allocator.create_pair(key, value)))
 }
 

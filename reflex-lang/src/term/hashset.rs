@@ -13,7 +13,7 @@ use reflex::{
         build_hashset_lookup_table, transform_expression_list, CompoundNode, DependencyList,
         DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
         ExpressionListIter, ExpressionListType, GraphNode, HashsetTermType, HeapAllocator,
-        Internable, Rewritable, SerializeJson, StackOffset, Substitutions,
+        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
     hash::HashId,
 };
@@ -25,7 +25,7 @@ pub struct HashSetTerm<T: Expression> {
 }
 impl<T: Expression> HashSetTerm<T> {
     pub fn new(values: T::ExpressionList) -> Self {
-        let lookup = build_hashset_lookup_table(values.iter());
+        let lookup = build_hashset_lookup_table(values.iter().map(|item| item.as_deref().clone()));
         Self { values, lookup }
     }
 }
@@ -109,7 +109,9 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
         transform_expression_list(&self.values, allocator, |value| {
             value.substitute_static(substitutions, factory, allocator, cache)
         })
-        .map(|values| factory.create_hashset_term(values.iter()))
+        .map(|values| {
+            factory.create_hashset_term(values.iter().map(|item| item.as_deref().clone()))
+        })
     }
     fn substitute_dynamic(
         &self,
@@ -168,14 +170,14 @@ impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
             if num_values <= max_displayed_values {
                 values
                     .iter()
-                    .map(|value| format!("{}", value))
+                    .map(|value| format!("{}", value.as_deref()))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 values
                     .iter()
                     .take(max_displayed_values - 1)
-                    .map(|value| format!("{}", value))
+                    .map(|value| format!("{}", value.as_deref()))
                     .chain(once(format!(
                         "...{} more values",
                         num_values - (max_displayed_values - 1)

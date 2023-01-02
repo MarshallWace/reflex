@@ -53,7 +53,7 @@ where
                 .items()
                 .as_deref()
                 .iter()
-                .any(|item| !item.is_static());
+                .any(|item| !item.as_deref().is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
             } else {
@@ -63,17 +63,17 @@ where
                 )
             })
         } else if let Some(collection) = factory.match_hashset_term(&target) {
-            let has_dynamic_values = collection.values().any(|item| !item.is_static());
+            let has_dynamic_values = collection.values().any(|item| !item.as_deref().is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
             } else {
                 factory.create_application_term(
                     factory.create_builtin_term(CollectHashSet),
-                    allocator.create_list(collection.values()),
+                    allocator.create_list(collection.values().map(|item| item.as_deref().clone())),
                 )
             })
         } else if let Some(collection) = factory.match_hashmap_term(&target) {
-            let has_dynamic_keys = collection.keys().any(|item| !item.is_static());
+            let has_dynamic_keys = collection.keys().any(|item| !item.as_deref().is_static());
             Ok(if !has_dynamic_keys {
                 target.clone()
             } else {

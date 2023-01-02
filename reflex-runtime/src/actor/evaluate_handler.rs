@@ -168,7 +168,7 @@ pub fn parse_evaluate_effect_query<T: Expression>(
         .match_list_term(payload)
         .filter(|args| args.items().as_deref().len() == 4)?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let label = args.next().unwrap();
     let query = args.next().unwrap();
     let evaluation_mode = args.next().unwrap();
@@ -217,10 +217,11 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     let value = items.as_deref().get(0)?;
     let dependencies = items.as_deref().get(1)?;
     let dependencies = factory.match_list_term(dependencies.as_deref())?.items();
-    let dependencies = dependencies
-        .as_deref()
-        .iter()
-        .filter_map(|dependency| factory.match_symbol_term(&dependency).map(|term| term.id()));
+    let dependencies = dependencies.as_deref().iter().filter_map(|dependency| {
+        factory
+            .match_symbol_term(dependency.as_deref())
+            .map(|term| term.id())
+    });
     Some(EvaluationResult::new(
         value.as_deref().clone(),
         DependencyList::from_iter(dependencies),
@@ -448,28 +449,24 @@ impl<T: Expression> WorkerState<T> {
     fn current_result_status(&self, factory: &impl ExpressionFactory<T>) -> WorkerResultStatus {
         match self.latest_result() {
             None => WorkerResultStatus::Blocked,
-            Some(result) => match factory.match_signal_term(result.result()) {
-                None => WorkerResultStatus::Active,
-                Some(signal) => {
-                    if signal
-                        .signals()
-                        .as_deref()
-                        .iter()
-                        .any(|signal| matches!(&signal.signal_type(), SignalType::Error))
-                    {
-                        WorkerResultStatus::Error
-                    } else if signal
-                        .signals()
-                        .as_deref()
-                        .iter()
-                        .any(|signal| matches!(&signal.signal_type(), SignalType::Pending))
-                    {
-                        WorkerResultStatus::Pending
-                    } else {
-                        WorkerResultStatus::Blocked
+            Some(result) => {
+                match factory.match_signal_term(result.result()) {
+                    None => WorkerResultStatus::Active,
+                    Some(signal) => {
+                        if signal.signals().as_deref().iter().any(|signal| {
+                            matches!(&signal.as_deref().signal_type(), SignalType::Error)
+                        }) {
+                            WorkerResultStatus::Error
+                        } else if signal.signals().as_deref().iter().any(|signal| {
+                            matches!(&signal.as_deref().signal_type(), SignalType::Pending)
+                        }) {
+                            WorkerResultStatus::Pending
+                        } else {
+                            WorkerResultStatus::Blocked
+                        }
                     }
                 }
-            },
+            }
         }
     }
     fn dependencies(&self) -> Option<&DependencyList> {
@@ -1340,7 +1337,7 @@ fn is_unresolved_result<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .any(|effect| is_unresolved_effect(&effect))
+                .any(|effect| is_unresolved_effect(effect.as_deref()))
         })
         .unwrap_or(false)
 }
@@ -1364,9 +1361,11 @@ fn parse_newly_added_expression_effects<T: Expression>(
             .as_deref()
             .iter()
             .filter(|effect| {
+                let effect = effect.as_deref();
                 matches!(effect.signal_type(), SignalType::Custom(_))
                     && !existing_effect_ids.contains(&effect.id())
             })
+            .map(|effect| effect.as_deref().clone())
             .collect(),
     }
 }

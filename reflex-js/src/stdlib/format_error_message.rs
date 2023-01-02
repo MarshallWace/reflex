@@ -62,7 +62,7 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
                             num_errors
                         })
                         .map(|item| {
-                            parse_error_message(&item, factory, allocator)
+                            parse_error_message(item.as_deref(), factory, allocator)
                                 .unwrap_or_else(|| String::from(UNKNOWN_ERROR_MESSAGE))
                         });
                     Some(

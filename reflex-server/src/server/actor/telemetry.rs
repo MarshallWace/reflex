@@ -935,7 +935,8 @@ fn get_query_result_effects<'a, T: Expression>(
             .signals()
             .as_deref()
             .iter()
-            .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
+            .filter(|signal| matches!(signal.as_deref().signal_type(), SignalType::Custom(_)))
+            .map(|item| item.as_deref().clone())
             .collect::<Vec<_>>(),
     }
 }

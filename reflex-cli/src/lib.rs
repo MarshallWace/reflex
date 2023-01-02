@@ -166,12 +166,12 @@ pub fn format_signal_result<T: Expression<SignalTerm = V>, V: SignalTermType<T>>
         .signals()
         .as_deref()
         .iter()
-        .map(|signal| format_signal::<T>(&signal))
+        .map(|signal| format_signal(signal.as_deref()))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_signal<T: Expression>(signal: &T::Signal) -> String {
+fn format_signal<T: Expression<Signal = V>, V: ConditionType<T>>(signal: &V) -> String {
     match signal.signal_type() {
         SignalType::Error => {
             format!("Error: {}", signal.payload().as_deref())

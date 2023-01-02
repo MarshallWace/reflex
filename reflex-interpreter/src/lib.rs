@@ -658,7 +658,14 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                     let condition = factory
                         .match_signal_term(&effect)
                         .filter(|effect| effect.signals().as_deref().len() == 1)
-                        .and_then(|effect| effect.signals().as_deref().iter().next());
+                        .and_then(|effect| {
+                            effect
+                                .signals()
+                                .as_deref()
+                                .iter()
+                                .map(|item| item.as_deref().clone())
+                                .next()
+                        });
                     match condition {
                         None => Err(format!("Invalid effect condition: {}", effect)),
                         Some(condition) => {
@@ -977,7 +984,12 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                     .pop_multiple(count)
                     .into_iter()
                     .map(|arg| match factory.match_signal_term(&arg) {
-                        Some(signal) => Ok(signal.signals().as_deref().iter().collect::<Vec<_>>()),
+                        Some(signal) => Ok(signal
+                            .signals()
+                            .as_deref()
+                            .iter()
+                            .map(|item| item.as_deref().clone())
+                            .collect::<Vec<_>>()),
                         None => Err(format!(
                             "Invalid combined signal: Expected <signal>, received {}",
                             arg
@@ -1019,7 +1031,10 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
             let args = args.as_deref();
             let (target, partial_args) = extract_partial_args(target, factory);
             let num_combined_args = partial_args.len() + args.as_deref().len();
-            let combined_args = partial_args.iter().cloned().chain(args.iter());
+            let combined_args = partial_args
+                .iter()
+                .cloned()
+                .chain(args.iter().map(|item| item.as_deref().clone()));
             if !target.is_static() {
                 Ok((
                     ExecutionResult::ResolveApplicationTarget {
@@ -1054,7 +1069,10 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 let arity = get_function_arity(&target)?;
                 if has_unresolved_args(
                     &arity,
-                    partial_args.iter().cloned().chain(args.as_deref().iter()),
+                    partial_args
+                        .iter()
+                        .cloned()
+                        .chain(args.as_deref().iter().map(|item| item.as_deref().clone())),
                 ) {
                     Ok((
                         ExecutionResult::ResolveApplicationArgs {
@@ -1068,11 +1086,17 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 } else {
                     if let Some(signal) = get_combined_short_circuit_signal(
                         get_num_short_circuit_signals(
-                            partial_args.iter().cloned().chain(args.as_deref().iter()),
+                            partial_args
+                                .iter()
+                                .cloned()
+                                .chain(args.as_deref().iter().map(|item| item.as_deref().clone())),
                             &arity,
                             factory,
                         ),
-                        partial_args.iter().cloned().chain(args.as_deref().iter()),
+                        partial_args
+                            .iter()
+                            .cloned()
+                            .chain(args.as_deref().iter().map(|item| item.as_deref().clone())),
                         &arity,
                         factory,
                         allocator,
@@ -1278,7 +1302,13 @@ fn extract_partial_args<'a, T: Expression>(
     let mut partial_args = Vec::new();
     let mut current = target.clone();
     while let Some(partial) = factory.match_partial_application_term(&current) {
-        partial_args.extend(partial.args().as_deref().iter());
+        partial_args.extend(
+            partial
+                .args()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref().clone()),
+        );
         let next = partial.target().as_deref().clone();
         current = next;
     }

@@ -158,8 +158,14 @@ fn serialize_list_field_value<T: Expression>(
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
-                    serialize_simple_field_value(&value, field_type, transcoder, factory, allocator)
-                        .map_err(|err| err.with_path_prefix(index.into()))
+                    serialize_simple_field_value(
+                        value.as_deref(),
+                        field_type,
+                        transcoder,
+                        factory,
+                        allocator,
+                    )
+                    .map_err(|err| err.with_path_prefix(index.into()))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ))
@@ -189,9 +195,13 @@ fn serialize_map_field_value<T: Expression>(
                 .iter()
                 .zip(term.values().as_deref().iter())
                 .map(|(key, value)| {
-                    serialize_map_key(&key, factory).and_then(|key| {
+                    serialize_map_key(key.as_deref(), factory).and_then(|key| {
                         match serialize_simple_field_value(
-                            &value, field_type, transcoder, factory, allocator,
+                            value.as_deref(),
+                            field_type,
+                            transcoder,
+                            factory,
+                            allocator,
                         ) {
                             Ok(value) => Ok((key, value)),
                             Err(err) => Err(err.with_path_prefix(key.into())),
@@ -205,9 +215,13 @@ fn serialize_map_field_value<T: Expression>(
             term.keys()
                 .zip(term.values())
                 .map(|(key, value)| {
-                    serialize_map_key(&key, factory).and_then(|key| {
+                    serialize_map_key(key.as_deref(), factory).and_then(|key| {
                         match serialize_simple_field_value(
-                            &value, field_type, transcoder, factory, allocator,
+                            value.as_deref(),
+                            field_type,
+                            transcoder,
+                            factory,
+                            allocator,
                         ) {
                             Ok(value) => Ok((key, value)),
                             Err(err) => Err(err.with_path_prefix(key.into())),

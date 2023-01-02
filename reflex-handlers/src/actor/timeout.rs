@@ -345,7 +345,7 @@ fn parse_timeout_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let duration = args.next().unwrap();
     let duration = parse_duration_millis_arg(&duration, factory);
     match duration {

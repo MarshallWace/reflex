@@ -11,8 +11,8 @@ use serde_json::Value as JsonValue;
 use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListIter, ExpressionListType,
-    GraphNode, HeapAllocator, Internable, ListTermType, Rewritable, SerializeJson, StackOffset,
-    Substitutions,
+    GraphNode, HeapAllocator, Internable, ListTermType, RefType, Rewritable, SerializeJson,
+    StackOffset, Substitutions,
 };
 use reflex_utils::json;
 
@@ -160,14 +160,14 @@ impl<T: Expression> std::fmt::Display for ListTerm<T> {
             if num_items <= max_displayed_items {
                 items
                     .iter()
-                    .map(|item| format!("{}", item))
+                    .map(|item| format!("{}", item.as_deref()))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 items
                     .iter()
                     .take(max_displayed_items - 1)
-                    .map(|item| format!("{}", item))
+                    .map(|item| format!("{}", item.as_deref()))
                     .chain(once(format!(
                         "...{} more items",
                         num_items - (max_displayed_items - 1)
@@ -183,7 +183,7 @@ impl<T: Expression + SerializeJson + Clone> SerializeJson for ListTerm<T> {
     fn to_json(&self) -> Result<JsonValue, String> {
         self.items
             .iter()
-            .map(|key| key.to_json())
+            .map(|key| key.as_deref().to_json())
             .collect::<Result<Vec<_>, String>>()
             .map(|values| JsonValue::Array(values))
     }
@@ -192,13 +192,13 @@ impl<T: Expression + SerializeJson + Clone> SerializeJson for ListTerm<T> {
             .items
             .iter()
             .zip(self.items.iter())
-            .map(|(current, previous)| previous.patch(&current))
+            .map(|(current, previous)| previous.as_deref().patch(current.as_deref()))
             .chain(
                 target
                     .items
                     .iter()
                     .skip(self.items.len())
-                    .map(|item| item.to_json().map(Some)),
+                    .map(|item| item.as_deref().to_json().map(Some)),
             )
             .collect::<Result<Vec<_>, _>>()?;
 

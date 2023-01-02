@@ -46,15 +46,12 @@ impl<T: Expression> Applicable<T> for IfPending {
                 .as_deref()
                 .iter()
                 .filter(|signal| signal.as_deref().signal_type() != SignalType::Pending)
+                .map(|item| item.as_deref().clone())
                 .collect::<Vec<_>>();
             if non_pending_signals.len() == signal.signals().as_deref().len() {
                 Ok(target.clone())
             } else if !non_pending_signals.is_empty() {
-                Ok(factory.create_signal_term(
-                    allocator.create_signal_list(
-                        non_pending_signals,
-                    ),
-                ))
+                Ok(factory.create_signal_term(allocator.create_signal_list(non_pending_signals)))
             } else {
                 Ok(fallback)
             }

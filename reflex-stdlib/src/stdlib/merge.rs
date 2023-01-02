@@ -51,6 +51,7 @@ impl<T: Expression> Applicable<T> for Merge {
                     .items()
                     .as_deref()
                     .iter()
+                    .map(|item| item.as_deref().clone())
                     .filter_map(|arg| match factory.match_record_term(&arg) {
                         Some(term) => Some(Ok((
                             term.prototype().as_deref().clone(),
@@ -79,7 +80,12 @@ impl<T: Expression> Applicable<T> for Merge {
                                 Vec::new(),
                                 |mut combined_properties, (prototype, values)| {
                                     combined_properties.extend(
-                                        prototype.keys().as_deref().iter().zip(values.iter()),
+                                        prototype
+                                            .keys()
+                                            .as_deref()
+                                            .iter()
+                                            .map(|item| item.as_deref().clone())
+                                            .zip(values.iter().map(|item| item.as_deref().clone())),
                                     );
                                     combined_properties
                                 },
@@ -113,7 +119,7 @@ impl<T: Expression> Applicable<T> for Merge {
                                 allocator.create_list(base_prototype.keys().as_deref().iter().map(
                                     |key| {
                                         deduplicated_keys
-                                            .remove(&key.id())
+                                            .remove(&key.as_deref().id())
                                             .map(|index| values.get(index).cloned().unwrap())
                                             .unwrap()
                                     },

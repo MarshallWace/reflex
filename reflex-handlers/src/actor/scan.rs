@@ -598,7 +598,7 @@ fn parse_scan_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let target = args.next().unwrap();
     let seed = args.next().unwrap();
     let iteratee = args.next().unwrap();

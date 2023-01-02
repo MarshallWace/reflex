@@ -67,7 +67,7 @@ fn match_triple<'a, T: Expression>(
     match factory.match_list_term(target) {
         Some(term) if term.items().as_deref().len() == 3 => {
             let items = term.items();
-            let mut values = items.as_deref().iter();
+            let mut values = items.as_deref().iter().map(|item| item.as_deref().clone());
             let first = values.next().unwrap();
             let second = values.next().unwrap();
             let third = values.next().unwrap();

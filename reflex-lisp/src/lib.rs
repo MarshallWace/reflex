@@ -13,7 +13,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         Builtin, EvaluationCache, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-        Reducible, Rewritable, Substitutions, SymbolId,
+        Reducible, RefType, Rewritable, Substitutions, SymbolId,
     },
 };
 use reflex_stdlib::*;
@@ -752,9 +752,18 @@ where
                 BindingExpressionType::LetRec => match num_bindings {
                     1 => factory.create_application_term(
                         factory.create_lambda_term(1, body),
-                        allocator.create_list(once(factory.create_recursive_term(
-                            factory.create_lambda_term(1, initializers.iter().next().unwrap()),
-                        ))),
+                        allocator.create_list(once(
+                            factory.create_recursive_term(
+                                factory.create_lambda_term(
+                                    1,
+                                    initializers
+                                        .iter()
+                                        .map(|item| item.as_deref().clone())
+                                        .next()
+                                        .unwrap(),
+                                ),
+                            ),
+                        )),
                     ),
                     _ => {
                         let initializer_replacements = (0..num_bindings)
@@ -778,13 +787,14 @@ where
                             factory.create_list_term(allocator.create_list(
                                 initializers.iter().map(|initializer| {
                                     initializer
+                                        .as_deref()
                                         .substitute_static(
                                             &initializer_substitutions,
                                             factory,
                                             allocator,
                                             evaluation_cache,
                                         )
-                                        .unwrap_or(initializer)
+                                        .unwrap_or_else(|| initializer.as_deref().clone())
                                 }),
                             )),
                         ));

@@ -43,10 +43,17 @@ impl<T: Expression> Applicable<T> for Flatten {
             let items = items
                 .as_deref()
                 .iter()
+                .map(|item| item.as_deref().clone())
                 // TODO: avoid unnecessary intermediate allocations
                 .fold(Vec::<T>::new(), |mut results, item| {
                     if let Some(inner) = factory.match_list_term(&item) {
-                        results.extend(inner.items().as_deref().iter());
+                        results.extend(
+                            inner
+                                .items()
+                                .as_deref()
+                                .iter()
+                                .map(|item| item.as_deref().clone()),
+                        );
                     } else {
                         results.push(item)
                     };

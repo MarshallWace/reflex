@@ -347,7 +347,7 @@ fn parse_timestamp_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let interval = args.next().unwrap();
     let interval = parse_duration_millis_arg(&interval, factory);
     match interval {

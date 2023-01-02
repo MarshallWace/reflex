@@ -652,7 +652,7 @@ fn is_error_expression<T: Expression>(value: &T, factory: &impl ExpressionFactor
             term.signals()
                 .as_deref()
                 .iter()
-                .any(|effect| matches!(effect.signal_type(), SignalType::Error))
+                .any(|effect| matches!(effect.as_deref().signal_type(), SignalType::Error))
         })
         .unwrap_or(false)
 }

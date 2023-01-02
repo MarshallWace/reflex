@@ -55,8 +55,9 @@ where
                 .as_deref()
                 .iter()
                 .map(|entry| {
-                    match get_indexed_field(&entry, 0, factory, allocator).and_then(|key| {
-                        get_indexed_field(&entry, 1, factory, allocator).map(|value| (key, value))
+                    let entry = entry.as_deref();
+                    match get_indexed_field(entry, 0, factory, allocator).and_then(|key| {
+                        get_indexed_field(entry, 1, factory, allocator).map(|value| (key, value))
                     }) {
                         Some((key, value)) => Ok((key, value)),
                         None => Err(format!(

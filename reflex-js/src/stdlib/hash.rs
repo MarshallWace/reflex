@@ -46,7 +46,7 @@ impl<T: Expression> Applicable<T> for Hash {
             Some(parsed_args) => {
                 let mut hasher = DefaultHasher::new();
                 for arg in parsed_args.items().as_deref().iter() {
-                    std::hash::Hash::hash(&arg.id(), &mut hasher);
+                    std::hash::Hash::hash(&arg.as_deref().id(), &mut hasher);
                 }
                 let hash = hasher.finish();
                 Ok(factory.create_symbol_term(hash))

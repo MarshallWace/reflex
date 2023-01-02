@@ -58,7 +58,7 @@ impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
             .keys()
             .as_deref()
             .iter()
-            .position(|field_name| field_name.id() == key.id())?;
+            .position(|field_name| field_name.as_deref().id() == key.as_deref().id())?;
         self.values.get(index)
     }
 }
@@ -202,7 +202,7 @@ impl<T: Expression> std::fmt::Display for RecordTerm<T> {
                     .as_deref()
                     .iter()
                     .zip(self.values.iter())
-                    .map(|(key, value)| format!("{}: {}", key, value))
+                    .map(|(key, value)| format!("{}: {}", key.as_deref(), value.as_deref()))
                     .collect::<Vec<_>>()
                     .join(", "),
             ),
@@ -218,8 +218,8 @@ impl<T: Expression> SerializeJson for RecordTerm<T> {
             .iter()
             .zip(self.values.iter())
             .map(|(key, value)| {
-                let key = key.to_json()?;
-                let value = value.to_json()?;
+                let key = key.as_deref().to_json()?;
+                let value = value.as_deref().to_json()?;
                 match key {
                     JsonValue::String(key) => Ok((key, value)),
                     _ => Err(format!("Invalid JSON object key: {}", key.to_string())),
@@ -244,23 +244,23 @@ impl<T: Expression> SerializeJson for RecordTerm<T> {
                 .iter()
                 .zip(target.values.iter())
                 .map(|(key, new_value)| {
-                    let previous_value = self.get(&key).ok_or_else(|| {
+                    let previous_value = self.get(key.as_deref()).ok_or_else(|| {
                         format!(
                             "Prototype has changed, key {} not present in {}",
-                            key.to_string(),
+                            key.as_deref(),
                             self.prototype
                         )
                     })?;
                     Ok(previous_value
                         .as_deref()
-                        .patch(&new_value)?
+                        .patch(new_value.as_deref())?
                         .map(|value_patch| (key, value_patch)))
                 })
                 .filter_map(|entry| entry.transpose()) // Filter out unchanged fields
                 .map(|entry| {
-                    entry.and_then(|(key, value)| match key.to_json()? {
+                    entry.and_then(|(key, value)| match key.as_deref().to_json()? {
                         JsonValue::String(key) => Ok((key, value)),
-                        _ => Err(format!("Invalid JSON object key: {}", key.to_string())),
+                        _ => Err(format!("Invalid JSON object key: {}", key.as_deref())),
                     })
                 })
                 .collect::<Result<JsonMap<_, _>, _>>()?,

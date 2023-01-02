@@ -516,7 +516,7 @@ fn parse_fetch_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let url = args.next().unwrap();
     let method = args.next().unwrap();
     let headers = args.next().unwrap();
@@ -593,8 +593,8 @@ fn parse_key_values_arg<T: Expression>(
             .zip(value.values().as_deref().iter())
             .map(|(key, value)| {
                 match (
-                    factory.match_string_term(&key),
-                    factory.match_string_term(&value),
+                    factory.match_string_term(key.as_deref()),
+                    factory.match_string_term(value.as_deref()),
                 ) {
                     (Some(key), Some(value)) => Some((
                         String::from(key.value().as_deref().as_str().deref()),

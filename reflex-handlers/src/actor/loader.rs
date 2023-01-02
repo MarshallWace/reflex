@@ -209,17 +209,21 @@ impl<T: Expression> LoaderHandlerState<T> {
             effect: combined_effect.clone(),
             subscriptions: keys
                 .iter()
+                .map(|item| item.as_deref().clone())
                 .enumerate()
                 .filter_map(|(index, key)| effects.get(index).map(|effect| (key, effect.clone())))
                 .map(|(key, effect)| LoaderEntitySubscription { key, effect })
                 .collect(),
-            active_keys: keys.iter().map(|item| LoaderKeyHash::new(&item)).collect(),
+            active_keys: keys
+                .iter()
+                .map(|item| LoaderKeyHash::new(item.as_deref()))
+                .collect(),
             latest_result: None,
         };
         let num_previous_keys = loader_state.active_keys.len();
         loader_state
             .active_keys
-            .extend(keys.iter().map(|item| LoaderKeyHash::new(&item)));
+            .extend(keys.iter().map(|item| LoaderKeyHash::new(item.as_deref())));
         let num_added_keys = loader_state.active_keys.len() - num_previous_keys;
         let metric_labels = [("loader_name", name)];
         increment_gauge!(
@@ -755,7 +759,7 @@ fn has_error_message_effects<T: Expression>(
     term.signals()
         .as_deref()
         .iter()
-        .any(|effect| as_error_message_effect(&effect, factory).is_some())
+        .any(|effect| as_error_message_effect(effect.as_deref(), factory).is_some())
 }
 
 fn prefix_error_message_effects<T: Expression>(
@@ -766,7 +770,8 @@ fn prefix_error_message_effects<T: Expression>(
 ) -> T {
     factory.create_signal_term(
         allocator.create_signal_list(term.signals().as_deref().iter().map(|signal| {
-            if let Some(message) = as_error_message_effect(&signal, factory) {
+            let signal = signal.as_deref();
+            if let Some(message) = as_error_message_effect(signal, factory) {
                 allocator.create_signal(
                     signal.signal_type().clone(),
                     factory.create_string_term(allocator.create_string(format!(
@@ -777,7 +782,7 @@ fn prefix_error_message_effects<T: Expression>(
                     signal.token().as_deref().clone(),
                 )
             } else {
-                signal
+                signal.clone()
             }
         })),
     )
@@ -819,7 +824,7 @@ fn parse_loader_effect_args<T: Expression + Applicable<T>>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let name = args.next().unwrap();
     let loader = args.next().unwrap();
     let key = args.next().unwrap();

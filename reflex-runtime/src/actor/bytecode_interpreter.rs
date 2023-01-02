@@ -796,7 +796,7 @@ fn is_unresolved_result<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .any(|effect| is_unresolved_effect(&effect))
+                .any(|effect| is_unresolved_effect(effect.as_deref()))
         })
         .unwrap_or(false)
 }

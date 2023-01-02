@@ -1391,7 +1391,7 @@ fn parse_graphql_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let url = args.next().unwrap();
     let query = args.next().unwrap();
     let operation_name = args.next().unwrap();
@@ -1463,8 +1463,8 @@ fn parse_object_arg<T: Expression>(
                 .iter()
                 .zip(value.values().as_deref().iter())
                 .filter_map(|(key, value)| {
-                    factory.match_string_term(&key).map(|key| {
-                        reflex_json::sanitize(&value).map(|value| {
+                    factory.match_string_term(key.as_deref()).map(|key| {
+                        reflex_json::sanitize(value.as_deref()).map(|value| {
                             (String::from(key.value().as_deref().as_str().deref()), value)
                         })
                     })

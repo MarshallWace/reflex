@@ -5,13 +5,13 @@
 use std::{
     collections::{BTreeSet, HashSet},
     hash::{Hash, Hasher},
-    iter::Cloned,
 };
 
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, Expression, ExpressionListType,
-        GraphNode, SignalType, StackOffset, StateToken, StructPrototypeType,
+        GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset, StateToken,
+        StructPrototypeType,
     },
     hash::{hash_iter, hash_object, FnvHasher, HashId},
 };
@@ -60,7 +60,7 @@ impl<T: Expression> ExpressionList<T> {
 }
 
 impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
-    type Iterator<'a> = Cloned<std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
+    type Iterator<'a> = IntoRefTypeIterator<T, T::ExpressionRef<'a>, std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
     fn id(&self) -> HashId {
         self.id
     }
@@ -77,7 +77,7 @@ impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
     where
         T: 'a,
     {
-        self.items.iter().cloned()
+        IntoRefTypeIterator::new(self.items.iter())
     }
 }
 impl<T: Expression> GraphNode for ExpressionList<T> {
@@ -198,7 +198,7 @@ where
     }
 }
 impl<T: Expression> ConditionListType<T> for SignalList<T> {
-    type Iterator<'a> = Cloned<std::collections::btree_set::Iter<'a, T::Signal>>
+    type Iterator<'a> = IntoRefTypeIterator<T::Signal, T::SignalRef<'a>, std::collections::btree_set::Iter<'a, T::Signal>>
         where
             T::Signal: 'a,
             T: 'a,
@@ -214,7 +214,7 @@ impl<T: Expression> ConditionListType<T> for SignalList<T> {
         T::Signal: 'a,
         T: 'a,
     {
-        self.signals.iter().cloned()
+        IntoRefTypeIterator::new(self.signals.iter())
     }
 }
 impl<T: Expression> std::fmt::Display for SignalList<T> {
@@ -451,7 +451,7 @@ impl<T: Expression> StructPrototype<T> {
             .iter()
             .enumerate()
             .find_map(|(offset, existing_key)| {
-                if existing_key.id() == key.id() {
+                if existing_key.as_deref().id() == key.as_deref().id() {
                     Some(offset)
                 } else {
                     None
@@ -475,7 +475,7 @@ impl<T: Expression> std::fmt::Display for StructPrototype<T> {
             "{{{}}}",
             self.keys
                 .iter()
-                .map(|key| format!("{}", key))
+                .map(|key| format!("{}", key.as_deref()))
                 .collect::<Vec<_>>()
                 .join(",")
         )

@@ -51,12 +51,18 @@ where
         } else if let Some(list) = factory.match_list_term(&target) {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(CollectQueryListItems),
-                allocator.create_list(list.items().as_deref().iter().map(|item| {
-                    factory.create_application_term(
-                        factory.create_builtin_term(DynamicQueryBranch),
-                        allocator.create_pair(item, shape.clone()),
-                    )
-                })),
+                allocator.create_list(
+                    list.items()
+                        .as_deref()
+                        .iter()
+                        .map(|item| item.as_deref().clone())
+                        .map(|item| {
+                            factory.create_application_term(
+                                factory.create_builtin_term(DynamicQueryBranch),
+                                allocator.create_pair(item, shape.clone()),
+                            )
+                        }),
+                ),
             ))
         } else {
             Ok(factory.create_application_term(shape, allocator.create_unit_list(target)))

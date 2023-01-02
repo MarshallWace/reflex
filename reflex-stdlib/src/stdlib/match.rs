@@ -89,7 +89,13 @@ pub(crate) fn match_enum<'a, T: Expression>(
                 Some(term) if term.value() >= 0 => Some((
                     term.value() as usize,
                     // TODO: avoid unnecessary intermediate allocations
-                    target.items().as_deref().iter().skip(1).collect::<Vec<_>>(),
+                    target
+                        .items()
+                        .as_deref()
+                        .iter()
+                        .map(|item| item.as_deref().clone())
+                        .skip(1)
+                        .collect::<Vec<_>>(),
                 )),
                 _ => None,
             }),

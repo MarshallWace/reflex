@@ -149,7 +149,9 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<
         match eager {
             Eagerness::Lazy => {
                 let compiled_args = compile_args(
-                    args.iter().map(|arg| (arg, ArgType::Lazy)),
+                    args.iter()
+                        .map(|item| item.as_deref().clone())
+                        .map(|arg| (arg, ArgType::Lazy)),
                     stack_offset,
                     factory,
                     allocator,
@@ -180,7 +182,9 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for ApplicationTerm<
                     ))
                 } else {
                     let compiled_args = compile_args(
-                        args.iter().zip(arity.iter()),
+                        args.iter()
+                            .map(|item| item.as_deref().clone())
+                            .zip(arity.iter()),
                         stack_offset,
                         factory,
                         allocator,
@@ -272,7 +276,7 @@ impl<T: Expression + Compile<T>> Compile<T> for ConstructorTerm<T> {
         let keys = prototype.keys();
         let keys = keys.as_deref();
         let compiled_keys = compile_expressions(
-            keys.iter(),
+            keys.iter().map(|item| item.as_deref().clone()),
             Eagerness::Eager,
             stack_offset,
             factory,
@@ -334,7 +338,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
         let values = self.values();
         let num_entries = keys.len();
         let keys_chunk = compile_expressions(
-            keys,
+            keys.map(|item| item.as_deref().clone()),
             Eagerness::Eager,
             stack_offset,
             factory,
@@ -342,7 +346,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashMapTerm<T> {
             compiler,
         )?;
         let values_chunk = compile_expressions(
-            values,
+            values.map(|item| item.as_deref().clone()),
             Eagerness::Lazy,
             stack_offset,
             factory,
@@ -368,7 +372,7 @@ impl<T: Expression + Compile<T>> Compile<T> for HashSetTerm<T> {
         let values = self.values();
         let num_values = values.len();
         compile_expressions(
-            values,
+            values.map(|item| item.as_deref().clone()),
             Eagerness::Lazy,
             stack_offset,
             factory,
@@ -510,7 +514,7 @@ impl<T: Expression + Compile<T>> Compile<T> for ListTerm<T> {
         let items = self.items();
         let items = items.as_deref();
         compile_expressions(
-            items.iter(),
+            items.iter().map(|item| item.as_deref().clone()),
             Eagerness::Lazy,
             stack_offset,
             factory,
@@ -559,7 +563,9 @@ impl<T: Expression + Applicable<T> + Compile<T>> Compile<T> for PartialApplicati
         let compiled_target =
             compiler.compile_term(target, eager, stack_offset + num_args, factory, allocator)?;
         let compiled_args = compile_args(
-            args.iter().zip(arity.iter()),
+            args.iter()
+                .map(|item| item.as_deref().clone())
+                .zip(arity.iter()),
             stack_offset,
             factory,
             allocator,
@@ -608,7 +614,13 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for S
             .enumerate()
             .fold(Ok(Program::new(empty())), |program, (index, signal)| {
                 let mut program = program?;
-                match compile_signal(&signal, stack_offset + index, factory, allocator, compiler) {
+                match compile_signal(
+                    signal.as_deref(),
+                    stack_offset + index,
+                    factory,
+                    allocator,
+                    compiler,
+                ) {
                     Err(error) => Err(error),
                     Ok(compiled_signal) => {
                         program.extend(compiled_signal);
@@ -631,7 +643,7 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Compile<T>> Compile<T> for R
         let values = values.as_deref();
         let num_entries = values.len();
         let compiled_values = compile_expressions(
-            values.iter(),
+            values.iter().map(|item| item.as_deref().clone()),
             Eagerness::Lazy,
             stack_offset,
             factory,

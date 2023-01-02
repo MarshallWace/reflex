@@ -50,7 +50,12 @@ where
         if is_nil_term(&values, factory) {
             Ok(factory.create_hashset_term(empty()))
         } else if let Some(values) = factory.match_list_term(&values) {
-            let values = values.items().as_deref().iter().collect::<Vec<_>>();
+            let values = values
+                .items()
+                .as_deref()
+                .iter()
+                .map(|item| item.as_deref().clone())
+                .collect::<Vec<_>>();
             let has_dynamic_values = values.iter().any(|item| !item.is_static());
             if has_dynamic_values {
                 Ok(factory.create_application_term(

@@ -52,7 +52,12 @@ impl<T: Expression> Applicable<T> for Append {
             let combined_collections = once(collection).chain(additional_collections);
             // TODO: avoid unnecessary intermediate allocations
             let combined_items = combined_collections.fold(Vec::<T>::new(), |mut results, arg| {
-                results.extend(arg.items().as_deref().iter());
+                results.extend(
+                    arg.items()
+                        .as_deref()
+                        .iter()
+                        .map(|item| item.as_deref().clone()),
+                );
                 results
             });
             Ok(factory.create_list_term(allocator.create_list(combined_items)))
@@ -63,7 +68,8 @@ impl<T: Expression> Applicable<T> for Append {
                 |arg| format!("Expected HashSet, received {}", arg),
             )?;
             let combined_collections = once(collection).chain(additional_collections);
-            let combined_values = combined_collections.flat_map(|arg| arg.values());
+            let combined_values = combined_collections
+                .flat_map(|arg| arg.values().map(|item| item.as_deref().clone()));
             let values = combined_values.collect::<Vec<_>>();
             let deduplicated_values = match deduplicate_hashset_entries(&values) {
                 Some(values) => values,

@@ -92,7 +92,7 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for LambdaTerm<T> {
-    type Children<'a> = std::iter::Once<T>
+    type Children<'a> = std::iter::Once<T::ExpressionRef<'a>>
         where
             T: 'a,
             Self: 'a;
@@ -100,7 +100,7 @@ impl<T: Expression> CompoundNode<T> for LambdaTerm<T> {
     where
         T: 'a,
     {
-        once(self.body.clone())
+        once((&self.body).into())
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
@@ -262,10 +262,12 @@ fn apply_eta_reduction<'a, T: Expression>(
                     .as_deref()
                     .iter()
                     .enumerate()
-                    .all(|(index, arg)| match factory.match_variable_term(&arg) {
-                        Some(term) => term.offset() == num_args - index - 1,
-                        _ => false,
-                    }) =>
+                    .all(
+                        |(index, arg)| match factory.match_variable_term(arg.as_deref()) {
+                            Some(term) => term.offset() == num_args - index - 1,
+                            _ => false,
+                        },
+                    ) =>
         {
             Some(term.target())
         }

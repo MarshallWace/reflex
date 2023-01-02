@@ -52,6 +52,7 @@ impl<T: Expression> Applicable<T> for Throw {
             allocator.create_signal_list(
                 errors
                     .iter()
+                    .map(|item| item.as_deref().clone())
                     .map(|error| create_error_signal(error, factory, allocator)),
             )
         } else {

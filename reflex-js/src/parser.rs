@@ -2170,7 +2170,7 @@ mod tests {
         signals
             .iter()
             .map(|signal| {
-                let payload = signal.payload();
+                let payload = signal.as_deref().payload();
                 let message = factory
                     .match_record_term(payload.as_deref())
                     .unwrap()

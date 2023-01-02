@@ -54,13 +54,14 @@ impl<T: Expression> Applicable<T> for Insert {
                 let existing_index = if has_value {
                     existing
                         .keys()
-                        .position(|existing_key| existing_key.id() == key.id())
+                        .position(|existing_key| existing_key.as_deref().id() == key.id())
                 } else {
                     None
                 };
                 let entries = if let Some(existing_index) = existing_index {
                     existing
                         .keys()
+                        .map(|item| item.as_deref().clone())
                         .zip(
                             existing
                                 .values()
@@ -69,7 +70,7 @@ impl<T: Expression> Applicable<T> for Insert {
                                     if index == existing_index {
                                         value.clone()
                                     } else {
-                                        existing_value
+                                        existing_value.as_deref().clone()
                                     }
                                 }),
                         )
@@ -77,8 +78,14 @@ impl<T: Expression> Applicable<T> for Insert {
                 } else {
                     existing
                         .keys()
+                        .map(|item| item.as_deref().clone())
                         .chain(once(key))
-                        .zip(existing.values().chain(once(value)))
+                        .zip(
+                            existing
+                                .values()
+                                .map(|item| item.as_deref().clone())
+                                .chain(once(value)),
+                        )
                         .collect::<Vec<_>>()
                 };
                 factory.create_hashmap_term(entries)

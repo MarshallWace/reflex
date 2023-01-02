@@ -604,7 +604,7 @@ fn parse_get_effect_args<'a, T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let state_token = args.next().unwrap();
     let initial_value = args.next().unwrap();
     Ok((state_token, initial_value))
@@ -627,7 +627,7 @@ fn parse_set_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let state_token = args.next().unwrap();
     let value = args.next().unwrap();
     Ok((state_token, value))
@@ -650,7 +650,7 @@ fn parse_increment_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let state_token = args.next().unwrap();
     Ok(state_token)
 }
@@ -672,7 +672,7 @@ fn parse_decrement_effect_args<T: Expression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let state_token = args.next().unwrap();
     Ok(state_token)
 }

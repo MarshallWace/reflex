@@ -1406,7 +1406,7 @@ fn parse_custom_effect_types<T: Expression>(
             .signals()
             .as_deref()
             .iter()
-            .filter_map(|effect| match effect.signal_type() {
+            .filter_map(|effect| match effect.as_deref().signal_type() {
                 SignalType::Custom(effect_type) => Some(effect_type),
                 _ => None,
             })
@@ -1420,8 +1420,9 @@ fn match_error_expression<'a, T: Expression>(
 ) -> Option<T::Signal> {
     factory.match_signal_term(expression).and_then(|term| {
         term.signals().as_deref().iter().find_map(|effect| {
+            let effect = effect.as_deref();
             if matches!(effect.signal_type(), SignalType::Error) {
-                Some(effect)
+                Some(effect.clone())
             } else {
                 None
             }
@@ -1474,7 +1475,7 @@ fn is_blocked_result_payload<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .any(|effect| matches!(effect.signal_type(), SignalType::Custom(_)))
+                .any(|effect| matches!(effect.as_deref().signal_type(), SignalType::Custom(_)))
         })
         .unwrap_or(false)
 }
@@ -1489,7 +1490,7 @@ fn is_pending_result_payload<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .any(|effect| matches!(effect.signal_type(), SignalType::Pending))
+                .any(|effect| matches!(effect.as_deref().signal_type(), SignalType::Pending))
         })
         .unwrap_or(false)
 }

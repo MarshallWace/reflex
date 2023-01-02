@@ -1290,7 +1290,7 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
             )
         })?;
     let args = args.items();
-    let mut args = args.as_deref().iter();
+    let mut args = args.as_deref().iter().map(|item| item.as_deref().clone());
     let proto_id = args.next().unwrap();
     let url = args.next().unwrap();
     let service = args.next().unwrap();
@@ -1363,8 +1363,8 @@ fn parse_object_arg<T: Expression>(
                 .iter()
                 .zip(value.values().as_deref().iter())
                 .filter_map(|(key, value)| {
-                    factory.match_string_term(&key).map(|key| {
-                        reflex_json::sanitize(&value).map(|value| {
+                    factory.match_string_term(key.as_deref()).map(|key| {
+                        reflex_json::sanitize(value.as_deref()).map(|value| {
                             (String::from(key.value().as_deref().as_str().deref()), value)
                         })
                     })

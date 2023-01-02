@@ -67,17 +67,17 @@ where
                 ))
             }
         } else if let Some(value) = factory.match_hashset_term(&target) {
-            if value.values().all(|value| value.is_atomic()) {
+            if value.values().all(|value| value.as_deref().is_atomic()) {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(CollectHashSet),
-                    allocator.create_list(value.values()),
+                    allocator.create_list(value.values().map(|item| item.as_deref().clone())),
                 ))
             }
         } else if let Some(value) = factory.match_hashmap_term(&target) {
-            let keys_are_atomic = value.keys().all(|key| key.is_atomic());
-            let values_are_atomic = value.values().all(|value| value.is_atomic());
+            let keys_are_atomic = value.keys().all(|key| key.as_deref().is_atomic());
+            let values_are_atomic = value.values().all(|value| value.as_deref().is_atomic());
             if keys_are_atomic && values_are_atomic {
                 Ok(target)
             } else {
@@ -85,19 +85,29 @@ where
                     factory.create_builtin_term(ConstructHashMap),
                     allocator.create_pair(
                         if keys_are_atomic {
-                            factory.create_list_term(allocator.create_list(value.keys()))
+                            factory.create_list_term(
+                                allocator
+                                    .create_list(value.keys().map(|item| item.as_deref().clone())),
+                            )
                         } else {
                             factory.create_application_term(
                                 factory.create_builtin_term(CollectList),
-                                allocator.create_list(value.keys()),
+                                allocator
+                                    .create_list(value.keys().map(|item| item.as_deref().clone())),
                             )
                         },
                         if values_are_atomic {
-                            factory.create_list_term(allocator.create_list(value.values()))
+                            factory.create_list_term(
+                                allocator.create_list(
+                                    value.values().map(|item| item.as_deref().clone()),
+                                ),
+                            )
                         } else {
                             factory.create_application_term(
                                 factory.create_builtin_term(CollectList),
-                                allocator.create_list(value.values()),
+                                allocator.create_list(
+                                    value.values().map(|item| item.as_deref().clone()),
+                                ),
                             )
                         },
                     ),

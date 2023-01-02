@@ -48,6 +48,7 @@ impl<T: Expression> Applicable<T> for Map {
                             .items()
                             .as_deref()
                             .iter()
+                            .map(|item| item.as_deref().clone())
                             .map(|item| {
                                 factory.create_application_term(
                                     iteratee.clone(),
@@ -60,9 +61,10 @@ impl<T: Expression> Applicable<T> for Map {
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(
                 factory.create_hashmap_term(
-                    target.keys().zip(
+                    target.keys().map(|item| item.as_deref().clone()).zip(
                         target
                             .values()
+                            .map(|item| item.as_deref().clone())
                             .map(|value| {
                                 factory.create_application_term(
                                     iteratee.clone(),

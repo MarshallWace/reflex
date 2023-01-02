@@ -46,19 +46,33 @@ impl<T: Expression> HashMapTerm<T> {
                         self.values.len(),
                         self.values
                             .iter()
+                            .map(|item| item.as_deref().clone())
                             .take(existing_index)
                             .chain(once(value))
-                            .chain(self.values.iter().skip(existing_index + 1)),
+                            .chain(
+                                self.values
+                                    .iter()
+                                    .map(|item| item.as_deref().clone())
+                                    .skip(existing_index + 1),
+                            ),
                     );
                     Some((None, values))
                 }
             }
             None => {
-                let keys = allocator
-                    .create_sized_list(self.keys.len() + 1, self.keys.iter().chain(once(key)));
+                let keys = allocator.create_sized_list(
+                    self.keys.len() + 1,
+                    self.keys
+                        .iter()
+                        .map(|item| item.as_deref().clone())
+                        .chain(once(key)),
+                );
                 let values = allocator.create_sized_list(
                     self.values.len() + 1,
-                    self.values.iter().chain(once(value)),
+                    self.values
+                        .iter()
+                        .map(|item| item.as_deref().clone())
+                        .chain(once(value)),
                 );
                 Some((Some(keys), values))
             }
@@ -69,7 +83,8 @@ impl<T: Expression> HashMapTerm<T> {
                 factory.create_hashmap_term(
                     keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                         .iter()
-                        .zip(values.iter()),
+                        .map(|item| item.as_deref().clone())
+                        .zip(values.iter().map(|item| item.as_deref().clone())),
                 ),
             ),
         }
@@ -83,7 +98,7 @@ impl<T: Expression> Hash for HashMapTerm<T> {
 }
 impl<T: Expression> HashMapTerm<T> {
     pub fn new(keys: T::ExpressionList, values: T::ExpressionList) -> Self {
-        let lookup = build_hashmap_lookup_table(keys.iter());
+        let lookup = build_hashmap_lookup_table(keys.iter().map(|item| item.as_deref().clone()));
         Self {
             lookup,
             keys,
@@ -97,7 +112,8 @@ impl<T: Expression> HashMapTerm<T> {
     ) -> impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T> + 'a> + 'a {
         self.keys
             .iter()
-            .zip(self.values.iter())
+            .map(|item| item.as_deref().clone())
+            .zip(self.values.iter().map(|item| item.as_deref().clone()))
             .map(move |(key, value)| {
                 factory.create_list_term(allocator.create_pair(key.clone(), value.clone()))
             })
@@ -214,10 +230,12 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
+                    .map(|item| item.as_deref().clone())
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter(),
+                            .iter()
+                            .map(|item| item.as_deref().clone()),
                     ),
             ),
         )
@@ -247,10 +265,12 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
+                    .map(|item| item.as_deref().clone())
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter(),
+                            .iter()
+                            .map(|item| item.as_deref().clone()),
                     ),
             ),
         )
@@ -273,10 +293,12 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
+                    .map(|item| item.as_deref().clone())
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter(),
+                            .iter()
+                            .map(|item| item.as_deref().clone()),
                     ),
             ),
         )
@@ -300,10 +322,12 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
+                    .map(|item| item.as_deref().clone())
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter(),
+                            .iter()
+                            .map(|item| item.as_deref().clone()),
                     ),
             ),
         )
@@ -326,13 +350,13 @@ impl<T: Expression> std::fmt::Display for HashMapTerm<T> {
             "HashMap({})",
             if num_entries <= max_displayed_entries {
                 entries
-                    .map(|(key, value)| format!("{} => {}", key, value))
+                    .map(|(key, value)| format!("{} => {}", key.as_deref(), value.as_deref()))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 entries
                     .take(max_displayed_entries - 1)
-                    .map(|(key, value)| format!("{} => {}", key, value))
+                    .map(|(key, value)| format!("{} => {}", key.as_deref(), value.as_deref()))
                     .chain(once(format!(
                         "...{} more entries",
                         num_entries - (max_displayed_entries - 1)

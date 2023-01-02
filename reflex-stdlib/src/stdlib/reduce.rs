@@ -46,6 +46,7 @@ impl<T: Expression> Applicable<T> for Reduce {
                 .items()
                 .as_deref()
                 .iter()
+                .map(|item| item.as_deref().clone())
                 .fold(seed, |result, item| {
                     factory.create_application_term(
                         iteratee.clone(),
@@ -55,21 +56,21 @@ impl<T: Expression> Applicable<T> for Reduce {
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Ok(target
                 .keys()
-                .zip(target.values())
+                .map(|item| item.as_deref().clone())
+                .zip(target.values().map(|item| item.as_deref().clone()))
                 .fold(seed, |result, (key, value)| {
                     factory.create_application_term(
                         iteratee.clone(),
                         allocator.create_pair(
                             result,
-                            factory.create_list_term(
-                                allocator.create_pair(key, value),
-                            ),
+                            factory.create_list_term(allocator.create_pair(key, value)),
                         ),
                     )
                 }))
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Ok(target
                 .values()
+                .map(|item| item.as_deref().clone())
                 .fold(seed, |result, value| {
                     factory.create_application_term(
                         iteratee.clone(),

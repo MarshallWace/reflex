@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use reflex::core::{
-    ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, SerializeJson,
-    SignalTermType, StackOffset,
+    ConditionListType, DependencyList, Eagerness, Expression, GraphNode, Internable, RefType,
+    SerializeJson, SignalTermType, StackOffset,
 };
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ impl<T: Expression> std::fmt::Display for SignalTerm<T> {
             "[{}]",
             self.signals
                 .iter()
-                .map(|signal| format!("{}", signal))
+                .map(|signal| format!("{}", signal.as_deref()))
                 .collect::<Vec<_>>()
                 .join(",")
         )
