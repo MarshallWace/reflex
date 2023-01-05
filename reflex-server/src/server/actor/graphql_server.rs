@@ -29,16 +29,27 @@ use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
-use reflex_graphql::GraphQlParserBuiltin;
-use reflex_graphql::{graphql_variables_are_equal, GraphQlOperation};
+use reflex_graphql::{graphql_variables_are_equal, GraphQlOperation, GraphQlParserBuiltin};
+use reflex_handlers::actor::{
+    loader::EFFECT_TYPE_LOADER,
+    scan::EFFECT_TYPE_SCAN,
+    timeout::EFFECT_TYPE_TIMEOUT,
+    timestamp::EFFECT_TYPE_TIMESTAMP,
+    variable::{
+        EFFECT_TYPE_VARIABLE_DECREMENT, EFFECT_TYPE_VARIABLE_GET, EFFECT_TYPE_VARIABLE_INCREMENT,
+        EFFECT_TYPE_VARIABLE_SET,
+    },
+};
 use reflex_json::JsonValue;
 use reflex_macros::{dispatcher, Named};
+use reflex_runtime::action::effect::EffectEmitAction;
 use reflex_runtime::action::evaluate::{
     EvaluateResultAction, EvaluateStartAction, EvaluateUpdateAction,
 };
 use reflex_runtime::action::query::{
     QueryEmitAction, QuerySubscribeAction, QueryUnsubscribeAction,
 };
+use reflex_runtime::actor::evaluate_handler::EFFECT_TYPE_EVALUATE;
 use reflex_runtime::actor::query_manager::create_query_evaluate_effect;
 
 use crate::server::action::graphql_server::{
@@ -257,6 +268,8 @@ where
         GraphQlTransactionTrace {
             root,
             active_span: Some(initial_span),
+            effect_spans: Default::default(),
+            subquery_spans: Default::default(),
         }
     }
 }
@@ -272,6 +285,40 @@ fn get_span_attributes(
     once(KeyValue::new(
         Key::from("phase"),
         Value::from(operation_phase.as_str()),
+    ))
+    .chain(attributes)
+}
+
+fn get_effect_span_label(signal_type: &SignalType) -> String {
+    format!("effect:{}", signal_type)
+}
+
+fn get_effect_span_attributes(
+    signal_type: &SignalType,
+    attributes: impl IntoIterator<Item = KeyValue>,
+) -> impl IntoIterator<Item = KeyValue> {
+    once(KeyValue::new(
+        Key::from("type"),
+        match signal_type {
+            SignalType::Error => Value::from("error"),
+            SignalType::Pending => Value::from("pending"),
+            SignalType::Custom(signal_type) => Value::from(signal_type.clone()),
+        },
+    ))
+    .chain(attributes)
+}
+
+fn get_subquery_span_label(label: &str) -> String {
+    format!("subquery:{}", label)
+}
+
+fn get_subquery_span_attributes(
+    label: &str,
+    attributes: impl IntoIterator<Item = KeyValue>,
+) -> impl IntoIterator<Item = KeyValue> {
+    once(KeyValue::new(
+        Key::from("query"),
+        Value::from(String::from(label)),
     ))
     .chain(attributes)
 }
@@ -306,6 +353,8 @@ pub struct GraphQlServerState<T: Expression, TSpan: Span> {
     subscription_operation_mappings: HashMap<Uuid, HashId>,
     // Mapping from query evaluate effect ID to active operation query hash
     evaluate_effect_mappings: IntMap<HashId, HashId>,
+    // FIXME: remove
+    subquery_label_mappings: IntMap<HashId, String>,
 }
 impl<T: Expression, TSpan: Span> Default for GraphQlServerState<T, TSpan> {
     fn default() -> Self {
@@ -313,6 +362,7 @@ impl<T: Expression, TSpan: Span> Default for GraphQlServerState<T, TSpan> {
             operations: Default::default(),
             subscription_operation_mappings: Default::default(),
             evaluate_effect_mappings: Default::default(),
+            subquery_label_mappings: Default::default(),
         }
     }
 }
@@ -336,6 +386,7 @@ struct GraphQlOperationEffectState<T: Expression> {
     condition: T::Signal,
     signal_type: SignalType,
     status: EffectStatus<T>,
+    active_span: Option<StateToken>,
 }
 
 enum EffectStatus<T> {
@@ -343,6 +394,11 @@ enum EffectStatus<T> {
     Queued,
     /// Effect has received a placeholder pending result from the handler
     Pending,
+    /// A value has been emitted for the effect but the query has not yet been re-evaluated
+    Emitted {
+        #[allow(dead_code)]
+        value: T,
+    },
     /// Effect has resolved to a value
     Resolved {
         #[allow(dead_code)]
@@ -363,6 +419,8 @@ struct GraphQlSubscriptionState<TSpan: Span> {
 struct GraphQlTransactionTrace<TSpan: Span> {
     root: Context,
     active_span: Option<TSpan>,
+    effect_spans: IntMap<StateToken, TSpan>,
+    subquery_spans: IntMap<HashId, TSpan>,
 }
 impl<TSpan: Span + Send + Sync + 'static> GraphQlTransactionTrace<TSpan> {
     fn enter_span(
@@ -397,6 +455,82 @@ impl<TSpan: Span + Send + Sync + 'static> GraphQlTransactionTrace<TSpan> {
             span.add_event(event_type.as_str(), attributes.clone());
             self.root.span().add_event(event_type.as_str(), attributes);
         }
+        let span_context = span.span_context();
+        let trace_id = span_context.trace_id();
+        let span_id = span_context.span_id();
+        span.end();
+        Some((trace_id, span_id))
+    }
+    fn start_effect_span(
+        &mut self,
+        state_token: StateToken,
+        effect_type: &SignalType,
+        attributes: impl IntoIterator<Item = KeyValue>,
+        tracer: &impl Tracer<Span = TSpan>,
+    ) -> (TraceId, SpanId) {
+        match self.effect_spans.entry(state_token) {
+            Entry::Occupied(entry) => {
+                let span = entry.get();
+                let span_context = span.span_context();
+                let trace_id = span_context.trace_id();
+                let span_id = span_context.span_id();
+                (trace_id, span_id)
+            }
+            Entry::Vacant(entry) => {
+                let span = create_span(
+                    get_effect_span_label(effect_type),
+                    get_effect_span_attributes(effect_type, attributes),
+                    tracer,
+                    &self.root,
+                );
+                let span_context = span.span_context();
+                let trace_id = span_context.trace_id();
+                let span_id = span_context.span_id();
+                entry.insert(span);
+                (trace_id, span_id)
+            }
+        }
+    }
+    fn end_effect_span(&mut self, state_token: StateToken) -> Option<(TraceId, SpanId)> {
+        let mut span = self.effect_spans.remove(&state_token)?;
+        let span_context = span.span_context();
+        let trace_id = span_context.trace_id();
+        let span_id = span_context.span_id();
+        span.end();
+        Some((trace_id, span_id))
+    }
+    fn start_subquery_span(
+        &mut self,
+        cache_id: StateToken,
+        label: &str,
+        attributes: impl IntoIterator<Item = KeyValue>,
+        tracer: &impl Tracer<Span = TSpan>,
+    ) -> (TraceId, SpanId) {
+        match self.subquery_spans.entry(cache_id) {
+            Entry::Occupied(entry) => {
+                let span = entry.get();
+                let span_context = span.span_context();
+                let trace_id = span_context.trace_id();
+                let span_id = span_context.span_id();
+                (trace_id, span_id)
+            }
+            Entry::Vacant(entry) => {
+                let span = create_span(
+                    get_subquery_span_label(label),
+                    get_subquery_span_attributes(label, attributes),
+                    tracer,
+                    &self.root,
+                );
+                let span_context = span.span_context();
+                let trace_id = span_context.trace_id();
+                let span_id = span_context.span_id();
+                entry.insert(span);
+                (trace_id, span_id)
+            }
+        }
+    }
+    fn end_subquery_span(&mut self, cache_id: StateToken) -> Option<(TraceId, SpanId)> {
+        let mut span = self.subquery_spans.remove(&cache_id)?;
         let span_context = span.span_context();
         let trace_id = span_context.trace_id();
         let span_id = span_context.span_id();
@@ -442,6 +576,7 @@ dispatcher!({
         Inbox(GraphQlServerUnsubscribeAction<T>),
         Inbox(GraphQlServerModifyAction<T>),
         Inbox(QueryEmitAction<T>),
+        Inbox(EffectEmitAction<T>),
         Inbox(EvaluateStartAction<T>),
         Inbox(EvaluateResultAction<T>),
         Inbox(EvaluateUpdateAction<T>),
@@ -621,6 +756,26 @@ dispatcher!({
             context: &mut impl HandlerContext,
         ) -> Option<SchedulerTransition<TAction, TTask>> {
             self.handle_evaluate_update(state, action, metadata, context)
+        }
+
+        fn accept(&self, _action: &EffectEmitAction<T>) -> bool {
+            true
+        }
+        fn schedule(
+            &self,
+            _action: &EffectEmitAction<T>,
+            _state: &Self::State,
+        ) -> Option<SchedulerMode> {
+            Some(SchedulerMode::Async)
+        }
+        fn handle(
+            &self,
+            state: &mut Self::State,
+            action: &EffectEmitAction<T>,
+            metadata: &MessageData,
+            context: &mut impl HandlerContext,
+        ) -> Option<SchedulerTransition<TAction, TTask>> {
+            self.handle_effect_emit(state, action, metadata, context)
         }
     }
 });
@@ -1213,8 +1368,39 @@ where
         TAction: Action + From<GraphQlServerEmitAction<T>>,
         TTask: TaskFactory<TAction, TTask>,
     {
-        let EvaluateStartAction { cache_id, .. } = action;
-        let query_id = state.evaluate_effect_mappings.get(cache_id)?;
+        let EvaluateStartAction {
+            cache_id, label, ..
+        } = action;
+        let query_id = match state.evaluate_effect_mappings.get(cache_id) {
+            Some(query_effect) => Some(query_effect),
+            None => {
+                if let Entry::Vacant(entry) = state.subquery_label_mappings.entry(*cache_id) {
+                    entry.insert(label.clone());
+                };
+                let parent_traces = state
+                    .operations
+                    .values_mut()
+                    .filter(|operation_state| operation_state.active_effects.contains_key(cache_id))
+                    .flat_map(|operation_state| {
+                        operation_state
+                            .subscriptions
+                            .values_mut()
+                            .filter_map(|subscription| subscription.trace.as_mut())
+                    });
+                for trace in parent_traces {
+                    trace.start_subquery_span(
+                        *cache_id,
+                        label,
+                        [KeyValue::new(
+                            Key::from("query_id"),
+                            Value::from(*cache_id as i64),
+                        )],
+                        &self.tracer,
+                    );
+                }
+                None
+            }
+        }?;
         let operation_state = state.operations.get_mut(query_id)?;
         let active_traces = operation_state
             .subscriptions
@@ -1251,13 +1437,43 @@ where
             state_index,
             state_updates,
         } = action;
-        let query_id = state.evaluate_effect_mappings.get(cache_id)?;
+        let query_id = match state.evaluate_effect_mappings.get(cache_id) {
+            Some(query_id) => Some(query_id),
+            None => {
+                if let Some(label) = state.subquery_label_mappings.get(cache_id) {
+                    let parent_traces = state
+                        .operations
+                        .values_mut()
+                        .filter(|operation_state| {
+                            operation_state.active_effects.contains_key(cache_id)
+                        })
+                        .flat_map(|operation_state| {
+                            operation_state
+                                .subscriptions
+                                .values_mut()
+                                .filter_map(|subscription| subscription.trace.as_mut())
+                        });
+                    for trace in parent_traces {
+                        trace.start_subquery_span(
+                            *cache_id,
+                            label,
+                            [KeyValue::new(
+                                Key::from("query_id"),
+                                Value::from(*cache_id as i64),
+                            )],
+                            &self.tracer,
+                        );
+                    }
+                }
+                None
+            }
+        }?;
         let operation_state = state.operations.get_mut(query_id)?;
-        update_operation_effect_state(
-            state_updates.iter(),
-            &mut operation_state.active_effects,
-            &self.factory,
-        );
+        for (state_token, value) in state_updates.iter() {
+            if let Some(effect_state) = operation_state.active_effects.get_mut(state_token) {
+                effect_state.status = parse_effect_value_status(value, &self.factory);
+            }
+        }
         let active_traces = operation_state
             .subscriptions
             .values_mut()
@@ -1323,13 +1539,27 @@ where
         let EvaluateResultAction {
             cache_id, result, ..
         } = action;
-        let query_id = state.evaluate_effect_mappings.get(cache_id)?;
+        let query_id = match state.evaluate_effect_mappings.get(cache_id) {
+            Some(query_id) => Some(query_id),
+            None => {
+                let parent_traces = state
+                    .operations
+                    .values_mut()
+                    .filter(|operation_state| operation_state.active_effects.contains_key(cache_id))
+                    .flat_map(|operation_state| {
+                        operation_state
+                            .subscriptions
+                            .values_mut()
+                            .filter_map(|subscription| subscription.trace.as_mut())
+                    });
+                for trace in parent_traces {
+                    trace.end_subquery_span(*cache_id);
+                }
+                None
+            }
+        }?;
         let operation_state = state.operations.get_mut(query_id)?;
-        update_operation_effect_mappings(
-            &mut operation_state.active_effects,
-            result,
-            &self.factory,
-        );
+        update_operation_effect_mappings(operation_state, result, &self.factory, &self.tracer);
         let query_status = GraphQlQueryStatus::get_state(Some(result.result()), &self.factory);
         let updated_phase = match query_status {
             GraphQlQueryStatus::Blocked => Some(GraphQlOperationPhase::Blocked),
@@ -1359,8 +1589,52 @@ where
             for trace in active_traces {
                 trace.end_active_span(Some(GraphQlTraceEvent {
                     event_type,
-                    attributes: effect_status_metrics.as_span_labels().collect(),
+                    attributes: Default::default(),
                 }));
+            }
+        }
+        None
+    }
+    fn handle_effect_emit<TAction, TTask>(
+        &self,
+        state: &mut GraphQlServerState<T, TTracer::Span>,
+        action: &EffectEmitAction<T>,
+        _metadata: &MessageData,
+        _context: &mut impl HandlerContext,
+    ) -> Option<SchedulerTransition<TAction, TTask>>
+    where
+        TAction: Action,
+        TTask: TaskFactory<TAction, TTask>,
+    {
+        let EffectEmitAction { effect_types, .. } = action;
+        let filtered_effect_types = effect_types
+            .iter()
+            .filter(|batch| !is_internal_effect_type(&*batch.effect_type))
+            .collect::<Vec<_>>();
+        if filtered_effect_types.is_empty() {
+            return None;
+        }
+        for operation_state in state.operations.values_mut() {
+            for effect_type in filtered_effect_types.iter().copied() {
+                for (state_token, value) in effect_type.updates.iter() {
+                    if let Some(effect_state) = operation_state.active_effects.get_mut(state_token)
+                    {
+                        effect_state.status = EffectStatus::Emitted {
+                            value: value.clone(),
+                        };
+                        if let Some(state_token) = effect_state.active_span.take() {
+                            let active_traces = {
+                                operation_state
+                                    .subscriptions
+                                    .values_mut()
+                                    .filter_map(|subscription| subscription.trace.as_mut())
+                            };
+                            for trace in active_traces {
+                                trace.end_effect_span(state_token);
+                            }
+                        }
+                    }
+                }
             }
         }
         None
@@ -1425,19 +1699,22 @@ where
     }
 }
 
-fn update_operation_effect_state<'a, T: Expression + 'a>(
-    updates: impl IntoIterator<Item = &'a (StateToken, T)>,
-    active_effects: &mut IntMap<StateToken, GraphQlOperationEffectState<T>>,
-    factory: &impl ExpressionFactory<T>,
-) {
-    for (state_token, value) in updates {
-        if let Some(effect_state) = active_effects.get_mut(state_token) {
-            effect_state.status = parse_effect_status(value, factory);
-        }
+fn is_internal_effect_type(effect_type: &str) -> bool {
+    match effect_type {
+        EFFECT_TYPE_EVALUATE
+        | EFFECT_TYPE_LOADER
+        | EFFECT_TYPE_SCAN
+        | EFFECT_TYPE_TIMEOUT
+        | EFFECT_TYPE_TIMESTAMP
+        | EFFECT_TYPE_VARIABLE_DECREMENT
+        | EFFECT_TYPE_VARIABLE_GET
+        | EFFECT_TYPE_VARIABLE_INCREMENT
+        | EFFECT_TYPE_VARIABLE_SET => true,
+        _ => false,
     }
 }
 
-fn parse_effect_status<T: Expression>(
+fn parse_effect_value_status<T: Expression>(
     value: &T,
     factory: &impl ExpressionFactory<T>,
 ) -> EffectStatus<T> {
@@ -1492,6 +1769,15 @@ fn get_operation_effect_status_metrics<'a, T: Expression>(
                     _ => None,
                 }),
         );
+    let emitted =
+        count_item_occurrences(
+            effect_state
+                .iter()
+                .filter_map(|(_, state)| match state.status {
+                    EffectStatus::Emitted { .. } => Some(&state.signal_type),
+                    _ => None,
+                }),
+        );
     let resolved =
         count_item_occurrences(
             effect_state
@@ -1505,6 +1791,7 @@ fn get_operation_effect_status_metrics<'a, T: Expression>(
         queued,
         pending,
         error,
+        emitted,
         resolved,
     }
 }
@@ -1538,23 +1825,67 @@ fn count_state_updates<T: Expression>(
     count_item_occurrences(effect_types)
 }
 
-fn update_operation_effect_mappings<T: Expression>(
-    active_effects: &mut IntMap<StateToken, GraphQlOperationEffectState<T>>,
+fn update_operation_effect_mappings<
+    T: Expression,
+    TTracer: Tracer<Span = TSpan>,
+    TSpan: Span + Send + Sync + 'static,
+>(
+    operation_state: &mut GraphQlOperationState<T, TTracer::Span>,
     result: &EvaluationResult<T>,
     factory: &impl ExpressionFactory<T>,
+    tracer: &TTracer,
 ) {
+    let active_effects = &mut operation_state.active_effects;
+    let subscriptions = &mut operation_state.subscriptions;
     // Remove mappings for outdated dependencies
     let remaining_dependencies = result.dependencies();
     active_effects.retain(|state_token, _effect| remaining_dependencies.contains(*state_token));
     // Insert mappings for newly-encountered signals
     let custom_effects = parse_custom_effects(result.result(), factory);
     active_effects.extend(custom_effects.into_iter().map(|effect| {
+        let state_token = effect.id();
+        let effect_type = effect.signal_type();
+        let is_internal_effect = match &effect_type {
+            SignalType::Error | SignalType::Pending => true,
+            SignalType::Custom(effect_type) => is_internal_effect_type(effect_type),
+        };
+        if !is_internal_effect {
+            let active_traces = subscriptions
+                .values_mut()
+                .filter_map(|subscription| subscription.trace.as_mut());
+            for trace in active_traces {
+                trace.start_effect_span(
+                    state_token,
+                    &effect_type,
+                    [
+                        KeyValue::new(
+                            Key::from("effect_type"),
+                            match &effect_type {
+                                SignalType::Error => Value::from("error"),
+                                SignalType::Pending => Value::from("pending"),
+                                SignalType::Custom(signal_type) => Value::from(signal_type.clone()),
+                            },
+                        ),
+                        KeyValue::new(
+                            Key::from("payload"),
+                            Value::from(format!("{}", effect.payload().as_deref())),
+                        ),
+                        KeyValue::new(
+                            Key::from("token"),
+                            Value::from(format!("{}", effect.token().as_deref())),
+                        ),
+                    ],
+                    tracer,
+                );
+            }
+        }
         (
-            effect.id(),
+            state_token,
             GraphQlOperationEffectState {
-                signal_type: effect.signal_type(),
+                signal_type: effect_type,
                 condition: effect,
                 status: EffectStatus::Queued,
+                active_span: Some(state_token),
             },
         )
     }));
@@ -1682,6 +2013,7 @@ pub(super) struct EffectStatusMetrics<'a> {
     queued: HashMap<&'a SignalType, usize>,
     pending: HashMap<&'a SignalType, usize>,
     error: HashMap<&'a SignalType, usize>,
+    emitted: HashMap<&'a SignalType, usize>,
     resolved: HashMap<&'a SignalType, usize>,
 }
 impl<'a> EffectStatusMetrics<'a> {
@@ -1698,6 +2030,10 @@ impl<'a> EffectStatusMetrics<'a> {
             .chain(format_effect_status_type_metric_labels(
                 "effects.error.",
                 self.error.iter(),
+            ))
+            .chain(format_effect_status_type_metric_labels(
+                "effects.emitted.",
+                self.emitted.iter(),
             ))
             .chain(format_effect_status_type_metric_labels(
                 "effects.resolved.",

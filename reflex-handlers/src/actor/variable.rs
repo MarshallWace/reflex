@@ -27,7 +27,7 @@ use reflex_runtime::{
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator,
 };
 
-use crate::stdlib::{
+pub use crate::stdlib::{
     EFFECT_TYPE_VARIABLE_DECREMENT, EFFECT_TYPE_VARIABLE_GET, EFFECT_TYPE_VARIABLE_INCREMENT,
     EFFECT_TYPE_VARIABLE_SET,
 };

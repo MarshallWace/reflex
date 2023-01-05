@@ -7,10 +7,10 @@ use reflex::core::{
 };
 use reflex_stdlib::Stdlib;
 
-pub(crate) const EFFECT_TYPE_VARIABLE_GET: &'static str = "reflex::variable::get";
-pub(crate) const EFFECT_TYPE_VARIABLE_SET: &'static str = "reflex::state::set";
-pub(crate) const EFFECT_TYPE_VARIABLE_INCREMENT: &'static str = "reflex::state::increment";
-pub(crate) const EFFECT_TYPE_VARIABLE_DECREMENT: &'static str = "reflex::state::decrement";
+pub const EFFECT_TYPE_VARIABLE_GET: &'static str = "reflex::variable::get";
+pub const EFFECT_TYPE_VARIABLE_SET: &'static str = "reflex::state::set";
+pub const EFFECT_TYPE_VARIABLE_INCREMENT: &'static str = "reflex::state::increment";
+pub const EFFECT_TYPE_VARIABLE_DECREMENT: &'static str = "reflex::state::decrement";
 
 pub struct GetVariable;
 impl GetVariable {
