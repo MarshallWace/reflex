@@ -3,8 +3,8 @@
 # List cargo workspace member crates, sorted by dependency depth (deepest first)
 
 cargo tree --no-dedupe --prefix depth | # List all crates, prefixed with crate depth
-  grep '^.[:digit:]*[[:alnum:]_-]* v[[:alnum:].-]* ('"$PWD"'[/)]' | # Filter to crates defined within the current directory
+  grep '^.[[:digit:]]*[[:alnum:]_-]* v[[:alnum:].-]* ('"$PWD"'[/)]' | # Filter to crates defined within the current directory
   sort -r | # Sort by dependency depth, deepest first
-  sed 's/^.[:digit:]*\([[:alnum:]_-]*\).*/\1/' | # Strip results to just the crate name
+  sed 's/^.[[:digit:]]*\([[:alnum:]_-]*\).*/\1/' | # Strip results to just the crate name
   uniq | # Strip consecutive duplicate results
   awk '!seen[$0]++' # Strip remaining non-consecutive duplicate results
