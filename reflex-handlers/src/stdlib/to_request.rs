@@ -48,9 +48,10 @@ impl<T: Expression> Applicable<T> for ToRequest {
                     allocator.create_empty_list(),
                 );
                 let body = factory.create_nil_term();
+                let token = factory.create_nil_term();
                 Some(factory.create_record_term(
                     request_prototype(factory, allocator),
-                    allocator.create_list(vec![url, method, headers, body]),
+                    allocator.create_list(vec![url, method, headers, body, token]),
                 ))
             }
             _ => {
@@ -82,5 +83,6 @@ pub(crate) fn request_prototype<T: Expression>(
         factory.create_string_term(allocator.create_static_string("method")),
         factory.create_string_term(allocator.create_static_string("headers")),
         factory.create_string_term(allocator.create_static_string("body")),
+        factory.create_string_term(allocator.create_static_string("token")),
     ]))
 }
