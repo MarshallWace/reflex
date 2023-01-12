@@ -8,8 +8,11 @@ pub struct WithExactSizeIterator<T: Iterator> {
     iter: T,
 }
 impl<T: Iterator> WithExactSizeIterator<T> {
-    pub fn new(remaining: usize, iter: T) -> Self {
-        Self { remaining, iter }
+    pub fn new(len: usize, iter: T) -> Self {
+        Self {
+            remaining: len,
+            iter,
+        }
     }
 }
 impl<T: Iterator> Iterator for WithExactSizeIterator<T> {
