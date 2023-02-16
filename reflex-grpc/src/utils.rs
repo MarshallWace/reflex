@@ -22,22 +22,27 @@ pub fn get_transport_error(status: &Status) -> Option<&TransportError> {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) struct ProtoId(u64);
+pub(crate) struct ProtoId(u32);
 impl std::fmt::Display for ProtoId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(value) = self;
         write!(f, "0x{:x}", value)
     }
 }
-impl From<u64> for ProtoId {
-    fn from(value: u64) -> Self {
+impl From<u32> for ProtoId {
+    fn from(value: u32) -> Self {
         Self(value)
     }
 }
-impl Into<u64> for ProtoId {
-    fn into(self) -> u64 {
+impl Into<u32> for ProtoId {
+    fn into(self) -> u32 {
         let Self(value) = self;
         value
+    }
+}
+impl From<u64> for ProtoId {
+    fn from(value: u64) -> Self {
+        Self::from((value & 0x00000000FFFFFFFF) as u32)
     }
 }
 
@@ -47,7 +52,7 @@ pub(crate) fn load_proto_descriptor(proto: &[u8]) -> Result<FileDescriptorSet, D
 
 pub(crate) fn get_proto_checksum(proto: &FileDescriptorSet) -> ProtoId {
     // TODO: Traverse imports when computing protobuf schema hash
-    ProtoId(hash_object(&proto))
+    ProtoId::from(hash_object(&proto))
 }
 
 fn hash_object(value: &impl std::hash::Hash) -> u64 {

@@ -91,7 +91,7 @@ impl<'src> SymbolCache<'src> {
             .get(identifier)
             .map(|value| *value)
             .unwrap_or_else(|| {
-                let id = self.cache.len() as u64;
+                let id = self.cache.len() as SymbolId;
                 self.cache.insert(identifier, id);
                 id
             })

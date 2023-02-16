@@ -22,7 +22,7 @@ use crate::hash::{hash_object, FnvHasher, HashId, IntMap, IntSet};
 
 pub type IntValue = i64;
 pub type FloatValue = f64;
-pub type SymbolId = u64;
+pub type SymbolId = u32;
 
 pub fn is_integer(value: FloatValue) -> bool {
     as_integer(value).is_some()

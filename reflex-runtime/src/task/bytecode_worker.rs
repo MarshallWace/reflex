@@ -5,7 +5,7 @@ use metrics::histogram;
 use reflex::{
     core::{
         Applicable, DependencyList, EvaluationResult, Expression, ExpressionFactory, HeapAllocator,
-        InstructionPointer, Reducible, Rewritable, SignalType, StateCache,
+        InstructionPointer, Reducible, Rewritable, SignalType, StateCache, SymbolId,
     },
     hash::{hash_object, HashId},
 };
@@ -534,7 +534,7 @@ fn create_query_entry_point_function(
     let (query_factory_address, query_factory_hash) = query_factory;
     create_main_function([
         Instruction::PushSymbol {
-            id: hash_object(operation_id),
+            id: (hash_object(operation_id) & 0x00000000FFFFFFFF) as SymbolId,
         },
         Instruction::Call {
             target_address: graph_factory_address,

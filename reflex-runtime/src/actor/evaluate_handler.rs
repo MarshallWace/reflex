@@ -18,9 +18,9 @@ use metrics::{
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, DynamicState, EvaluationResult,
-        Expression, ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType, RefType,
-        SignalTermType, SignalType, StateCache, StateToken, StringTermType, StringValue,
-        SymbolTermType,
+        Expression, ExpressionFactory, ExpressionListType, HeapAllocator, IntTermType, IntValue,
+        ListTermType, RefType, SignalTermType, SignalType, StateCache, StateToken, StringTermType,
+        StringValue,
     },
     hash::{IntMap, IntSet},
 };
@@ -197,12 +197,9 @@ fn create_evaluate_effect_result<T: Expression>(
         allocator.create_pair(
             result.result().clone(),
             factory.create_list_term(
-                allocator.create_list(
-                    result
-                        .dependencies()
-                        .iter()
-                        .map(|state_token| factory.create_symbol_term(state_token)),
-                ),
+                allocator.create_list(result.dependencies().iter().map(|state_token| {
+                    factory.create_int_term(serialize_state_token(state_token))
+                })),
             ),
         ),
     )
@@ -219,13 +216,21 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     let dependencies = factory.match_list_term(dependencies.as_deref())?.items();
     let dependencies = dependencies.as_deref().iter().filter_map(|dependency| {
         factory
-            .match_symbol_term(dependency.as_deref())
-            .map(|term| term.id())
+            .match_int_term(dependency.as_deref())
+            .map(|term| deserialize_state_token(term.value()))
     });
     Some(EvaluationResult::new(
         value.as_deref().clone(),
         DependencyList::from_iter(dependencies),
     ))
+}
+
+fn serialize_state_token(state_token: StateToken) -> IntValue {
+    unsafe { std::mem::transmute::<u64, i64>(state_token) }
+}
+
+fn deserialize_state_token(value: IntValue) -> StateToken {
+    unsafe { std::mem::transmute::<i64, u64>(value) }
 }
 
 #[derive(Named, Clone)]

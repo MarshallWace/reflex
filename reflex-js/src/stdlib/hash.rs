@@ -6,7 +6,7 @@ use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, SymbolId, Uid, Uuid,
 };
 
 pub struct Hash;
@@ -49,7 +49,9 @@ impl<T: Expression> Applicable<T> for Hash {
                     std::hash::Hash::hash(&arg.as_deref().id(), &mut hasher);
                 }
                 let hash = hasher.finish();
-                Ok(factory.create_symbol_term(hash))
+                // TODO: Confirm conversion of 64-bit hash to 32-bit symbol ID
+                let hash_symbol = (hash & 0x00000000FFFFFFFF) as SymbolId;
+                Ok(factory.create_symbol_term(hash_symbol))
             }
             _ => Err(format!("Expected list, received {}", parsed_args)),
         }
