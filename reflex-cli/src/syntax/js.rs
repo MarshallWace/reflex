@@ -34,7 +34,6 @@ pub fn default_js_loaders<'a, T: Expression + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
 where
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + JsImportsBuiltin + HandlerImportsBuiltin,
 {
     compose_module_loaders(
@@ -61,13 +60,12 @@ where
     move |input: &str| reflex_js::parse(input, &env, &factory, &allocator)
 }
 
-pub fn create_js_module_parser<T: Expression + Rewritable<T> + 'static>(
+pub fn create_js_module_parser<T: Expression + 'static>(
     path: &Path,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl SyntaxParser<T>
 where
-    T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + JsImportsBuiltin + HandlerImportsBuiltin,
 {
     let env = create_js_env(factory, allocator);

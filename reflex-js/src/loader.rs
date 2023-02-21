@@ -11,15 +11,16 @@ use std::{
     rc::Rc,
 };
 
+use reflex::core::{Expression, ExpressionFactory, HeapAllocator};
+
 use crate::{
     globals::{builtin_globals, JsGlobalsBuiltin},
     parse_module,
     parser::JsParserBuiltin,
     Env,
 };
-use reflex::core::{Expression, ExpressionFactory, HeapAllocator, Rewritable};
 
-pub fn create_module_loader<T: Expression + Rewritable<T> + 'static>(
+pub fn create_module_loader<T: Expression + 'static>(
     env: Env<T>,
     custom_loader: Option<impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static>,
     factory: &(impl ExpressionFactory<T> + Clone + 'static),
@@ -106,7 +107,7 @@ pub fn compose_module_loaders<T: Expression>(
     }
 }
 
-pub fn create_js_loader<T: Expression + Rewritable<T> + 'static>(
+pub fn create_js_loader<T: Expression>(
     env: Env<T>,
     module_loader: impl Fn(&str, &Path) -> Option<Result<T, String>>,
     factory: &(impl ExpressionFactory<T> + Clone),
@@ -144,7 +145,7 @@ pub fn get_module_filesystem_path(import_path: &str, module_path: &Path) -> Path
         .unwrap_or_else(|| Path::new(import_path).to_path_buf())
 }
 
-pub fn create_js_env<T: Expression + Rewritable<T>>(
+pub fn create_js_env<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Env<T>
