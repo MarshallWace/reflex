@@ -295,14 +295,14 @@ impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<apply:{}:{}>",
+            "<apply:{}:({})>",
             self.target().as_deref(),
             self.args()
                 .as_deref()
                 .iter()
                 .map(|arg| format!("{}", arg.as_deref()))
                 .collect::<Vec<_>>()
-                .join(",")
+                .join(", ")
         )
     }
 }

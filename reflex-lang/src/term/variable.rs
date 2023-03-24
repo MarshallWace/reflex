@@ -109,7 +109,7 @@ impl Internable for VariableTerm {
 
 impl std::fmt::Display for VariableTerm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<static:{}>", self.offset)
+        write!(f, "<variable:{}>", self.offset)
     }
 }
 impl SerializeJson for VariableTerm {
