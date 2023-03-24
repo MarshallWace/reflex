@@ -25,6 +25,7 @@ pub struct CompilerCliOptions {
     pub debug: bool,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum OutputFormat {
     Json,
     Debug,
