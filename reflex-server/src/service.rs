@@ -56,6 +56,7 @@ use uuid::Uuid;
 
 use crate::{
     actor::{ServerAction, ServerActor},
+    logger::SkipRedispatchedActionsLogger,
     server::{
         action::{
             http_server::{HttpServerRequestAction, HttpServerResponseAction},
@@ -465,7 +466,7 @@ where
         custom_actors: GraphQlWebServerActorFactory<
             TAction,
             TTask,
-            TLogger,
+            SkipRedispatchedActionsLogger<TLogger, TAction, TTask>,
             TInstrumentation,
             TAsyncTasks,
             TBlockingTasks,
@@ -507,7 +508,7 @@ where
                 'a,
                 TAction,
                 TTask,
-                TLogger,
+                SkipRedispatchedActionsLogger<TLogger, TAction, TTask>,
                 TInstrumentation,
                 TAsyncTasks,
                 TBlockingTasks,
@@ -558,6 +559,7 @@ where
     {
         let schema_types = schema.map(parse_graphql_schema_types).transpose()?;
         let (runtime, main_pid) = {
+            let logger = SkipRedispatchedActionsLogger::new(logger);
             let mut builder =
                 TokioSchedulerBuilder::new(logger, instrumentation, async_tasks, blocking_tasks);
             let main_pid = builder.generate_pid();

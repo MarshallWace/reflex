@@ -30,6 +30,7 @@ use reflex_scheduler::tokio::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    logger::SkipRedispatchedActionsLogger,
     server::{
         GraphQlServerOperationMetricLabels, GraphQlServerQueryLabel,
         HttpGraphQlServerQueryMetricLabels, HttpGraphQlServerQueryTransform,
@@ -84,7 +85,7 @@ pub async fn cli<
     custom_actors: GraphQlWebServerActorFactory<
         TAction,
         TTask,
-        TLogger,
+        SkipRedispatchedActionsLogger<TLogger, TAction, TTask>,
         TInstrumentation,
         TAsyncTasks,
         TBlockingTasks,
@@ -131,7 +132,7 @@ where
             'a,
             TAction,
             TTask,
-            TLogger,
+            SkipRedispatchedActionsLogger<TLogger, TAction, TTask>,
             TInstrumentation,
             TAsyncTasks,
             TBlockingTasks,

@@ -310,3 +310,92 @@ where
         }
     }
 }
+
+pub struct SkipRedispatchedActionsLogger<T, TAction, TTask>(
+    FilteredLogger<T, SkipRedispatchedActionsLoggerPredicate, TAction, TTask>,
+)
+where
+    T: TokioSchedulerLogger<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>;
+impl<T, TAction, TTask> SkipRedispatchedActionsLogger<T, TAction, TTask>
+where
+    T: TokioSchedulerLogger<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    pub fn new(inner: T) -> Self {
+        Self(FilteredLogger::new(
+            inner,
+            SkipRedispatchedActionsLoggerPredicate,
+        ))
+    }
+}
+impl<T, TAction, TTask> Clone for SkipRedispatchedActionsLogger<T, TAction, TTask>
+where
+    T: TokioSchedulerLogger<Action = TAction, Task = TTask> + Clone,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn clone(&self) -> Self {
+        let Self(inner) = self;
+        Self(inner.clone())
+    }
+}
+impl<T, TAction, TTask> TokioSchedulerLogger for SkipRedispatchedActionsLogger<T, TAction, TTask>
+where
+    T: TokioSchedulerLogger<Action = TAction, Task = TTask>,
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    type Action = TAction;
+    type Task = TTask;
+    fn log_scheduler_command(
+        &mut self,
+        command: &TokioCommand<Self::Action, Self::Task>,
+        enqueue_time: Instant,
+    ) {
+        let Self(inner) = self;
+        inner.log_scheduler_command(command, enqueue_time)
+    }
+    fn log_worker_message(
+        &mut self,
+        message: &AsyncMessage<Self::Action>,
+        actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
+        pid: ProcessId,
+    ) {
+        let Self(inner) = self;
+        inner.log_worker_message(message, actor, pid)
+    }
+    fn log_task_message(&mut self, message: &AsyncMessage<Self::Action>, pid: ProcessId) {
+        let Self(inner) = self;
+        inner.log_task_message(message, pid)
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+struct SkipRedispatchedActionsLoggerPredicate;
+impl<TAction, TTask> FilteredLoggerPredicate<TAction, TTask>
+    for SkipRedispatchedActionsLoggerPredicate
+where
+    TAction: Action,
+    TTask: TaskFactory<TAction, TTask>,
+{
+    fn accept_scheduler_command(&self, command: &TokioCommand<TAction, TTask>) -> bool {
+        match command {
+            TokioCommand::Send { pid: _, message } => message.redispatched_from().is_none(),
+            _ => true,
+        }
+    }
+    fn accept_worker_message(
+        &self,
+        _message: &AsyncMessage<TAction>,
+        _actor: &TTask::Actor,
+        _pid: ProcessId,
+    ) -> bool {
+        false
+    }
+    fn accept_task_message(&self, _message: &AsyncMessage<TAction>, _pid: ProcessId) -> bool {
+        false
+    }
+}

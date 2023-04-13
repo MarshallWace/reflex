@@ -55,6 +55,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     graphql_service,
+    logger::SkipRedispatchedActionsLogger,
     server::{
         actor::{
             create_grpc_otlp_tracer, create_http_otlp_tracer,
@@ -413,7 +414,7 @@ pub fn cli<
     custom_actors: GraphQlWebServerActorFactory<
         TAction,
         TTask,
-        TLogger,
+        SkipRedispatchedActionsLogger<TLogger, TAction, TTask>,
         TInstrumentation,
         TAsyncTasks,
         TBlockingTasks,
@@ -461,7 +462,7 @@ where
             'a,
             TAction,
             TTask,
-            TLogger,
+            SkipRedispatchedActionsLogger<TLogger, TAction, TTask>,
             TInstrumentation,
             TAsyncTasks,
             TBlockingTasks,
