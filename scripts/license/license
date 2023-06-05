@@ -1,0 +1,197 @@
+#! /usr/bin/env bash
+set -euo pipefail
+
+# Determine the current script location
+current_dir="$(realpath "$(dirname "$0")")"
+# Determine the project repository root
+project_dir="$(cd "$current_dir" && git rev-parse --show-toplevel)"
+# Determine the current script location within the project repository root
+relative_dir="$(realpath --relative-base="$project_dir" "$current_dir")"
+
+# If any filename arguments were provided, parse them into an array, defaulting to the full set of version-controlled files
+if [ $# -gt 0 ]
+then
+  # Parse whitespace-separated filenames into an array
+  read -r -a input_filenames <<< "$@"
+else
+  # Parse newline-separated version-control file listing output terminated by a null byte into an array
+  IFS=$'\n' read -r -a input_filenames -d '' < <(git ls-files && printf '\0')
+fi
+
+# Filter out any files located within the current script directory
+filenames=()
+for filename in "${input_filenames[@]}"
+do
+  # Strip out any filenames that start with the current script directiory
+  filtered_filename="$(awk -v s="$relative_dir" 'index($0, s) != 1' <<< "$filename")"
+  # If the filename was not stripped out, add it to the final list of filenames to be processed
+  if [[ -n "$filtered_filename" ]]
+  then
+    filenames+=("$filtered_filename")
+  fi
+done
+
+echo "Processing ${#filenames[@]} files"
+
+# Parse the CSV of known authors into an array of author emails and associative arrays of author metadata fields
+declare -a known_authors=()
+declare -A known_author_names=()
+declare -A known_author_urls=()
+while IFS="" read -r author
+do
+  while IFS="," read -r email name url
+  do
+    known_authors+=("$email")
+    known_author_names["$email"]="$name"
+    known_author_urls["$email"]="$url"
+  done <<< "$author"
+done < "$current_dir"/authors.csv
+
+# Retrieve the default author email address from the current user's git config
+# (this will be used to determine contributor metadata for untracked files)
+default_author="$(git config --get user.email)"
+
+# Iterate over the filetype templates and ensure license information is prepended to any matching source files
+for license_filename in "$current_dir"/template/LICENSE.*
+do
+  # Extract the filetype extension from the filename of the license header template
+  extension="${license_filename##*.}"
+  # Read the license header template source into a variable
+  license_source=$(<"$license_filename")
+  # Determine the length in bytes of the license header template
+  license_length="${#license_source}"
+  # Read the contributor annotation template corresponding to the current filetype
+  author_annotation_template_filename="$(dirname "$license_filename")/AUTHOR.${extension}"
+  author_annotation_template=$(<"$author_annotation_template_filename")
+  # Create regular expression pattern matchers to match the template variables within an author annotation
+  # Escape any regex metacharacters in the template source (https://unix.stackexchange.com/a/33005)
+  author_annotation_template_escaped="$(sed 's/[\[\$\.\*\\\/\^]/\\&/g; s/\^/\\^/g' <<< "$author_annotation_template")"
+  # Create a Basic Regular Expression pattern for matching an author annotation
+  author_annotation_pattern_matcher="^$(sed 's/\\\$EMAIL/[^[:space:]]*/g' <<< "$(sed 's/\\\$NAME/.*/g' <<< "$(sed 's/\\\$URL/[^[:space:]]*/g' <<< "$author_annotation_template_escaped")")")$"
+  # Create a sed regular expression pattern for extracting the email address from an author annotation
+  author_annotation_email_pattern_matcher="^$(sed 's/\\\$EMAIL/\\([^[:space:]]*\\)/g' <<< "$(sed 's/\\\$NAME/.*/g' <<< "$(sed 's/\\\$URL/[^[:space:]]*/g' <<< "$author_annotation_template_escaped")")")$"
+  # Determine a filtered array of filenames that match this filetype extension
+  declare -a matching_filenames=()
+  for filename in "${filenames[@]}"
+  do
+    if [[ "$filename" = *."$extension" ]]
+    then
+      matching_filenames+=("$filename")
+    fi
+  done
+  # Iterate over the filenames that match the current filetype extension and ensure the license information is correct
+  for filename in "${matching_filenames[@]}"
+  do
+    # Determine the file path within the project
+    relative_path="$(realpath --relative-base="$project_dir" "$filename")"
+    echo "$relative_path"
+    # Determine the set of author emails for this file as reported by version control, sorted by author commit count
+    declare -a file_authors=()
+    git_authors="$(git shortlog --summary --email --numbered "${GIT_COMMIT:-HEAD}" -- "$filename")"
+    if [[ -n $git_authors ]]
+    then
+      while IFS="" read -r git_author
+      do
+        # Extract the email address from the git author summary line
+        email="$(sed 's/.*<\(.*\)>$/\1/' <<< "$git_author")"
+        file_authors+=("$email")
+      done <<< "$git_authors"
+    fi
+    # If no authors are reported by version control, append the default author
+    if [[ "${#file_authors[@]}" == 0 ]]
+    then
+      file_authors+=("$default_author")
+    fi
+    # Construct a lookup associative array keyed by author email to keep track of which authors are missing annotationas
+    declare -A expected_file_authors=()
+    for author_email in "${file_authors[@]}"
+    do
+      expected_file_authors["$author_email"]=1
+    done
+    # Construct an associative array of templated author annotations based on the version control author metadata
+    declare -A missing_author_annotations=()
+    for author_email in "${file_authors[@]}"
+    do
+      # Determine whether this author is one of the known authors
+      if [ -n "${known_author_names["$author_email"]+_}" ]
+      then
+        # Get the author metadata corresponding to the author's email address
+        author_name="${known_author_names["$author_email"]}"
+        author_url="${known_author_urls["$author_email"]}"
+        # Escape the injected template values in preparation for templating
+        author_name_escaped="$(sed 's/[&/\]/\\&/g' <<< "$author_name")"
+        author_email_escaped="$(sed 's/[&/\]/\\&/g' <<< "$author_email")"
+        author_url_escaped="$(sed 's/[&/\]/\\&/g' <<< "$author_url")"
+        # Template the author annotation
+        annotation="$author_annotation_template"
+        annotation="$(sed 's/\$EMAIL/'"$author_email_escaped"'/g' <<< "$annotation")"
+        annotation="$(sed 's/\$NAME/'"$author_name_escaped"'/g' <<< "$annotation")"
+        annotation="$(sed 's/\$URL/'"$author_url_escaped"'/g' <<< "$annotation")"
+        # Add the templated annotation to the associative array of templated author annotations
+        missing_author_annotations["$author_email"]="$annotation"
+      fi
+    done
+    # If the source file does not already start with the license header source, prepend the license header source
+    if [[ "$(head --bytes "$license_length" "$filename")" != "$license_source" ]]
+    then
+      echo " - Adding license"
+      file_source="$(cat "$filename")"
+      printf '%s\n%s\n' "$license_source" "$file_source" > "$filename"
+    fi
+    # Parse the set of authors already present in this file
+    current_offset="$(("$license_length" + 1))"
+    while IFS="" read -r line
+    do
+      # Determine whether this line is an author annotation
+      if [[ $line =~ $author_annotation_pattern_matcher ]]
+      then
+        # If the line matched the author annotation pattern, parse the author email from the annotation
+        annotation_email="$(sed 's/'"$author_annotation_email_pattern_matcher"'/\1/' <<< "$line")"
+        # Remove this annotation from the list of missing author annotations
+        unset missing_author_annotations["$annotation_email"]
+        line_length="${#line}"
+        current_offset="$(("$current_offset" + "$line_length" + 1))"
+      else
+        # If this was not a valid annotation we have read past the author annotation section, so break out of the loop
+        break
+      fi
+    done < <(tail --bytes +"$(("$current_offset" + 1))" "$filename")
+    # Ensure each author reported by version control is present in the set of annotated authors
+    # Determine whether there are any authors not currently annotated in source code
+    if [[ "${#missing_author_annotations[@]}" != 0 ]]
+    then
+      # Collect a templated chunk of annotations by iterating over the list of commit authors for this file
+      # (note that we can't just iterate over the associative array, because that would lose the commit-count ordering)
+      annotations=""
+      for author_email in "${file_authors[@]}"
+      do
+        # Determine whether this author is one of the known authors not already present in the source code annotations
+        if [ -n "${known_author_names["$author_email"]+_}" ] && [ -n "${missing_author_annotations["$author_email"]+_}" ]
+        then
+          # Get the author metadata corresponding to the author's email address
+          author_name="${known_author_names["$author_email"]}"
+          author_url="${known_author_urls["$author_email"]}"
+          echo " - Adding author ${author_name} <${author_email}> (${author_url})"
+          # Escape the injected template values in preparation for templating
+          author_name_escaped="$(sed 's/[&/\]/\\&/g' <<< "$author_name")"
+          author_email_escaped="$(sed 's/[&/\]/\\&/g' <<< "$author_email")"
+          author_url_escaped="$(sed 's/[&/\]/\\&/g' <<< "$author_url")"
+          # Template the author annotation
+          annotation="$author_annotation_template"
+          annotation="$(sed 's/\$EMAIL/'"$author_email_escaped"'/g' <<< "$annotation")"
+          annotation="$(sed 's/\$NAME/'"$author_name_escaped"'/g' <<< "$annotation")"
+          annotation="$(sed 's/\$URL/'"$author_url_escaped"'/g' <<< "$annotation")"
+          # Add the templated annotation to the array of pending author annotations
+          annotations+="$annotation"$'\n'
+        fi
+      done
+      # If there are any missing annotations, inject them into the source file
+      if [[ -n "$annotations" ]]
+      then
+        file_header="$(head --bytes "$current_offset" "$filename")"
+        file_body="$(tail --bytes +"$(("$current_offset" + 1))" "$filename")"
+        printf '%s\n%s%s\n' "$file_header" "$annotations" "$file_body" > "$filename"
+      fi
+    fi
+  done
+done
