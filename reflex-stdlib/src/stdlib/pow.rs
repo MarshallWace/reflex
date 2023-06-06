@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     is_integer, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FloatTermType, FunctionArity, HeapAllocator, IntTermType, Uid, Uuid,
+    FloatTermType, FloatValue, FunctionArity, HeapAllocator, IntTermType, Uid, Uuid,
 };
 
 pub struct Pow;
@@ -47,7 +47,7 @@ impl<T: Expression> Applicable<T> for Pow {
             let left = left.value();
             let right = right.value();
             Some(Ok(if right < 0 {
-                factory.create_float_term((left as f64).powi(right))
+                factory.create_float_term((left as FloatValue).powi(right as i32))
             } else {
                 factory.create_int_term(left.pow(right as u32))
             }))
@@ -84,7 +84,7 @@ impl<T: Expression> Applicable<T> for Pow {
             factory.match_int_term(&right),
         ) {
             Some(Ok(
-                factory.create_float_term(left.value().powi(right.value()))
+                factory.create_float_term(left.value().powi(right.value() as i32))
             ))
         } else {
             None

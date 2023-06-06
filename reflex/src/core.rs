@@ -20,7 +20,7 @@ pub use uuid::{uuid, Uuid};
 pub use crate::cache::EvaluationCache;
 use crate::hash::{hash_object, FnvHasher, HashId, IntMap, IntSet};
 
-pub type IntValue = i32;
+pub type IntValue = i64;
 pub type FloatValue = f64;
 pub type SymbolId = u64;
 
@@ -29,8 +29,8 @@ pub fn is_integer(value: FloatValue) -> bool {
 }
 
 pub fn as_integer(value: FloatValue) -> Option<IntValue> {
-    let int_value = value as i32;
-    if value == int_value as f64 {
+    let int_value = value as IntValue;
+    if value == int_value as FloatValue {
         Some(int_value)
     } else {
         None

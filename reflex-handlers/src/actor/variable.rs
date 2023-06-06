@@ -11,7 +11,7 @@ use std::{
 use reflex::{
     core::{
         ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType,
-        HeapAllocator, IntTermType, ListTermType, RefType, SignalType, StateToken,
+        HeapAllocator, IntTermType, IntValue, ListTermType, RefType, SignalType, StateToken,
     },
     hash::HashId,
 };
@@ -555,7 +555,7 @@ fn decrement_variable<T: Expression>(
 
 fn add_integer_value<T: Expression>(
     operation_label: &'static str,
-    delta: i32,
+    delta: IntValue,
     existing: Option<&T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,

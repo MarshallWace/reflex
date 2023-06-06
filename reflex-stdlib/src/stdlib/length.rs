@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator,
+    ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator, IntValue,
     ListTermType, RefType, Uid, Uuid,
 };
 
@@ -40,11 +40,11 @@ impl<T: Expression> Applicable<T> for Length {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let result = if let Some(target) = factory.match_list_term(&target) {
-            Some(factory.create_int_term(target.items().as_deref().len() as i32))
+            Some(factory.create_int_term(target.items().as_deref().len() as IntValue))
         } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(factory.create_int_term(target.keys().len() as i32))
+            Some(factory.create_int_term(target.keys().len() as IntValue))
         } else if let Some(target) = factory.match_hashset_term(&target) {
-            Some(factory.create_int_term(target.values().len() as i32))
+            Some(factory.create_int_term(target.values().len() as IntValue))
         } else {
             None
         };

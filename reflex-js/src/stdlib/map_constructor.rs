@@ -6,8 +6,8 @@ use std::iter::empty;
 
 use reflex::core::{
     deduplicate_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
-    Uid, Uuid,
+    ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, IntValue, ListTermType,
+    RefType, Uid, Uuid,
 };
 use reflex_stdlib::{CollectList, ConstructHashMap, Get};
 
@@ -133,7 +133,7 @@ where
     } else {
         Some(factory.create_application_term(
             factory.create_builtin_term(Get),
-            allocator.create_pair(target.clone(), factory.create_int_term(index as i32)),
+            allocator.create_pair(target.clone(), factory.create_int_term(index as IntValue)),
         ))
     }
 }

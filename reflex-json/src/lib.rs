@@ -46,7 +46,7 @@ pub fn hydrate<T: Expression>(
         Value::Bool(value) => Ok(factory.create_boolean_term(value)),
         Value::String(value) => Ok(factory.create_string_term(allocator.create_string(value))),
         Value::Number(value) => match value.as_i64() {
-            Some(value) => Ok(factory.create_int_term(value as i32)),
+            Some(value) => Ok(factory.create_int_term(value)),
             None => match value.as_f64() {
                 Some(value) => Ok(factory.create_float_term(value)),
                 None => Err(format!(

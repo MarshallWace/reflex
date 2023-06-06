@@ -962,8 +962,7 @@ fn parse_value<T: Expression>(
         Value::Int(value) => Ok(factory.create_int_term(
             value
                 .as_i64()
-                .ok_or_else(|| format!("Invalid integer argument: {:?}", value))?
-                as i32,
+                .ok_or_else(|| format!("Invalid integer argument: {:?}", value))?,
         )),
         Value::Float(value) => Ok(factory.create_float_term(*value)),
         Value::String(value) => {

@@ -127,7 +127,7 @@ impl CustomType for Int64ValueMessage {
                 Value::I64(term.value() as i64),
             ))
         } else {
-            Err(format!("Expected Int, received {}", value))
+            Err(format!("Expected Int<i64>, received {}", value))
         }
     }
     fn deserialize<T: Expression>(
@@ -189,7 +189,7 @@ impl CustomType for UInt64ValueMessage {
                 ))
             }
         } else {
-            Err(format!("Expected Int, received {}", value))
+            Err(format!("Expected Int<u64>, received {}", value))
         }
     }
     fn deserialize<T: Expression>(
@@ -231,18 +231,35 @@ impl CustomType for Int32ValueMessage {
         if let Some(value) = factory
             .match_float_term(value)
             .and_then(|value| as_integer(value.value()))
+            .and_then(|value| {
+                if value >= i64::from(i32::MIN) && value <= i64::from(i32::MAX) {
+                    Some(value as i32)
+                } else {
+                    None
+                }
+            })
         {
             Ok(create_value_message_wrapper(
                 message_type,
                 Value::I32(value),
             ))
-        } else if let Some(term) = factory.match_int_term(value) {
+        } else if let Some(value) = factory
+            .match_int_term(value)
+            .map(|term| term.value())
+            .and_then(|value| {
+                if value >= i64::from(i32::MIN) && value <= i64::from(i32::MAX) {
+                    Some(value as i32)
+                } else {
+                    None
+                }
+            })
+        {
             Ok(create_value_message_wrapper(
                 message_type,
-                Value::I32(term.value()),
+                Value::I32(value),
             ))
         } else {
-            Err(format!("Expected Int, received {}", value))
+            Err(format!("Expected Int<i32>, received {}", value))
         }
     }
     fn deserialize<T: Expression>(
@@ -254,7 +271,7 @@ impl CustomType for Int32ValueMessage {
         let value = get_optional_message_field(message, "value")?;
         match value {
             None => Ok(factory.create_int_term(Default::default())),
-            Some(Value::I32(value)) => Ok(factory.create_int_term(*value)),
+            Some(Value::I32(value)) => Ok(factory.create_int_term(*value as IntValue)),
             _ => Err(format!("Expected i32, received {:?}", value)),
         }
     }
@@ -297,7 +314,7 @@ impl CustomType for UInt32ValueMessage {
                 ))
             }
         } else {
-            Err(format!("Expected Int, received {}", value))
+            Err(format!("Expected Int<u32>, received {}", value))
         }
     }
     fn deserialize<T: Expression>(
@@ -582,6 +599,30 @@ mod tests {
                     }),
                 );
             }
+            {
+                let value = factory.create_int_term(i64::MAX);
+                let result = serializer.serialize(&value, &message_type, &factory);
+                assert_eq!(
+                    result,
+                    Ok({
+                        let mut message = DynamicMessage::new(message_type.clone());
+                        message.set_field_by_name("value", Value::I64(i64::MAX));
+                        message
+                    }),
+                );
+            }
+            {
+                let value = factory.create_int_term(i64::MIN);
+                let result = serializer.serialize(&value, &message_type, &factory);
+                assert_eq!(
+                    result,
+                    Ok({
+                        let mut message = DynamicMessage::new(message_type.clone());
+                        message.set_field_by_name("value", Value::I64(i64::MIN));
+                        message
+                    }),
+                );
+            }
         }
 
         #[test]
@@ -620,11 +661,20 @@ mod tests {
             {
                 let message = {
                     let mut message = DynamicMessage::new(message_type.clone());
-                    message.set_field_by_name("value", Value::I64(IntValue::MAX as i64 + 1));
+                    message.set_field_by_name("value", Value::I64(i64::MAX));
                     message
                 };
                 let result = serializer.deserialize(&message, &factory, &allocator);
-                assert_eq!(result, Err(String::from("Invalid Int value: 2147483648")));
+                assert_eq!(result, Ok(factory.create_int_term(i64::MAX)));
+            }
+            {
+                let message = {
+                    let mut message = DynamicMessage::new(message_type.clone());
+                    message.set_field_by_name("value", Value::I64(i64::MIN));
+                    message
+                };
+                let result = serializer.deserialize(&message, &factory, &allocator);
+                assert_eq!(result, Ok(factory.create_int_term(i64::MIN)));
             }
         }
     }
@@ -701,11 +751,23 @@ mod tests {
             {
                 let message = {
                     let mut message = DynamicMessage::new(message_type.clone());
-                    message.set_field_by_name("value", Value::U64(IntValue::MAX as u64 + 1));
+                    message.set_field_by_name("value", Value::U64(i64::MAX as u64));
                     message
                 };
                 let result = serializer.deserialize(&message, &factory, &allocator);
-                assert_eq!(result, Err(String::from("Invalid Int value: 2147483648")));
+                assert_eq!(result, Ok(factory.create_int_term(i64::MAX as IntValue)));
+            }
+            {
+                let message = {
+                    let mut message = DynamicMessage::new(message_type.clone());
+                    message.set_field_by_name("value", Value::U64(i64::MAX as u64 + 1));
+                    message
+                };
+                let result = serializer.deserialize(&message, &factory, &allocator);
+                assert_eq!(
+                    result,
+                    Err(String::from("Invalid Int value: 9223372036854775808"))
+                );
             }
         }
     }
@@ -760,6 +822,46 @@ mod tests {
                     }),
                 );
             }
+            {
+                let value = factory.create_int_term(i32::MAX as i64);
+                let result = serializer.serialize(&value, &message_type, &factory);
+                assert_eq!(
+                    result,
+                    Ok({
+                        let mut message = DynamicMessage::new(message_type.clone());
+                        message.set_field_by_name("value", Value::I32(i32::MAX));
+                        message
+                    }),
+                );
+            }
+            {
+                let value = factory.create_int_term(i32::MIN as i64);
+                let result = serializer.serialize(&value, &message_type, &factory);
+                assert_eq!(
+                    result,
+                    Ok({
+                        let mut message = DynamicMessage::new(message_type.clone());
+                        message.set_field_by_name("value", Value::I32(i32::MIN));
+                        message
+                    }),
+                );
+            }
+            {
+                let value = factory.create_int_term(i32::MAX as i64 + 1);
+                let result = serializer.serialize(&value, &message_type, &factory);
+                assert_eq!(
+                    result,
+                    Err(String::from("Expected Int<i32>, received 2147483648"))
+                );
+            }
+            {
+                let value = factory.create_int_term(i32::MIN as i64 - 1);
+                let result = serializer.serialize(&value, &message_type, &factory);
+                assert_eq!(
+                    result,
+                    Err(String::from("Expected Int<i32>, received -2147483649"))
+                );
+            }
         }
 
         #[test]
@@ -794,6 +896,24 @@ mod tests {
                 };
                 let result = serializer.deserialize(&message, &factory, &allocator);
                 assert_eq!(result, Ok(factory.create_int_term(-3)));
+            }
+            {
+                let message = {
+                    let mut message = DynamicMessage::new(message_type.clone());
+                    message.set_field_by_name("value", Value::I32(i32::MAX));
+                    message
+                };
+                let result = serializer.deserialize(&message, &factory, &allocator);
+                assert_eq!(result, Ok(factory.create_int_term(i32::MAX as IntValue)));
+            }
+            {
+                let message = {
+                    let mut message = DynamicMessage::new(message_type.clone());
+                    message.set_field_by_name("value", Value::I32(i32::MIN));
+                    message
+                };
+                let result = serializer.deserialize(&message, &factory, &allocator);
+                assert_eq!(result, Ok(factory.create_int_term(i32::MIN as IntValue)));
             }
         }
     }
@@ -870,11 +990,11 @@ mod tests {
             {
                 let message = {
                     let mut message = DynamicMessage::new(message_type.clone());
-                    message.set_field_by_name("value", Value::U32(IntValue::MAX as u32 + 1));
+                    message.set_field_by_name("value", Value::U32(u32::MAX));
                     message
                 };
                 let result = serializer.deserialize(&message, &factory, &allocator);
-                assert_eq!(result, Err(String::from("Invalid Int value: 2147483648")));
+                assert_eq!(result, Ok(factory.create_int_term(u32::MAX as IntValue)));
             }
         }
     }

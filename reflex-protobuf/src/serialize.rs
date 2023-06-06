@@ -247,7 +247,7 @@ fn serialize_map_key<T: Expression>(
             term.value().as_deref().as_str().deref(),
         )))
     } else if let Some(term) = factory.match_int_term(value) {
-        Ok(MapKey::I32(term.value()))
+        Ok(MapKey::I64(term.value()))
     } else if let Some(term) = factory.match_boolean_term(value) {
         Ok(MapKey::Bool(term.value()))
     } else {
@@ -264,7 +264,13 @@ fn serialize_simple_field_value<T: Expression>(
 ) -> Result<Value, TranscodeError> {
     match field_type.kind() {
         Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 => {
-            parse_integer_value(value, factory).map(Value::I32)
+            parse_integer_value(value, factory).map(|value| {
+                Value::I32(match value {
+                    value if value > i64::from(i32::MAX) => i32::MAX,
+                    value if value < i64::from(i32::MIN) => i32::MIN,
+                    value => value as i32,
+                })
+            })
         }
         Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 => parse_integer_value(value, factory)
             .map(|value| value as i64)

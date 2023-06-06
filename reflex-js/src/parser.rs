@@ -9,7 +9,7 @@ use reflex::{
     cache::NoopCache,
     core::{
         as_integer, create_record, Builtin, Expression, ExpressionFactory, FloatTermType,
-        HeapAllocator, IntTermType, RefType, Rewritable, StringTermType, StringValue,
+        HeapAllocator, IntTermType, IntValue, RefType, Rewritable, StringTermType, StringValue,
         Substitutions,
     },
 };
@@ -1935,7 +1935,7 @@ where
 {
     get_dynamic_field(
         target,
-        factory.create_int_term(index as i32),
+        factory.create_int_term(index as IntValue),
         factory,
         allocator,
     )

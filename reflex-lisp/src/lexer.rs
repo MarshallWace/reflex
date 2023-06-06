@@ -21,7 +21,7 @@ impl<'a, T> ParserOutput<'a, T> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum SyntaxDatum<'a> {
-    IntegerLiteral(i32),
+    IntegerLiteral(i64),
     FloatLiteral(f64),
     StringLiteral(String),
     Symbol(&'a str),
@@ -183,7 +183,7 @@ fn consume_number_literal(input: &str) -> Option<ParserOutput<SyntaxDatum>> {
     let (is_float, input) =
         consume_char('.', input).map_or_else(|| (false, input), |remaining| (true, remaining));
     if !is_float {
-        let int_value = int_chars.parse::<i32>();
+        let int_value = int_chars.parse::<i64>();
         return match int_value {
             Ok(value) => Some(ParserOutput {
                 parsed: SyntaxDatum::IntegerLiteral(if is_negative { -value } else { value }),

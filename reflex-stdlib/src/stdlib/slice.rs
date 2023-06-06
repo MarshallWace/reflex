@@ -3,8 +3,8 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     as_integer, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FloatTermType, FunctionArity, HeapAllocator, IntTermType, ListTermType,
-    RefType, Uid, Uuid,
+    ExpressionListType, FloatTermType, FunctionArity, HeapAllocator, IntTermType, IntValue,
+    ListTermType, RefType, Uid, Uuid,
 };
 
 pub struct Slice;
@@ -47,7 +47,7 @@ impl<T: Expression> Applicable<T> for Slice {
             match (start_index, end_index) {
                 (Some(start_index), Some(end_index)) => {
                     let start_index = start_index.max(0) as usize;
-                    let end_index = end_index.max(start_index as i32) as usize;
+                    let end_index = end_index.max(start_index as IntValue) as usize;
                     Some((start_index, end_index))
                 }
                 _ => None,
@@ -76,7 +76,7 @@ impl<T: Expression> Applicable<T> for Slice {
 fn parse_integer_argument<T: Expression>(
     term: &T,
     factory: &impl ExpressionFactory<T>,
-) -> Option<i32> {
+) -> Option<IntValue> {
     match factory.match_int_term(term) {
         Some(term) => Some(term.value()),
         _ => match factory.match_float_term(term) {

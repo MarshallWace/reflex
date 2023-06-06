@@ -13,7 +13,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         Builtin, EvaluationCache, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-        Reducible, RefType, Rewritable, Substitutions, SymbolId,
+        IntValue, Reducible, RefType, Rewritable, Substitutions, SymbolId,
     },
 };
 use reflex_stdlib::*;
@@ -240,7 +240,7 @@ where
 
 fn parse_integer_literal<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     _input: &SyntaxDatum,
-    value: i32,
+    value: i64,
     factory: &impl ExpressionFactory<T>,
 ) -> T
 where
@@ -546,7 +546,7 @@ where
         let args = args.into_iter();
         allocator.create_sized_list(
             1 + args.len(),
-            once(factory.create_int_term(discriminant as i32)).chain(args),
+            once(factory.create_int_term(discriminant as IntValue)).chain(args),
         )
     })
 }
@@ -774,7 +774,7 @@ where
                                         factory.create_builtin_term(Get),
                                         allocator.create_pair(
                                             factory.create_variable_term(0),
-                                            factory.create_int_term(index as i32),
+                                            factory.create_int_term(index as IntValue),
                                         ),
                                     ),
                                 )
@@ -805,7 +805,7 @@ where
                                     factory.create_builtin_term(Get),
                                     allocator.create_pair(
                                         bindings.clone(),
-                                        factory.create_int_term(index as i32),
+                                        factory.create_int_term(index as IntValue),
                                     ),
                                 )
                             })),

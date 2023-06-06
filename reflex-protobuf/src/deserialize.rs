@@ -106,13 +106,13 @@ fn deserialize_field_value<T: Expression>(
 ) -> Result<T, TranscodeError> {
     match value {
         Value::Bool(value) => Ok(factory.create_boolean_term(*value)),
+        Value::I32(value) => Ok(factory.create_int_term(*value as i64)),
+        Value::I64(value) => Ok(factory.create_int_term(*value as i64)),
+        Value::U32(value) => Ok(factory.create_int_term(*value as i64)),
         // TODO: prevent lossy transcoding of gRPC integer types
-        Value::I32(value) => Ok(factory.create_int_term(*value)),
-        Value::I64(value) => Ok(factory.create_float_term(*value as f64)),
-        Value::U32(value) => Ok(factory.create_int_term(*value as i32)),
         Value::U64(value) => Ok(factory.create_float_term(*value as f64)),
         Value::F32(value) => Ok(factory.create_float_term(*value as f64)),
-        Value::F64(value) => Ok(factory.create_float_term(*value)),
+        Value::F64(value) => Ok(factory.create_float_term(*value as f64)),
         Value::String(value) => {
             Ok(factory.create_string_term(allocator.create_string(value.as_str())))
         }
@@ -209,12 +209,12 @@ fn deserialize_map_key<T: Expression>(
 ) -> Result<T, TranscodeError> {
     match value {
         MapKey::Bool(value) => Ok(factory.create_boolean_term(*value)),
-        MapKey::I32(value) => Ok(factory.create_int_term(*value)),
+        MapKey::I32(value) => Ok(factory.create_int_term(*value as i64)),
         MapKey::String(value) => {
             Ok(factory.create_string_term(allocator.create_string(value.as_str())))
         }
-        MapKey::U32(_) => Err("u32"),
-        MapKey::I64(_) => Err("i64"),
+        MapKey::U32(value) => Ok(factory.create_int_term(*value as i64)),
+        MapKey::I64(value) => Ok(factory.create_int_term(*value as i64)),
         MapKey::U64(_) => Err("u64"),
     }
     .map_err(|value_type| TranscodeError::from(format!("Invalid map key type: {}", value_type)))

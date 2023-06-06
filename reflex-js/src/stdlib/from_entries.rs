@@ -4,7 +4,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, Uid, Uuid,
+    ExpressionListType, FunctionArity, HeapAllocator, IntValue, ListTermType, RefType, Uid, Uuid,
 };
 use reflex_stdlib::{CollectList, ConstructRecord, Get};
 
@@ -116,7 +116,7 @@ where
     } else {
         Some(factory.create_application_term(
             factory.create_builtin_term(Get),
-            allocator.create_pair(target.clone(), factory.create_int_term(index as i32)),
+            allocator.create_pair(target.clone(), factory.create_int_term(index as IntValue)),
         ))
     }
 }

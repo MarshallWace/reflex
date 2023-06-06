@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     get_hashmap_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator,
+    ExpressionFactory, ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator, IntValue,
     ListTermType, RecordTermType, RefType, StructPrototypeType, Uid, Uuid,
 };
 
@@ -75,8 +75,10 @@ impl<T: Expression> Applicable<T> for Entries {
                             .enumerate()
                             .map(|(index, item)| {
                                 factory.create_list_term(
-                                    allocator
-                                        .create_pair(factory.create_int_term(index as i32), item),
+                                    allocator.create_pair(
+                                        factory.create_int_term(index as IntValue),
+                                        item,
+                                    ),
                                 )
                             }),
                     ),

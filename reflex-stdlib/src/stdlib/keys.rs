@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HashmapTermType, HeapAllocator, ListTermType,
+    ExpressionListType, FunctionArity, HashmapTermType, HeapAllocator, IntValue, ListTermType,
     RecordTermType, RefType, StructPrototypeType, Uid, Uuid,
 };
 
@@ -62,7 +62,7 @@ impl<T: Expression> Applicable<T> for Keys {
                             .as_deref()
                             .iter()
                             .enumerate()
-                            .map(|(index, _)| factory.create_int_term(index as i32)),
+                            .map(|(index, _)| factory.create_int_term(index as IntValue)),
                     ),
                 ),
             )
