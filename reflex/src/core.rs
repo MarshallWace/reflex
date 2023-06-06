@@ -134,7 +134,7 @@ pub trait RecursiveTermType<T: Expression> {
         T: 'a;
 }
 pub trait BuiltinTermType<T: Expression> {
-    fn target<'a>(&'a self) -> T::Ref<'a, T::Builtin>
+    fn target<'a>(&'a self) -> T::Builtin
     where
         T: 'a,
         T::Builtin: 'a;

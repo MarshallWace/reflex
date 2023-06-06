@@ -98,7 +98,7 @@ fn get_expression_arity<T: Expression>(
     if let Some(target) = factory.match_lambda_term(target) {
         Some(Arity::lazy(target.num_args(), 0, false))
     } else if let Some(target) = factory.match_builtin_term(target) {
-        Some(target.target().as_deref().arity())
+        Some(target.target().arity())
     } else if let Some(target) = factory.match_partial_application_term(target) {
         get_expression_arity(target.target().as_deref(), factory)
             .map(|arity| arity.partial(target.args().as_deref().len()))

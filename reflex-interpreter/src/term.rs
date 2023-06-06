@@ -237,7 +237,7 @@ impl<T: Expression> Compile<T> for BuiltinTerm<T> {
         _compiler: &mut Compiler,
     ) -> Result<Program, String> {
         Ok(Program::new(once(Instruction::PushBuiltin {
-            target: self.target().as_deref().uid(),
+            target: self.target().uid(),
         })))
     }
 }

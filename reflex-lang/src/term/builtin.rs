@@ -34,12 +34,12 @@ impl<T: Expression> BuiltinTerm<T> {
     }
 }
 impl<T: Expression> BuiltinTermType<T> for BuiltinTerm<T> {
-    fn target<'a>(&'a self) -> T::Ref<'a, T::Builtin>
+    fn target<'a>(&'a self) -> T::Builtin
     where
         T::Builtin: 'a,
         T: 'a,
     {
-        (&self.target).into()
+        self.target
     }
 }
 impl<T: Expression> Uid for BuiltinTerm<T> {
