@@ -1166,18 +1166,26 @@ pub trait HeapAllocator<T: Expression> {
     fn create_unit_list(&self, value: T) -> T::ExpressionList;
     fn create_pair(&self, left: T, right: T) -> T::ExpressionList;
     fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList;
-    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a>) -> T::ExpressionList;
+    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a>) -> T::ExpressionList
+    where
+        Self: 'a;
     fn create_signal_list(&self, signals: impl IntoIterator<Item = T::Signal>) -> T::SignalList;
     fn create_struct_prototype(&self, keys: T::ExpressionList) -> T::StructPrototype;
     fn clone_struct_prototype<'a>(
         &self,
         prototype: T::StructPrototypeRef<'a>,
-    ) -> T::StructPrototype;
+    ) -> T::StructPrototype
+    where
+        Self: 'a;
     fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal;
-    fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal;
+    fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal
+    where
+        Self: 'a;
     fn create_string(&self, value: impl Into<String>) -> T::String;
     fn create_static_string(&self, value: &'static str) -> T::String;
-    fn clone_string<'a>(&self, value: T::StringRef<'a>) -> T::String;
+    fn clone_string<'a>(&self, value: T::StringRef<'a>) -> T::String
+    where
+        Self: 'a;
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug, Serialize)]

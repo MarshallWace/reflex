@@ -77,7 +77,10 @@ impl<
     fn create_pair(&self, left: T, right: T) -> T::ExpressionList {
         self.sized_iterator_list([left, right])
     }
-    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a>) -> T::ExpressionList {
+    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a>) -> T::ExpressionList
+    where
+        Self: 'a,
+    {
         expressions.as_deref().clone()
     }
     fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList {
@@ -89,16 +92,19 @@ impl<
     fn create_struct_prototype(&self, keys: T::ExpressionList) -> T::StructPrototype {
         StructPrototype::new(keys)
     }
-    fn clone_struct_prototype<'a>(
-        &self,
-        prototype: T::StructPrototypeRef<'a>,
-    ) -> T::StructPrototype {
+    fn clone_struct_prototype<'a>(&self, prototype: T::StructPrototypeRef<'a>) -> T::StructPrototype
+    where
+        Self: 'a,
+    {
         prototype.as_deref().clone()
     }
     fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal {
         Signal::new(signal_type, payload, token)
     }
-    fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal {
+    fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal
+    where
+        Self: 'a,
+    {
         signal.as_deref().clone()
     }
     fn create_string(&self, value: impl Into<String>) -> T::String {
@@ -107,7 +113,10 @@ impl<
     fn create_static_string(&self, value: &'static str) -> T::String {
         self.create_string(value)
     }
-    fn clone_string<'a>(&self, value: T::StringRef<'a>) -> T::String {
+    fn clone_string<'a>(&self, value: T::StringRef<'a>) -> T::String
+    where
+        Self: 'a,
+    {
         value.as_deref().clone()
     }
 }
