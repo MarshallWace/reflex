@@ -161,7 +161,7 @@ fn serialize_value<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>
 }
 
 pub struct QueryInspectorEffectState<T: Expression> {
-    effect: T::Signal<T>,
+    effect: T::Signal,
     value: Option<T>,
 }
 

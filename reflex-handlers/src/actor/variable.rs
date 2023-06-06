@@ -578,7 +578,7 @@ fn add_integer_value<T: Expression>(
 }
 
 fn parse_get_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal<T>,
+    effect: &'a T::Signal,
     factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<(&'a T, &'a T), String> {
@@ -600,7 +600,7 @@ fn parse_get_effect_args<'a, T: Expression>(
 }
 
 fn parse_set_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal<T>,
+    effect: &'a T::Signal,
     factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<(&'a T, &'a T), String> {
@@ -622,7 +622,7 @@ fn parse_set_effect_args<'a, T: Expression>(
 }
 
 fn parse_increment_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal<T>,
+    effect: &'a T::Signal,
     factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<&'a T, String> {
@@ -643,7 +643,7 @@ fn parse_increment_effect_args<'a, T: Expression>(
 }
 
 fn parse_decrement_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal<T>,
+    effect: &'a T::Signal,
     factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
 ) -> Result<&'a T, String> {

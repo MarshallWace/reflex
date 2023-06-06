@@ -121,12 +121,12 @@ impl<T: Expression> Default for ScanHandlerState<T> {
 
 struct ScanHandlerReducerState<T: Expression> {
     metric_labels: [(SharedString, SharedString); 2],
-    source_effect: T::Signal<T>,
-    source_value_effect: T::Signal<T>,
+    source_effect: T::Signal,
+    source_value_effect: T::Signal,
     source_value: Option<T>,
-    state_value_effect: T::Signal<T>,
+    state_value_effect: T::Signal,
     state_value: T,
-    result_effect: T::Signal<T>,
+    result_effect: T::Signal,
 }
 
 dispatcher!({
@@ -419,7 +419,7 @@ where
     fn subscribe_scan_effect<TAction>(
         &self,
         state: &mut ScanHandlerState<T>,
-        effect: &T::Signal<T>,
+        effect: &T::Signal,
         args: ScanEffectArgs<T>,
     ) -> Option<TAction>
     where
@@ -530,7 +530,7 @@ where
     fn unsubscribe_scan_effect<TAction>(
         &self,
         state: &mut ScanHandlerState<T>,
-        effect: &T::Signal<T>,
+        effect: &T::Signal,
     ) -> Option<TAction>
     where
         TAction: Action + From<EffectUnsubscribeAction<T>>,
@@ -583,7 +583,7 @@ struct ScanEffectArgs<T: Expression> {
 }
 
 fn parse_scan_effect_args<T: Expression>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<ScanEffectArgs<T>, String> {
     let payload = effect.payload().as_deref();

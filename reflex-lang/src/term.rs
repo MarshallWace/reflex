@@ -5,7 +5,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{collections::HashSet, hash::Hash};
 
-use reflex::hash::hash_object;
+use reflex::{core::NodeId, hash::hash_object};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -71,8 +71,8 @@ where
     T::String: Hash,
 {
     #[serde(bound(
-        serialize = "<T as Expression>::String: Serialize, <T as Expression>::ExpressionList<T>: Serialize, <T as Expression>::SignalList<T>: Serialize, <T as Expression>::Signal<T>: Serialize, <T as Expression>::StructPrototype<T>: Serialize",
-        deserialize = "<T as Expression>::String: Deserialize<'de>, <T as Expression>::ExpressionList<T>: Deserialize<'de>, <T as Expression>::SignalList<T>: Deserialize<'de>, <T as Expression>::Signal<T>: Deserialize<'de>, <T as Expression>::StructPrototype<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::String: Serialize, <T as Expression>::ExpressionList: Serialize, <T as Expression>::SignalList: Serialize, <T as Expression>::Signal: Serialize, <T as Expression>::StructPrototype: Serialize",
+        deserialize = "<T as Expression>::String: Deserialize<'de>, <T as Expression>::ExpressionList: Deserialize<'de>, <T as Expression>::SignalList: Deserialize<'de>, <T as Expression>::Signal: Deserialize<'de>, <T as Expression>::StructPrototype: Deserialize<'de>"
     ))]
     Nil(NilTerm),
     Boolean(BooleanTerm),
@@ -104,65 +104,66 @@ where
 {
     type String = T::String;
     type Builtin = T::Builtin;
-    type Signal<TWrapper: Expression> = Signal<TWrapper>;
-    type SignalList<TWrapper: Expression> = SignalList<TWrapper>;
-    type StructPrototype<TWrapper: Expression> = StructPrototype<TWrapper>;
-    type ExpressionList<TWrapper: Expression> = ExpressionList<TWrapper>;
+    type Signal = Signal<Self>;
+    type SignalList = SignalList<Self>;
+    type StructPrototype = StructPrototype<Self>;
+    type ExpressionList = ExpressionList<Self>;
     type NilTerm = NilTerm;
     type BooleanTerm = BooleanTerm;
     type IntTerm = IntTerm;
     type FloatTerm = FloatTerm;
-    type StringTerm<TWrapper: Expression> = StringTerm<TWrapper>;
+    type StringTerm = StringTerm<Self>;
     type SymbolTerm = SymbolTerm;
     type VariableTerm = VariableTerm;
-    type EffectTerm<TWrapper: Expression> = EffectTerm<TWrapper>;
-    type LetTerm<TWrapper: Expression> = LetTerm<TWrapper>;
-    type LambdaTerm<TWrapper: Expression> = LambdaTerm<TWrapper>;
-    type ApplicationTerm<TWrapper: Expression> = ApplicationTerm<TWrapper>;
-    type PartialApplicationTerm<TWrapper: Expression> = PartialApplicationTerm<TWrapper>;
-    type RecursiveTerm<TWrapper: Expression> = RecursiveTerm<TWrapper>;
-    type BuiltinTerm<TWrapper: Expression> = BuiltinTerm<TWrapper>;
+    type EffectTerm = EffectTerm<Self>;
+    type LetTerm = LetTerm<Self>;
+    type LambdaTerm = LambdaTerm<Self>;
+    type ApplicationTerm = ApplicationTerm<Self>;
+    type PartialApplicationTerm = PartialApplicationTerm<Self>;
+    type RecursiveTerm = RecursiveTerm<Self>;
+    type BuiltinTerm = BuiltinTerm<Self>;
     type CompiledFunctionTerm = CompiledFunctionTerm;
-    type RecordTerm<TWrapper: Expression> = RecordTerm<TWrapper>;
-    type ConstructorTerm<TWrapper: Expression> = ConstructorTerm<TWrapper>;
-    type ListTerm<TWrapper: Expression> = ListTerm<TWrapper>;
-    type HashmapTerm<TWrapper: Expression> = HashMapTerm<TWrapper>;
-    type HashsetTerm<TWrapper: Expression> = HashSetTerm<TWrapper>;
-    type SignalTerm<TWrapper: Expression> = SignalTerm<TWrapper>;
+    type RecordTerm = RecordTerm<Self>;
+    type ConstructorTerm = ConstructorTerm<Self>;
+    type ListTerm = ListTerm<Self>;
+    type HashmapTerm = HashMapTerm<Self>;
+    type HashsetTerm = HashSetTerm<Self>;
+    type SignalTerm = SignalTerm<Self>;
 
     type StringRef<'a> = &'a <Self as Expression>::String
     where
         <Self as Expression>::String: 'a,
         Self: 'a;
 
-    type SignalRef<'a, TWrapper: Expression> = &'a <Self as Expression>::Signal<TWrapper>
+    type SignalRef<'a> = &'a <Self as Expression>::Signal
     where
-        TWrapper: 'a,
-        <Self as Expression>::Signal<TWrapper>: 'a,
+        <Self as Expression>::Signal: 'a,
         Self: 'a;
 
-    type StructPrototypeRef<'a, TWrapper: Expression> = &'a <Self as Expression>::StructPrototype<TWrapper>
+    type StructPrototypeRef<'a> = &'a <Self as Expression>::StructPrototype
     where
-        TWrapper: 'a,
-        <Self as Expression>::StructPrototype<TWrapper>: 'a,
+        <Self as Expression>::StructPrototype: 'a,
         Self: 'a;
 
-    type SignalListRef<'a, TWrapper: Expression> = &'a <Self as Expression>::SignalList<TWrapper>
+    type SignalListRef<'a> = &'a <Self as Expression>::SignalList
     where
-        TWrapper: 'a,
-        <Self as Expression>::SignalList<TWrapper>: 'a,
+        <Self as Expression>::SignalList: 'a,
         Self: 'a;
 
-    type ExpressionListRef<'a, TWrapper: Expression> = &'a <Self as Expression>::ExpressionList<TWrapper>
+    type ExpressionListRef<'a> = &'a <Self as Expression>::ExpressionList
     where
-        TWrapper: 'a,
-        <Self as Expression>::ExpressionList<TWrapper>: 'a,
+        <Self as Expression>::ExpressionList: 'a,
         Self: 'a;
 
     type ExpressionRef<'a> = &'a Self
     where
         Self: 'a;
-
+}
+impl<T: Expression + Applicable<T>> NodeId for Term<T>
+where
+    T: Hash,
+    T::String: Hash,
+{
     fn id(&self) -> HashId {
         hash_object(self)
     }

@@ -330,7 +330,7 @@ fn create_timeout_task(
 }
 
 fn parse_timeout_effect_args<T: Expression>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Option<Duration>, String> {
     let payload = effect.payload().as_deref();

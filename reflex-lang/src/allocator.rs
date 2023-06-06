@@ -15,11 +15,11 @@ use serde::{Deserialize, Serialize};
 pub struct DefaultAllocator<T: Expression> {
     _type: PhantomData<T>,
 }
-impl<T: Expression<ExpressionList<T> = ExpressionList<T>>> DefaultAllocator<T> {
+impl<T: Expression<ExpressionList = ExpressionList<T>>> DefaultAllocator<T> {
     fn sized_iterator_list(
         &self,
         expressions: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-    ) -> T::ExpressionList<T> {
+    ) -> T::ExpressionList {
         // TODO: optimise for lists with known size
         ExpressionList::new(expressions)
     }
@@ -27,15 +27,15 @@ impl<T: Expression<ExpressionList<T> = ExpressionList<T>>> DefaultAllocator<T> {
         &self,
         _length: usize,
         expressions: impl IntoIterator<Item = T>,
-    ) -> T::ExpressionList<T> {
+    ) -> T::ExpressionList {
         // TODO: optimise for lists with known size
         ExpressionList::new(expressions)
     }
-    fn unsized_list(&self, expressions: impl IntoIterator<Item = T>) -> T::ExpressionList<T> {
+    fn unsized_list(&self, expressions: impl IntoIterator<Item = T>) -> T::ExpressionList {
         ExpressionList::new(expressions)
     }
 }
-impl<T: Expression<ExpressionList<T> = ExpressionList<T>>> Default for DefaultAllocator<T> {
+impl<T: Expression<ExpressionList = ExpressionList<T>>> Default for DefaultAllocator<T> {
     fn default() -> Self {
         Self {
             _type: Default::default(),
@@ -45,66 +45,60 @@ impl<T: Expression<ExpressionList<T> = ExpressionList<T>>> Default for DefaultAl
 impl<
         T: Expression<
             String = String,
-            Signal<T> = Signal<T>,
-            StructPrototype<T> = StructPrototype<T>,
-            ExpressionList<T> = ExpressionList<T>,
-            SignalList<T> = SignalList<T>,
+            Signal = Signal<T>,
+            StructPrototype = StructPrototype<T>,
+            ExpressionList = ExpressionList<T>,
+            SignalList = SignalList<T>,
         >,
     > HeapAllocator<T> for DefaultAllocator<T>
 {
     fn create_list(
         &self,
         expressions: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
-    ) -> T::ExpressionList<T> {
+    ) -> T::ExpressionList {
         self.sized_iterator_list(expressions)
     }
     fn create_sized_list(
         &self,
         length: usize,
         expressions: impl IntoIterator<Item = T>,
-    ) -> T::ExpressionList<T> {
+    ) -> T::ExpressionList {
         self.sized_list(length, expressions)
     }
-    fn create_unsized_list(
-        &self,
-        expressions: impl IntoIterator<Item = T>,
-    ) -> T::ExpressionList<T> {
+    fn create_unsized_list(&self, expressions: impl IntoIterator<Item = T>) -> T::ExpressionList {
         self.unsized_list(expressions.into_iter().collect::<Vec<_>>())
     }
-    fn create_empty_list(&self) -> T::ExpressionList<T> {
+    fn create_empty_list(&self) -> T::ExpressionList {
         self.sized_iterator_list(empty())
     }
-    fn create_unit_list(&self, value: T) -> T::ExpressionList<T> {
+    fn create_unit_list(&self, value: T) -> T::ExpressionList {
         self.sized_iterator_list(once(value))
     }
-    fn create_pair(&self, left: T, right: T) -> T::ExpressionList<T> {
+    fn create_pair(&self, left: T, right: T) -> T::ExpressionList {
         self.sized_iterator_list([left, right])
     }
-    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a, T>) -> T::ExpressionList<T> {
+    fn clone_list<'a>(&self, expressions: T::ExpressionListRef<'a>) -> T::ExpressionList {
         expressions.as_deref().clone()
     }
-    fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList<T> {
+    fn create_triple(&self, first: T, second: T, third: T) -> T::ExpressionList {
         self.sized_iterator_list([first, second, third])
     }
-    fn create_signal_list(
-        &self,
-        signals: impl IntoIterator<Item = T::Signal<T>>,
-    ) -> T::SignalList<T> {
+    fn create_signal_list(&self, signals: impl IntoIterator<Item = T::Signal>) -> T::SignalList {
         SignalList::new(signals)
     }
-    fn create_struct_prototype(&self, keys: T::ExpressionList<T>) -> T::StructPrototype<T> {
+    fn create_struct_prototype(&self, keys: T::ExpressionList) -> T::StructPrototype {
         StructPrototype::new(keys)
     }
     fn clone_struct_prototype<'a>(
         &self,
-        prototype: T::StructPrototypeRef<'a, T>,
-    ) -> T::StructPrototype<T> {
+        prototype: T::StructPrototypeRef<'a>,
+    ) -> T::StructPrototype {
         prototype.as_deref().clone()
     }
-    fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal<T> {
+    fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal {
         Signal::new(signal_type, payload, token)
     }
-    fn clone_signal<'a>(&self, signal: T::SignalRef<'a, T>) -> T::Signal<T> {
+    fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal {
         signal.as_deref().clone()
     }
     fn create_string(&self, value: impl Into<String>) -> T::String {

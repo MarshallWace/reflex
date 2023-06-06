@@ -18,8 +18,8 @@ use reflex_utils::json::is_empty_json_object;
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct RecordTerm<T: Expression> {
-    prototype: T::StructPrototype<T>,
-    values: T::ExpressionList<T>,
+    prototype: T::StructPrototype,
+    values: T::ExpressionList,
 }
 
 impl<T: Expression> std::hash::Hash for RecordTerm<T> {
@@ -30,7 +30,7 @@ impl<T: Expression> std::hash::Hash for RecordTerm<T> {
 }
 
 impl<T: Expression> RecordTerm<T> {
-    pub fn new(prototype: T::StructPrototype<T>, values: T::ExpressionList<T>) -> Self {
+    pub fn new(prototype: T::StructPrototype, values: T::ExpressionList) -> Self {
         Self { prototype, values }
     }
     pub fn entries(&self) -> impl IntoIterator<Item = (&T, &T)> {
@@ -43,16 +43,16 @@ impl<T: Expression> RecordTerm<T> {
     }
 }
 impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
-    fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a, T>
+    fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a>
     where
-        T::StructPrototype<T>: 'a,
+        T::StructPrototype: 'a,
         T: 'a,
     {
         (&self.prototype).into()
     }
-    fn values<'a>(&'a self) -> T::ExpressionListRef<'a, T>
+    fn values<'a>(&'a self) -> T::ExpressionListRef<'a>
     where
-        T::ExpressionList<T>: 'a,
+        T::ExpressionList: 'a,
         T: 'a,
     {
         (&self.values).into()

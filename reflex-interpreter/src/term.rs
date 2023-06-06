@@ -31,10 +31,10 @@ use reflex_lang::{
 
 use crate::compiler::{compile_expressions, Compile, Compiler, Instruction, Program};
 
-impl<TWrapper: Expression, T: Expression> Compile<TWrapper> for CachedExpression<T>
+impl<TInner, TWrapper> Compile<TWrapper> for CachedExpression<TInner>
 where
-    TWrapper: Compile<TWrapper>,
-    T: Compile<TWrapper>,
+    TInner: Compile<TWrapper>,
+    TWrapper: Expression + Compile<TWrapper>,
 {
     fn compile(
         &self,
@@ -49,10 +49,10 @@ where
     }
 }
 
-impl<TWrapper: Expression, T: Expression> Compile<TWrapper> for SharedExpression<T>
+impl<TInner, TWrapper> Compile<TWrapper> for SharedExpression<TInner>
 where
-    TWrapper: Compile<TWrapper>,
-    T: Compile<TWrapper>,
+    TInner: Compile<TWrapper>,
+    TWrapper: Expression + Compile<TWrapper>,
 {
     fn compile(
         &self,
@@ -730,7 +730,7 @@ fn compile_args<'a, T: Expression + Compile<T> + 'a>(
 }
 
 fn compile_signal<T: Expression + Compile<T>>(
-    signal: &T::Signal<T>,
+    signal: &T::Signal,
     stack_offset: StackOffset,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
@@ -775,7 +775,7 @@ fn match_compiled_function_result(
 
 #[cfg(test)]
 mod tests {
-    use reflex::core::{DependencyList, EvaluationResult, InstructionPointer, StateCache};
+    use reflex::core::{DependencyList, EvaluationResult, InstructionPointer, NodeId, StateCache};
     use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
     use reflex_stdlib::{Abs, Add, If, Stdlib};
 

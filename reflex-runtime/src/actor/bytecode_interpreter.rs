@@ -802,7 +802,7 @@ fn is_unresolved_result<T: Expression>(
         .unwrap_or(false)
 }
 
-fn is_unresolved_effect<T: Expression<Signal<T> = V>, V: ConditionType<T>>(effect: &V) -> bool {
+fn is_unresolved_effect<T: Expression<Signal = V>, V: ConditionType<T>>(effect: &V) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,

@@ -76,7 +76,7 @@ impl<T: Expression> Applicable<T> for ToRequest {
 pub(crate) fn request_prototype<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::StructPrototype<T> {
+) -> T::StructPrototype {
     allocator.create_struct_prototype(allocator.create_list([
         factory.create_string_term(allocator.create_static_string("url")),
         factory.create_string_term(allocator.create_static_string("method")),

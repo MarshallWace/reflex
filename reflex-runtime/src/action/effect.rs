@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum EffectActions<T: Expression> {
     #[serde(bound(
-        serialize = "<T as Expression>::Signal<T>: Serialize",
-        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
     ))]
     Subscribe(EffectSubscribeAction<T>),
     Unsubscribe(EffectUnsubscribeAction<T>),
@@ -134,10 +134,10 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectThrottle
 pub struct EffectSubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
-        serialize = "<T as Expression>::Signal<T>: Serialize",
-        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
     ))]
-    pub effects: Vec<T::Signal<T>>,
+    pub effects: Vec<T::Signal>,
 }
 impl<T: Expression> Action for EffectSubscribeAction<T> {}
 impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
@@ -173,10 +173,10 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
 pub struct EffectUnsubscribeAction<T: Expression> {
     pub effect_type: String,
     #[serde(bound(
-        serialize = "<T as Expression>::Signal<T>: Serialize",
-        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
     ))]
-    pub effects: Vec<T::Signal<T>>,
+    pub effects: Vec<T::Signal>,
 }
 impl<T: Expression> Action for EffectUnsubscribeAction<T> {}
 impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {

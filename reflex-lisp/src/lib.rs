@@ -446,7 +446,7 @@ fn parse_function_arguments<'src, T: Expression + Rewritable<T> + Reducible<T>>(
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T::ExpressionList<T>>
+) -> ParserResult<'src, T::ExpressionList>
 where
     T::Builtin: LispParserBuiltin,
 {
@@ -827,7 +827,7 @@ fn parse_binding_initializers<'src, T: Expression + Rewritable<T> + Reducible<T>
     evaluation_cache: &mut impl EvaluationCache<T>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> ParserResult<'src, T::ExpressionList<T>>
+) -> ParserResult<'src, T::ExpressionList>
 where
     T::Builtin: LispParserBuiltin,
 {
@@ -2168,7 +2168,7 @@ mod tests {
         message: impl Into<String>,
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
-    ) -> T::Signal<T> {
+    ) -> T::Signal {
         allocator.create_signal(
             SignalType::Error,
             factory.create_string_term(allocator.create_string(message)),

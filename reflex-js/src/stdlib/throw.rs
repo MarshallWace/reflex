@@ -67,7 +67,7 @@ fn parse_aggregate_error<'a, T: Expression + 'a>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Option<&'a T::ExpressionList<T>> {
+) -> Option<&'a T::ExpressionList> {
     factory.match_record_term(target).and_then(|target| {
         target
             .as_deref()
@@ -99,6 +99,6 @@ fn create_error_signal<T: Expression>(
     error: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::Signal<T> {
+) -> T::Signal {
     allocator.create_signal(SignalType::Error, error, factory.create_nil_term())
 }

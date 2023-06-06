@@ -317,7 +317,7 @@ impl<T: Expression, TSpan: Span> Default for GraphQlServerState<T, TSpan> {
 struct GraphQlOperationState<T: Expression, TSpan: Span> {
     query: T,
     label: String,
-    evaluate_effect: T::Signal<T>,
+    evaluate_effect: T::Signal,
     operation_phase: Option<GraphQlOperationPhase>,
     metric_labels: Vec<(String, String)>,
     start_time: Option<Instant>,
@@ -1419,7 +1419,7 @@ fn parse_custom_effect_types<T: Expression>(
 fn match_error_expression<'a, T: Expression>(
     expression: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> Option<&'a T::Signal<T>> {
+) -> Option<&'a T::Signal> {
     factory.match_signal_term(expression).and_then(|term| {
         term.signals()
             .as_deref()
@@ -1436,7 +1436,7 @@ fn match_error_expression<'a, T: Expression>(
 }
 
 fn parse_error_message<'a, T: Expression + 'a>(
-    error: &'a T::Signal<T>,
+    error: &'a T::Signal,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<&'a str> {
@@ -1451,7 +1451,7 @@ fn parse_error_message<'a, T: Expression + 'a>(
 }
 
 fn parse_error_object_payload_message<'a, T: Expression + 'a>(
-    value: &'a T::RecordTerm<T>,
+    value: &'a T::RecordTerm,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<&'a str> {
@@ -1531,7 +1531,7 @@ mod tests {
     use metrics_exporter_prometheus::PrometheusHandle;
 
     use opentelemetry::trace::noop::{NoopSpan, NoopTracer};
-    use reflex::core::{uuid, DependencyList};
+    use reflex::core::{uuid, DependencyList, NodeId};
     use reflex_dispatcher::{Handler, MessageOffset, ProcessId, SchedulerTransition};
     use reflex_graphql::{
         parse_graphql_operation, parse_graphql_query, GraphQlVariables, NoopGraphQlQueryTransform,

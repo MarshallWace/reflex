@@ -16,7 +16,7 @@ use reflex::core::{
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectTerm<T: Expression> {
-    condition: T::Signal<T>,
+    condition: T::Signal,
 }
 
 impl<T: Expression> std::hash::Hash for EffectTerm<T> {
@@ -25,9 +25,9 @@ impl<T: Expression> std::hash::Hash for EffectTerm<T> {
     }
 }
 impl<T: Expression> EffectTermType<T> for EffectTerm<T> {
-    fn condition<'a>(&'a self) -> T::SignalRef<'a, T>
+    fn condition<'a>(&'a self) -> T::SignalRef<'a>
     where
-        T::Signal<T>: 'a,
+        T::Signal: 'a,
         T: 'a,
     {
         (&self.condition).into()
@@ -35,7 +35,7 @@ impl<T: Expression> EffectTermType<T> for EffectTerm<T> {
 }
 
 impl<T: Expression> EffectTerm<T> {
-    pub fn new(condition: T::Signal<T>) -> Self {
+    pub fn new(condition: T::Signal) -> Self {
         Self { condition }
     }
 }

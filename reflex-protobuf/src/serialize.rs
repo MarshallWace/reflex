@@ -75,7 +75,7 @@ pub(crate) fn serialize_generic_message<T: Expression>(
 }
 
 fn serialize_oneof_field<T: Expression>(
-    term: &T::RecordTerm<T>,
+    term: &T::RecordTerm,
     oneof_type: &OneofDescriptor,
     message_type: &MessageDescriptor,
     transcoder: &impl ProtoTranscoder,

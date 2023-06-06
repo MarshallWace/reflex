@@ -931,7 +931,7 @@ fn parse_field_arguments<T: Expression>(
     fragments: &QueryFragments<'_>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Result<T::ExpressionList<T>, String> {
+) -> Result<T::ExpressionList, String> {
     let arg_fields = args
         .iter()
         .map(

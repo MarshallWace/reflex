@@ -1375,7 +1375,7 @@ struct GraphQlEffectArgs {
 }
 
 fn parse_graphql_effect_args<T: Expression>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
     let payload = effect.payload().as_deref();

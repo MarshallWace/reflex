@@ -10,24 +10,28 @@ use reflex::{
     core::{
         Applicable, Arity, CompoundNode, DependencyList, DynamicState, Eagerness, Evaluate,
         EvaluationCache, EvaluationResult, Expression, ExpressionFactory, GraphNode, HeapAllocator,
-        Internable, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions,
+        Internable, NodeId, Reducible, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
     hash::HashId,
 };
 
 #[derive(Eq, Clone, Copy)]
-pub struct CachedExpression<T: Expression> {
-    value: T,
-    hash: HashId,
+pub struct CachedExpression<TInner> {
+    value: TInner,
+    id: HashId,
     size: usize,
     capture_depth: StackOffset,
     has_dynamic_dependencies_shallow: bool,
     has_dynamic_dependencies_deep: bool,
 }
-impl<T: Expression> CachedExpression<T> {
-    pub fn new(value: T) -> Self {
+
+impl<TInner> CachedExpression<TInner>
+where
+    TInner: NodeId + GraphNode,
+{
+    pub fn new(value: TInner) -> Self {
         Self {
-            hash: value.id(),
+            id: value.id(),
             size: value.size(),
             capture_depth: value.capture_depth(),
             has_dynamic_dependencies_shallow: value.has_dynamic_dependencies(false),
@@ -35,87 +39,39 @@ impl<T: Expression> CachedExpression<T> {
             value,
         }
     }
-    pub fn value(&self) -> &T {
+}
+
+impl<TInner> CachedExpression<TInner> {
+    pub fn value(&self) -> &TInner {
         &self.value
     }
 }
-impl<T: Expression> Expression for CachedExpression<T> {
-    type String = T::String;
-    type Builtin = T::Builtin;
-    type Signal<TWrapper: Expression> = T::Signal<TWrapper>;
-    type SignalList<TWrapper: Expression> = T::SignalList<TWrapper>;
-    type StructPrototype<TWrapper: Expression> = T::StructPrototype<TWrapper>;
-    type ExpressionList<TWrapper: Expression> = T::ExpressionList<TWrapper>;
-    type NilTerm = T::NilTerm;
-    type BooleanTerm = T::BooleanTerm;
-    type IntTerm = T::IntTerm;
-    type FloatTerm = T::FloatTerm;
-    type StringTerm<TWrapper: Expression> = T::StringTerm<TWrapper>;
-    type SymbolTerm = T::SymbolTerm;
-    type VariableTerm = T::VariableTerm;
-    type EffectTerm<TWrapper: Expression> = T::EffectTerm<TWrapper>;
-    type LetTerm<TWrapper: Expression> = T::LetTerm<TWrapper>;
-    type LambdaTerm<TWrapper: Expression> = T::LambdaTerm<TWrapper>;
-    type ApplicationTerm<TWrapper: Expression> = T::ApplicationTerm<TWrapper>;
-    type PartialApplicationTerm<TWrapper: Expression> = T::PartialApplicationTerm<TWrapper>;
-    type RecursiveTerm<TWrapper: Expression> = T::RecursiveTerm<TWrapper>;
-    type BuiltinTerm<TWrapper: Expression> = T::BuiltinTerm<TWrapper>;
-    type CompiledFunctionTerm = T::CompiledFunctionTerm;
-    type RecordTerm<TWrapper: Expression> = T::RecordTerm<TWrapper>;
-    type ConstructorTerm<TWrapper: Expression> = T::ConstructorTerm<TWrapper>;
-    type ListTerm<TWrapper: Expression> = T::ListTerm<TWrapper>;
-    type HashmapTerm<TWrapper: Expression> = T::HashmapTerm<TWrapper>;
-    type HashsetTerm<TWrapper: Expression> = T::HashsetTerm<TWrapper>;
-    type SignalTerm<TWrapper: Expression> = T::SignalTerm<TWrapper>;
 
-    type StringRef<'a> = &'a Self::String
-    where
-        Self::String: 'a,
-        Self: 'a;
-
-    type SignalRef<'a, TWrapper: Expression> = &'a Self::Signal<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::Signal<TWrapper>: 'a,
-        Self: 'a;
-
-    type StructPrototypeRef<'a, TWrapper: Expression> = &'a Self::StructPrototype<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::StructPrototype<TWrapper>: 'a,
-        Self: 'a;
-
-    type SignalListRef<'a, TWrapper: Expression> = &'a Self::SignalList<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::SignalList<TWrapper>: 'a,
-        Self: 'a;
-
-    type ExpressionListRef<'a, TWrapper: Expression> = &'a Self::ExpressionList<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::ExpressionList<TWrapper>: 'a,
-        Self: 'a;
-
-    type ExpressionRef<'a> = &'a Self
-    where
-        Self: 'a;
-
+impl<TInner> NodeId for CachedExpression<TInner> {
     fn id(&self) -> HashId {
-        self.hash
+        self.id
     }
 }
-impl<T: Expression> std::hash::Hash for CachedExpression<T> {
+
+impl<TInner> std::hash::Hash for CachedExpression<TInner> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash);
+        state.write_u64(self.id);
     }
 }
-impl<T: Expression> PartialEq for CachedExpression<T> {
+
+impl<TInner> PartialEq for CachedExpression<TInner>
+where
+    TInner: PartialEq,
+{
     fn eq(&self, other: &Self) -> bool {
         self.value.eq(&other.value)
     }
 }
-impl<T: Expression> GraphNode for CachedExpression<T> {
+
+impl<TInner> GraphNode for CachedExpression<TInner>
+where
+    TInner: GraphNode,
+{
     fn size(&self) -> usize {
         self.size
     }
@@ -152,10 +108,13 @@ impl<T: Expression> GraphNode for CachedExpression<T> {
         self.value.is_complex()
     }
 }
-impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<TWrapper>
-    for CachedExpression<T>
+
+impl<TInner, TWrapper> CompoundNode<TWrapper> for CachedExpression<TInner>
+where
+    TInner: CompoundNode<TWrapper>,
+    TWrapper: Expression,
 {
-    type Children<'a> = T::Children<'a>
+    type Children<'a> = TInner::Children<'a>
         where
             TWrapper: 'a,
             Self: 'a;
@@ -166,10 +125,11 @@ impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<
         self.value.children()
     }
 }
-impl<TWrapper: Expression, T: Expression> Rewritable<TWrapper> for CachedExpression<T>
+
+impl<TWrapper, TInner> Rewritable<TWrapper> for CachedExpression<TInner>
 where
-    TWrapper: Rewritable<TWrapper>,
-    T: Rewritable<TWrapper>,
+    TInner: GraphNode + NodeId + Rewritable<TWrapper>,
+    TWrapper: Expression + Rewritable<TWrapper>,
 {
     fn substitute_static(
         &self,
@@ -246,10 +206,11 @@ where
         }
     }
 }
-impl<TWrapper: Expression, T: Expression> Reducible<TWrapper> for CachedExpression<T>
+
+impl<TInner, TWrapper> Reducible<TWrapper> for CachedExpression<TInner>
 where
-    TWrapper: Reducible<TWrapper>,
-    T: Reducible<TWrapper>,
+    TInner: GraphNode + NodeId + Reducible<TWrapper>,
+    TWrapper: Expression + Reducible<TWrapper>,
 {
     fn is_reducible(&self) -> bool {
         self.value.is_reducible()
@@ -270,10 +231,11 @@ where
         }
     }
 }
-impl<TWrapper: Expression, T: Expression> Applicable<TWrapper> for CachedExpression<T>
+
+impl<TInner, TWrapper> Applicable<TWrapper> for CachedExpression<TInner>
 where
-    TWrapper: Applicable<TWrapper>,
-    T: Applicable<TWrapper>,
+    TInner: Applicable<TWrapper>,
+    TWrapper: Expression + Applicable<TWrapper>,
 {
     fn arity(&self) -> Option<Arity> {
         self.value.arity()
@@ -292,16 +254,19 @@ where
     }
 }
 
-impl<T: Expression + Internable> Internable for CachedExpression<T> {
+impl<TInner> Internable for CachedExpression<TInner>
+where
+    TInner: Internable,
+{
     fn should_intern(&self, eager: Eagerness) -> bool {
         self.value().should_intern(eager)
     }
 }
 
-impl<TWrapper: Expression, T: Expression> Evaluate<TWrapper> for CachedExpression<T>
+impl<TWrapper, TInner> Evaluate<TWrapper> for CachedExpression<TInner>
 where
-    TWrapper: Evaluate<TWrapper>,
-    T: Evaluate<TWrapper>,
+    TInner: GraphNode + NodeId + Evaluate<TWrapper>,
+    TWrapper: Expression + Evaluate<TWrapper>,
 {
     fn evaluate(
         &self,
@@ -323,28 +288,44 @@ where
         }
     }
 }
-impl<T: Expression> std::fmt::Display for CachedExpression<T> {
+
+impl<TInner> std::fmt::Display for CachedExpression<TInner>
+where
+    TInner: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.value, f)
     }
 }
-impl<T: Expression> std::fmt::Debug for CachedExpression<T> {
+
+impl<TInner> std::fmt::Debug for CachedExpression<TInner>
+where
+    TInner: std::fmt::Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.value, f)
     }
 }
-impl<T: Expression> SerializeJson for CachedExpression<T> {
+
+impl<TInner> SerializeJson for CachedExpression<TInner>
+where
+    TInner: SerializeJson,
+{
     fn to_json(&self) -> Result<JsonValue, String> {
         self.value().to_json()
     }
     fn patch(&self, target: &Self) -> Result<Option<JsonValue>, String> {
-        if self.hash == target.hash {
+        if self.id == target.id {
             return Ok(None);
         }
         self.value().patch(target.value())
     }
 }
-impl<T: Expression + serde::Serialize> serde::Serialize for CachedExpression<T> {
+
+impl<TInner> serde::Serialize for CachedExpression<TInner>
+where
+    TInner: serde::Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -352,96 +333,48 @@ impl<T: Expression + serde::Serialize> serde::Serialize for CachedExpression<T> 
         self.value.serialize(serializer)
     }
 }
-impl<'de, T: Expression + serde::Deserialize<'de>> serde::Deserialize<'de> for CachedExpression<T> {
+
+impl<'de, TInner> serde::Deserialize<'de> for CachedExpression<TInner>
+where
+    TInner: GraphNode + NodeId + serde::Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(Self::new(T::deserialize(deserializer)?))
+        Ok(Self::new(TInner::deserialize(deserializer)?))
     }
 }
 
 #[derive(Hash, PartialEq, Eq, Clone)]
-pub struct SharedExpression<T: Expression> {
-    pub value: Arc<T>,
+pub struct SharedExpression<TInner> {
+    pub value: Arc<TInner>,
 }
-impl<T: Expression> SharedExpression<T> {
-    pub fn new(value: T) -> Self {
+
+impl<TInner> SharedExpression<TInner> {
+    pub fn new(value: TInner) -> Self {
         Self {
             value: Arc::new(value),
         }
     }
-    pub fn value(&self) -> &T {
+    pub fn value(&self) -> &TInner {
         &self.value
     }
 }
-impl<T: Expression> Expression for SharedExpression<T> {
-    type String = T::String;
-    type Builtin = T::Builtin;
-    type Signal<TWrapper: Expression> = T::Signal<TWrapper>;
-    type SignalList<TWrapper: Expression> = T::SignalList<TWrapper>;
-    type StructPrototype<TWrapper: Expression> = T::StructPrototype<TWrapper>;
-    type ExpressionList<TWrapper: Expression> = T::ExpressionList<TWrapper>;
-    type NilTerm = T::NilTerm;
-    type BooleanTerm = T::BooleanTerm;
-    type IntTerm = T::IntTerm;
-    type FloatTerm = T::FloatTerm;
-    type StringTerm<TWrapper: Expression> = T::StringTerm<TWrapper>;
-    type SymbolTerm = T::SymbolTerm;
-    type VariableTerm = T::VariableTerm;
-    type EffectTerm<TWrapper: Expression> = T::EffectTerm<TWrapper>;
-    type LetTerm<TWrapper: Expression> = T::LetTerm<TWrapper>;
-    type LambdaTerm<TWrapper: Expression> = T::LambdaTerm<TWrapper>;
-    type ApplicationTerm<TWrapper: Expression> = T::ApplicationTerm<TWrapper>;
-    type PartialApplicationTerm<TWrapper: Expression> = T::PartialApplicationTerm<TWrapper>;
-    type RecursiveTerm<TWrapper: Expression> = T::RecursiveTerm<TWrapper>;
-    type BuiltinTerm<TWrapper: Expression> = T::BuiltinTerm<TWrapper>;
-    type CompiledFunctionTerm = T::CompiledFunctionTerm;
-    type RecordTerm<TWrapper: Expression> = T::RecordTerm<TWrapper>;
-    type ConstructorTerm<TWrapper: Expression> = T::ConstructorTerm<TWrapper>;
-    type ListTerm<TWrapper: Expression> = T::ListTerm<TWrapper>;
-    type HashmapTerm<TWrapper: Expression> = T::HashmapTerm<TWrapper>;
-    type HashsetTerm<TWrapper: Expression> = T::HashsetTerm<TWrapper>;
-    type SignalTerm<TWrapper: Expression> = T::SignalTerm<TWrapper>;
 
-    type StringRef<'a> = &'a Self::String
-    where
-        Self::String: 'a,
-        Self: 'a;
-
-    type SignalRef<'a, TWrapper: Expression> = &'a Self::Signal<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::Signal<TWrapper>: 'a,
-        Self: 'a;
-
-    type StructPrototypeRef<'a, TWrapper: Expression> = &'a Self::StructPrototype<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::StructPrototype<TWrapper>: 'a,
-        Self: 'a;
-
-    type SignalListRef<'a, TWrapper: Expression> = &'a Self::SignalList<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::SignalList<TWrapper>: 'a,
-        Self: 'a;
-
-    type ExpressionListRef<'a, TWrapper: Expression> = &'a Self::ExpressionList<TWrapper>
-    where
-        TWrapper: 'a,
-        Self::ExpressionList<TWrapper>: 'a,
-        Self: 'a;
-
-    type ExpressionRef<'a> = &'a Self
-    where
-        Self: 'a;
-
+impl<TInner> NodeId for SharedExpression<TInner>
+where
+    TInner: NodeId,
+{
     fn id(&self) -> HashId {
         self.value.id()
     }
 }
-impl<T: Expression> GraphNode for SharedExpression<T> {
+
+impl<TInner> GraphNode for SharedExpression<TInner>
+where
+    TInner: GraphNode,
+{
     fn size(&self) -> usize {
         self.value.size()
     }
@@ -470,10 +403,13 @@ impl<T: Expression> GraphNode for SharedExpression<T> {
         self.value.is_complex()
     }
 }
-impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<TWrapper>
-    for SharedExpression<T>
+
+impl<TInner, TWrapper> CompoundNode<TWrapper> for SharedExpression<TInner>
+where
+    TInner: CompoundNode<TWrapper>,
+    TWrapper: Expression,
 {
-    type Children<'a> = T::Children<'a>
+    type Children<'a> = TInner::Children<'a>
         where
             TWrapper: 'a,
             Self: 'a;
@@ -484,10 +420,11 @@ impl<T: Expression + CompoundNode<TWrapper>, TWrapper: Expression> CompoundNode<
         self.value.children()
     }
 }
-impl<TWrapper: Expression, T: Expression> Rewritable<TWrapper> for SharedExpression<T>
+
+impl<TInner, TWrapper> Rewritable<TWrapper> for SharedExpression<TInner>
 where
-    TWrapper: Rewritable<TWrapper>,
-    T: Rewritable<TWrapper>,
+    TInner: Rewritable<TWrapper>,
+    TWrapper: Expression + Rewritable<TWrapper>,
 {
     fn substitute_static(
         &self,
@@ -526,10 +463,11 @@ where
         self.value.normalize(factory, allocator, cache)
     }
 }
-impl<TWrapper: Expression, T: Expression> Reducible<TWrapper> for SharedExpression<T>
+
+impl<TInner, TWrapper> Reducible<TWrapper> for SharedExpression<TInner>
 where
-    TWrapper: Reducible<TWrapper>,
-    T: Reducible<TWrapper>,
+    TInner: Reducible<TWrapper>,
+    TWrapper: Expression + Reducible<TWrapper>,
 {
     fn is_reducible(&self) -> bool {
         self.value.is_reducible()
@@ -543,10 +481,11 @@ where
         self.value.reduce(factory, allocator, cache)
     }
 }
-impl<TWrapper: Expression, T: Expression> Applicable<TWrapper> for SharedExpression<T>
+
+impl<TInner, TWrapper: Expression> Applicable<TWrapper> for SharedExpression<TInner>
 where
-    TWrapper: Applicable<TWrapper>,
-    T: Applicable<TWrapper>,
+    TInner: Applicable<TWrapper>,
+    TWrapper: Expression + Applicable<TWrapper>,
 {
     fn arity(&self) -> Option<Arity> {
         self.value.arity()
@@ -564,10 +503,11 @@ where
         self.value.should_parallelize(args)
     }
 }
-impl<TWrapper: Expression, T: Expression> Evaluate<TWrapper> for SharedExpression<T>
+
+impl<TInner, TWrapper> Evaluate<TWrapper> for SharedExpression<TInner>
 where
-    TWrapper: Evaluate<TWrapper>,
-    T: Evaluate<TWrapper>,
+    TInner: Evaluate<TWrapper>,
+    TWrapper: Expression + Evaluate<TWrapper>,
 {
     fn evaluate(
         &self,
@@ -580,13 +520,19 @@ where
     }
 }
 
-impl<T: Expression + Internable> Internable for SharedExpression<T> {
+impl<TInner> Internable for SharedExpression<TInner>
+where
+    TInner: Internable,
+{
     fn should_intern(&self, eager: Eagerness) -> bool {
         self.value().should_intern(eager)
     }
 }
 
-impl<T: Expression + serde::Serialize> serde::Serialize for SharedExpression<T> {
+impl<TInner> serde::Serialize for SharedExpression<TInner>
+where
+    TInner: serde::Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -594,25 +540,41 @@ impl<T: Expression + serde::Serialize> serde::Serialize for SharedExpression<T> 
         self.value.serialize(serializer)
     }
 }
-impl<'de, T: Expression + serde::Deserialize<'de>> serde::Deserialize<'de> for SharedExpression<T> {
+
+impl<'de, TInner> serde::Deserialize<'de> for SharedExpression<TInner>
+where
+    TInner: serde::Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(Self::new(T::deserialize(deserializer)?))
+        Ok(Self::new(TInner::deserialize(deserializer)?))
     }
 }
-impl<T: Expression> std::fmt::Display for SharedExpression<T> {
+
+impl<TInner> std::fmt::Display for SharedExpression<TInner>
+where
+    TInner: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.value, f)
     }
 }
-impl<T: Expression> std::fmt::Debug for SharedExpression<T> {
+
+impl<TInner> std::fmt::Debug for SharedExpression<TInner>
+where
+    TInner: std::fmt::Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.value, f)
     }
 }
-impl<T: Expression> SerializeJson for SharedExpression<T> {
+
+impl<TInner> SerializeJson for SharedExpression<TInner>
+where
+    TInner: SerializeJson,
+{
     fn to_json(&self) -> Result<JsonValue, String> {
         (*self.value).to_json()
     }

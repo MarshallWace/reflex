@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum BytecodeInterpreterActions<T: Expression> {
     #[serde(bound(
-        serialize = "<T as Expression>::Signal<T>: Serialize",
-        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
     ))]
     Init(BytecodeInterpreterInitAction),
     Evaluate(BytecodeInterpreterEvaluateAction<T>),

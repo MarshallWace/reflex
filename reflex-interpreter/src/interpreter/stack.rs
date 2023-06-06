@@ -26,7 +26,7 @@ pub(crate) enum StackFrame<T: Expression> {
         address: InstructionPointer,
     },
     ApplicationTarget {
-        args: T::ExpressionList<T>,
+        args: T::ExpressionList,
     },
     ApplicationArg,
     ApplicationArgList {
@@ -154,10 +154,10 @@ impl<'src, T: Expression> CallStack<'src, T> {
             None
         }
     }
-    pub(crate) fn enter_application_target(&mut self, args: T::ExpressionList<T>) {
+    pub(crate) fn enter_application_target(&mut self, args: T::ExpressionList) {
         self.enter_stack_frame(None, StackFrame::ApplicationTarget { args });
     }
-    pub(crate) fn peek_application_target_stack(&self) -> Option<&T::ExpressionList<T>> {
+    pub(crate) fn peek_application_target_stack(&self) -> Option<&T::ExpressionList> {
         self.call_stack
             .last()
             .and_then(|entry| match &entry.context {
@@ -167,7 +167,7 @@ impl<'src, T: Expression> CallStack<'src, T> {
     }
     pub(crate) fn pop_application_target_stack(
         &mut self,
-    ) -> Option<(T::ExpressionList<T>, DependencyList, Vec<HashId>)> {
+    ) -> Option<(T::ExpressionList, DependencyList, Vec<HashId>)> {
         if self.peek_application_target_stack().is_some() {
             self.pop_call_stack()
                 .and_then(|(_, dependencies, subexpressions, frame)| match frame {

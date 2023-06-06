@@ -59,7 +59,7 @@ enum ExecutionResult<T: Expression> {
     ResolveExpression,
     ResolveApplicationTarget {
         target: T,
-        args: T::ExpressionList<T>,
+        args: T::ExpressionList,
     },
     ResolveApplicationArgs {
         target: T,
@@ -1457,7 +1457,7 @@ fn resolve_parallel_args<
     options: &InterpreterOptions,
 ) -> Result<Vec<T>, String>
 where
-    T::ExpressionList<T>: Sync,
+    T::ExpressionList: Sync,
 {
     {
         // this inner block does the calculation for a single entry which warms up the cache

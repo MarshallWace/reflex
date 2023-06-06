@@ -96,7 +96,7 @@ impl<T: Expression> Default for QueryManagerState<T> {
 struct QuerySubscription<T: Expression> {
     subscription_count: usize,
     query: T,
-    effect: T::Signal<T>,
+    effect: T::Signal,
     result: Option<EvaluationResult<T>>,
 }
 
@@ -336,7 +336,7 @@ pub fn create_query_evaluate_effect<T: Expression>(
     query: T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::Signal<T> {
+) -> T::Signal {
     create_evaluate_effect(
         label,
         query,

@@ -9,8 +9,8 @@ use reflex::{
     core::{
         Applicable, Arity, Builtin, CompoundNode, DependencyList, DynamicState, Eagerness,
         Evaluate, EvaluationCache, EvaluationResult, Expression, ExpressionFactory, FloatValue,
-        GraphNode, HeapAllocator, InstructionPointer, IntValue, Internable, Reducible, Rewritable,
-        SerializeJson, StackOffset, Substitutions, SymbolId,
+        GraphNode, HeapAllocator, InstructionPointer, IntValue, Internable, NodeId, Reducible,
+        Rewritable, SerializeJson, StackOffset, Substitutions, SymbolId,
     },
     hash::HashId,
 };
@@ -260,9 +260,7 @@ impl<TBuiltin: Builtin> ExpressionFactory<CachedSharedTerm<TBuiltin>>
     fn match_application_term<'a>(
         &self,
         expression: &'a CachedSharedTerm<TBuiltin>,
-    ) -> Option<
-        &'a <CachedSharedTerm<TBuiltin> as Expression>::ApplicationTerm<CachedSharedTerm<TBuiltin>>,
-    > {
+    ) -> Option<&'a ApplicationTerm<CachedSharedTerm<TBuiltin>>> {
         match expression.inner_term() {
             Term::Application(term) => Some(term),
             _ => None,
@@ -382,65 +380,62 @@ impl<TBuiltin: Builtin> CachedSharedTerm<TBuiltin> {
 impl<TBuiltin: Builtin> Expression for CachedSharedTerm<TBuiltin> {
     type String = String;
     type Builtin = TBuiltin;
-    type Signal<T: Expression> = Signal<T>;
-    type SignalList<T: Expression> = SignalList<T>;
-    type StructPrototype<T: Expression> = StructPrototype<T>;
-    type ExpressionList<T: Expression> = ExpressionList<T>;
+    type Signal = Signal<Self>;
+    type SignalList = SignalList<Self>;
+    type StructPrototype = StructPrototype<Self>;
+    type ExpressionList = ExpressionList<Self>;
     type NilTerm = NilTerm;
     type BooleanTerm = BooleanTerm;
     type IntTerm = IntTerm;
     type FloatTerm = FloatTerm;
-    type StringTerm<T: Expression> = StringTerm<T>;
+    type StringTerm = StringTerm<Self>;
     type SymbolTerm = SymbolTerm;
     type VariableTerm = VariableTerm;
-    type EffectTerm<T: Expression> = EffectTerm<T>;
-    type LetTerm<T: Expression> = LetTerm<T>;
-    type LambdaTerm<T: Expression> = LambdaTerm<T>;
-    type ApplicationTerm<T: Expression> = ApplicationTerm<T>;
-    type PartialApplicationTerm<T: Expression> = PartialApplicationTerm<T>;
-    type RecursiveTerm<T: Expression> = RecursiveTerm<T>;
-    type BuiltinTerm<T: Expression> = BuiltinTerm<T>;
+    type EffectTerm = EffectTerm<Self>;
+    type LetTerm = LetTerm<Self>;
+    type LambdaTerm = LambdaTerm<Self>;
+    type ApplicationTerm = ApplicationTerm<Self>;
+    type PartialApplicationTerm = PartialApplicationTerm<Self>;
+    type RecursiveTerm = RecursiveTerm<Self>;
+    type BuiltinTerm = BuiltinTerm<Self>;
     type CompiledFunctionTerm = CompiledFunctionTerm;
-    type RecordTerm<T: Expression> = RecordTerm<T>;
-    type ConstructorTerm<T: Expression> = ConstructorTerm<T>;
-    type ListTerm<T: Expression> = ListTerm<T>;
-    type HashmapTerm<T: Expression> = HashMapTerm<T>;
-    type HashsetTerm<T: Expression> = HashSetTerm<T>;
-    type SignalTerm<T: Expression> = SignalTerm<T>;
+    type RecordTerm = RecordTerm<Self>;
+    type ConstructorTerm = ConstructorTerm<Self>;
+    type ListTerm = ListTerm<Self>;
+    type HashmapTerm = HashMapTerm<Self>;
+    type HashsetTerm = HashSetTerm<Self>;
+    type SignalTerm = SignalTerm<Self>;
 
     type StringRef<'a> = &'a Self::String
     where
         Self::String: 'a,
         Self: 'a;
 
-    type SignalRef<'a, TWrapper: Expression> = &'a <Self as Expression>::Signal<TWrapper>
+    type SignalRef<'a> = &'a <Self as Expression>::Signal
     where
-        TWrapper: 'a,
-        <Self as Expression>::Signal<TWrapper>: 'a,
+        <Self as Expression>::Signal: 'a,
         Self: 'a;
 
-    type StructPrototypeRef<'a, TWrapper: Expression> = &'a <Self as Expression>::StructPrototype<TWrapper>
+    type StructPrototypeRef<'a> = &'a <Self as Expression>::StructPrototype
     where
-        TWrapper: 'a,
-        <Self as Expression>::StructPrototype<TWrapper>: 'a,
+        <Self as Expression>::StructPrototype: 'a,
         Self: 'a;
 
-    type SignalListRef<'a, TWrapper: Expression> = &'a <Self as Expression>::SignalList<TWrapper>
+    type SignalListRef<'a> = &'a <Self as Expression>::SignalList
     where
-        TWrapper: 'a,
-        <Self as Expression>::SignalList<TWrapper>: 'a,
+        <Self as Expression>::SignalList: 'a,
         Self: 'a;
 
-    type ExpressionListRef<'a, TWrapper: Expression> = &'a <Self as Expression>::ExpressionList<TWrapper>
+    type ExpressionListRef<'a> = &'a <Self as Expression>::ExpressionList
     where
-        TWrapper: 'a,
-        <Self as Expression>::ExpressionList<TWrapper>: 'a,
+        <Self as Expression>::ExpressionList: 'a,
         Self: 'a;
 
     type ExpressionRef<'a> = &'a Self
     where
         Self: 'a;
-
+}
+impl<TBuiltin: Builtin> NodeId for CachedSharedTerm<TBuiltin> {
     fn id(&self) -> HashId {
         self.value.id()
     }

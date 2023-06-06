@@ -18,8 +18,8 @@ use self::query::*;
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum RuntimeActions<T: Expression> {
     #[serde(bound(
-        serialize = "<T as Expression>::Signal<T>: Serialize",
-        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
     ))]
     Effect(EffectActions<T>),
     Evaluate(EvaluateActions<T>),

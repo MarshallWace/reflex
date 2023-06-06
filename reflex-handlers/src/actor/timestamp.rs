@@ -332,7 +332,7 @@ fn create_timestamp_task(
 }
 
 fn parse_timestamp_effect_args<T: Expression>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Duration, String> {
     let payload = effect.payload().as_deref();

@@ -21,7 +21,7 @@ use reflex::core::{
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationTerm<T: Expression> {
     pub target: T,
-    pub args: T::ExpressionList<T>,
+    pub args: T::ExpressionList,
 }
 
 impl<T: Expression> std::hash::Hash for ApplicationTerm<T> {
@@ -32,7 +32,7 @@ impl<T: Expression> std::hash::Hash for ApplicationTerm<T> {
 }
 
 impl<T: Expression> ApplicationTerm<T> {
-    pub fn new(target: T, args: T::ExpressionList<T>) -> Self {
+    pub fn new(target: T, args: T::ExpressionList) -> Self {
         Self { target, args }
     }
 }
@@ -43,9 +43,9 @@ impl<T: Expression> ApplicationTermType<T> for ApplicationTerm<T> {
     {
         (&self.target).into()
     }
-    fn args<'a>(&'a self) -> T::ExpressionListRef<'a, T>
+    fn args<'a>(&'a self) -> T::ExpressionListRef<'a>
     where
-        T::ExpressionList<T>: 'a,
+        T::ExpressionList: 'a,
         T: 'a,
     {
         (&self.args).into()
@@ -320,7 +320,7 @@ fn normalize_function_application<
     T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>,
 >(
     target: &T,
-    args: &T::ExpressionList<T>,
+    args: &T::ExpressionList,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -337,8 +337,8 @@ fn normalize_function_application<
 }
 
 fn normalize_lambda_application<T: Expression + Rewritable<T>>(
-    target: &T::LambdaTerm<T>,
-    args: &T::ExpressionList<T>,
+    target: &T::LambdaTerm,
+    args: &T::ExpressionList,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -415,7 +415,7 @@ fn normalize_builtin_application<
 >(
     target: &T,
     arity: &Arity,
-    args: &T::ExpressionList<T>,
+    args: &T::ExpressionList,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
     cache: &mut impl EvaluationCache<T>,
@@ -558,7 +558,7 @@ enum FunctionArgs<T: Expression> {
 fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: DynamicState<T>>(
     target: &T,
     arity: &Arity,
-    args: &T::ExpressionList<T>,
+    args: &T::ExpressionList,
     state: Option<&TState>,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,

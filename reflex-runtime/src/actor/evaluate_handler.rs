@@ -144,7 +144,7 @@ pub fn create_evaluate_effect<T: Expression>(
     invalidation_strategy: QueryInvalidationStrategy,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::Signal<T> {
+) -> T::Signal {
     allocator.create_signal(
         SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
         factory.create_list_term(allocator.create_list([
@@ -158,7 +158,7 @@ pub fn create_evaluate_effect<T: Expression>(
 }
 
 pub fn parse_evaluate_effect_query<T: Expression>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
     let payload = effect.payload().as_deref();
@@ -273,7 +273,7 @@ pub struct EvaluateHandlerState<T: Expression> {
     // TODO: Use newtypes for state hashmap keys
     workers: IntMap<StateToken, WorkerState<T>>,
     // TODO: Use expressions as state tokens, removing need to map state tokens back to originating effects
-    effects: IntMap<StateToken, T::Signal<T>>,
+    effects: IntMap<StateToken, T::Signal>,
     state_cache: GlobalStateCache<T>,
     /// Whitelist to keep track of effects that must be processed immediately to ensure exactly-once processing guarantees (non-whitelisted effect updates are eligible for throttling)
     immediate_effects: IntSet<StateToken>,
@@ -293,7 +293,7 @@ impl<T: Expression> Default for EvaluateHandlerState<T> {
 }
 struct WorkerState<T: Expression> {
     subscription_count: usize,
-    effect: T::Signal<T>,
+    effect: T::Signal,
     status: WorkerStatus<T>,
     state_index: Option<MessageOffset>,
     state_values: HashMap<StateToken, T>,
@@ -388,7 +388,7 @@ impl<T: Expression> EvaluateHandlerState<T> {
             Some(SchedulerTransition::new(worker_update_actions))
         }
     }
-    fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a T::Signal<T>> + 'a {
+    fn combined_effects<'a>(&'a self) -> impl Iterator<Item = &'a T::Signal> + 'a {
         self.workers.values().flat_map(|worker| {
             once(&worker.effect).into_iter().chain(
                 worker
@@ -1307,7 +1307,7 @@ fn update_worker_state<T: Expression>(
     })
 }
 
-fn group_effects_by_type<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
+fn group_effects_by_type<T: Expression<Signal = V>, V: ConditionType<T>>(
     effects: impl IntoIterator<Item = V>,
 ) -> impl Iterator<Item = (String, Vec<V>)> {
     effects
@@ -1326,7 +1326,7 @@ fn group_effects_by_type<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
         .into_iter()
 }
 
-fn get_custom_signal_type<T: Expression<Signal<T> = V>, V: ConditionType<T>>(
+fn get_custom_signal_type<T: Expression<Signal = V>, V: ConditionType<T>>(
     effect: &V,
 ) -> Option<String> {
     match effect.signal_type() {
@@ -1351,7 +1351,7 @@ fn is_unresolved_result<T: Expression>(
         .unwrap_or(false)
 }
 
-fn is_unresolved_effect<T: Expression<Signal<T> = V>, V: ConditionType<T>>(effect: &V) -> bool {
+fn is_unresolved_effect<T: Expression<Signal = V>, V: ConditionType<T>>(effect: &V) -> bool {
     match effect.signal_type() {
         SignalType::Error => false,
         SignalType::Pending | SignalType::Custom(_) => true,
@@ -1361,7 +1361,7 @@ fn is_unresolved_effect<T: Expression<Signal<T> = V>, V: ConditionType<T>>(effec
 fn parse_expression_effects<'a, T: Expression>(
     value: &'a T,
     factory: &'a impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a T::Signal<T>> + 'a {
+) -> impl Iterator<Item = &'a T::Signal> + 'a {
     factory
         .match_signal_term(value)
         .map(|term| {

@@ -18,10 +18,10 @@ use reflex_utils::json;
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ListTerm<T: Expression> {
-    items: T::ExpressionList<T>,
+    items: T::ExpressionList,
 }
 impl<T: Expression> ListTerm<T> {
-    pub fn new(items: T::ExpressionList<T>) -> Self {
+    pub fn new(items: T::ExpressionList) -> Self {
         Self { items }
     }
 }
@@ -33,9 +33,9 @@ impl<T: Expression> std::hash::Hash for ListTerm<T> {
 }
 
 impl<T: Expression> ListTermType<T> for ListTerm<T> {
-    fn items<'a>(&'a self) -> T::ExpressionListRef<'a, T>
+    fn items<'a>(&'a self) -> T::ExpressionListRef<'a>
     where
-        T::ExpressionList<T>: 'a,
+        T::ExpressionList: 'a,
         T: 'a,
     {
         (&self.items).into()

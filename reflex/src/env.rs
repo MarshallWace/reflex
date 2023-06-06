@@ -14,7 +14,7 @@ const EVENT_TYPE_ENV: &'static str = "reflex::env";
 pub fn create_env_args_accessor<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::Signal<T> {
+) -> T::Signal {
     allocator.create_signal(
         SignalType::Custom(String::from(EVENT_TYPE_ENV)),
         factory.create_list_term(allocator.create_empty_list()),

@@ -1274,7 +1274,7 @@ struct GrpcEffectArgs<T: Expression> {
 }
 
 fn parse_grpc_effect_args<T: AsyncExpression>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
     let payload = effect.payload().as_deref();

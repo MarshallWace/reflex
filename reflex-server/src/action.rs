@@ -26,8 +26,8 @@ use crate::server::action::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ServerCliAction<T: Expression> {
     #[serde(bound(
-        serialize = "<T as Expression>::Signal<T>: Serialize",
-        deserialize = "<T as Expression>::Signal<T>: Deserialize<'de>"
+        serialize = "<T as Expression>::Signal: Serialize",
+        deserialize = "<T as Expression>::Signal: Deserialize<'de>"
     ))]
     Runtime(RuntimeActions<T>),
     HttpServer(HttpServerActions),

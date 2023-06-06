@@ -18,7 +18,7 @@ use reflex::core::{
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct PartialApplicationTerm<T: Expression> {
     target: T,
-    args: T::ExpressionList<T>,
+    args: T::ExpressionList,
 }
 
 impl<T: Expression> std::hash::Hash for PartialApplicationTerm<T> {
@@ -29,7 +29,7 @@ impl<T: Expression> std::hash::Hash for PartialApplicationTerm<T> {
 }
 
 impl<T: Expression> PartialApplicationTerm<T> {
-    pub fn new(target: T, args: T::ExpressionList<T>) -> Self {
+    pub fn new(target: T, args: T::ExpressionList) -> Self {
         Self { target, args }
     }
 }
@@ -40,9 +40,9 @@ impl<T: Expression> PartialApplicationTermType<T> for PartialApplicationTerm<T> 
     {
         (&self.target).into()
     }
-    fn args<'a>(&'a self) -> T::ExpressionListRef<'a, T>
+    fn args<'a>(&'a self) -> T::ExpressionListRef<'a>
     where
-        T::ExpressionList<T>: 'a,
+        T::ExpressionList: 'a,
         T: 'a,
     {
         (&self.args).into()

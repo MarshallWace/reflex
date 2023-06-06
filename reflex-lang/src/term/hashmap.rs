@@ -20,8 +20,8 @@ use reflex::{
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct HashMapTerm<T: Expression> {
-    keys: T::ExpressionList<T>,
-    values: T::ExpressionList<T>,
+    keys: T::ExpressionList,
+    values: T::ExpressionList,
     lookup: IntMap<HashId, usize>,
 }
 impl<T: Expression> HashMapTerm<T> {
@@ -98,7 +98,7 @@ impl<T: Expression> Hash for HashMapTerm<T> {
     }
 }
 impl<T: Expression> HashMapTerm<T> {
-    pub fn new(keys: T::ExpressionList<T>, values: T::ExpressionList<T>) -> Self {
+    pub fn new(keys: T::ExpressionList, values: T::ExpressionList) -> Self {
         let lookup = build_hashmap_lookup_table(keys.iter().map(|item| item.as_deref()));
         Self {
             lookup,
@@ -351,7 +351,7 @@ impl<T: Expression> SerializeJson for HashMapTerm<T> {
 impl<T: Expression> serde::Serialize for HashMapTerm<T>
 where
     T: serde::Serialize,
-    T::ExpressionList<T>: serde::Serialize,
+    T::ExpressionList: serde::Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -363,7 +363,7 @@ where
 impl<'de, T: Expression> serde::Deserialize<'de> for HashMapTerm<T>
 where
     T: serde::Deserialize<'de>,
-    T::ExpressionList<T>: serde::Deserialize<'de>,
+    T::ExpressionList: serde::Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -374,8 +374,8 @@ where
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedHashMapTerm<T: Expression> {
-    keys: T::ExpressionList<T>,
-    values: T::ExpressionList<T>,
+    keys: T::ExpressionList,
+    values: T::ExpressionList,
 }
 impl<'a, T: Expression> Into<SerializedHashMapTerm<T>> for &'a HashMapTerm<T> {
     fn into(self) -> SerializedHashMapTerm<T> {

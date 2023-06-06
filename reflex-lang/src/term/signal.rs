@@ -15,7 +15,7 @@ use reflex::core::{
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SignalTerm<T: Expression> {
-    signals: T::SignalList<T>,
+    signals: T::SignalList,
 }
 
 impl<T: Expression> std::hash::Hash for SignalTerm<T> {
@@ -25,14 +25,14 @@ impl<T: Expression> std::hash::Hash for SignalTerm<T> {
 }
 
 impl<T: Expression> SignalTerm<T> {
-    pub fn new(signals: T::SignalList<T>) -> Self {
+    pub fn new(signals: T::SignalList) -> Self {
         Self { signals }
     }
 }
 impl<T: Expression> SignalTermType<T> for SignalTerm<T> {
-    fn signals<'a>(&'a self) -> T::SignalListRef<'a, T>
+    fn signals<'a>(&'a self) -> T::SignalListRef<'a>
     where
-        T::SignalList<T>: 'a,
+        T::SignalList: 'a,
         T: 'a,
         Self: 'a,
     {

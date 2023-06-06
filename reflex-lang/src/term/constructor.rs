@@ -16,7 +16,7 @@ use reflex::core::{
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct ConstructorTerm<T: Expression> {
-    prototype: T::StructPrototype<T>,
+    prototype: T::StructPrototype,
 }
 
 impl<T: Expression> std::hash::Hash for ConstructorTerm<T> {
@@ -26,14 +26,14 @@ impl<T: Expression> std::hash::Hash for ConstructorTerm<T> {
 }
 
 impl<T: Expression> ConstructorTerm<T> {
-    pub fn new(prototype: T::StructPrototype<T>) -> Self {
+    pub fn new(prototype: T::StructPrototype) -> Self {
         Self { prototype }
     }
 }
 impl<T: Expression> ConstructorTermType<T> for ConstructorTerm<T> {
-    fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a, T>
+    fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a>
     where
-        T::StructPrototype<T>: 'a,
+        T::StructPrototype: 'a,
         T: 'a,
     {
         (&self.prototype).into()

@@ -177,7 +177,7 @@ impl<T: Expression> Into<ExpressionList<T>> for SerializedExpressionList<T> {
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct SignalList<T: Expression> {
     id: HashId,
-    signals: BTreeSet<T::Signal<T>>,
+    signals: BTreeSet<T::Signal>,
 }
 
 impl<T: Expression> Hash for SignalList<T> {
@@ -187,9 +187,9 @@ impl<T: Expression> Hash for SignalList<T> {
 }
 impl<T: Expression> SignalList<T>
 where
-    T::Signal<T>: Ord,
+    T::Signal: Ord,
 {
-    pub fn new(signals: impl IntoIterator<Item = T::Signal<T>>) -> Self {
+    pub fn new(signals: impl IntoIterator<Item = T::Signal>) -> Self {
         let signals = signals.into_iter().collect::<BTreeSet<_>>();
         Self {
             id: hash_iter(signals.iter().map(|signal| signal.id())),
@@ -198,9 +198,9 @@ where
     }
 }
 impl<T: Expression> ConditionListType<T> for SignalList<T> {
-    type Iterator<'a> = IntoRefTypeIterator<T::Signal<T>, T::SignalRef<'a, T>, std::collections::btree_set::Iter<'a, T::Signal<T>>>
+    type Iterator<'a> = IntoRefTypeIterator<T::Signal, T::SignalRef<'a>, std::collections::btree_set::Iter<'a, T::Signal>>
         where
-            T::Signal<T>: 'a,
+            T::Signal: 'a,
             T: 'a,
             Self: 'a;
     fn id(&self) -> u64 {
@@ -211,7 +211,7 @@ impl<T: Expression> ConditionListType<T> for SignalList<T> {
     }
     fn iter<'a>(&'a self) -> Self::Iterator<'a>
     where
-        T::Signal<T>: 'a,
+        T::Signal: 'a,
         T: 'a,
     {
         IntoRefTypeIterator::new(self.signals.iter())
@@ -233,9 +233,9 @@ impl<T: Expression> std::fmt::Display for SignalList<T> {
 impl<T: Expression> serde::Serialize for SignalList<T>
 where
     T: serde::Serialize,
-    T::Signal<T>: Ord,
-    T::Signal<T>: Serialize,
-    for<'de> T::Signal<T>: Deserialize<'de>,
+    T::Signal: Ord,
+    T::Signal: Serialize,
+    for<'de> T::Signal: Deserialize<'de>,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -247,9 +247,9 @@ where
 impl<'de, T: Expression> serde::Deserialize<'de> for SignalList<T>
 where
     T: serde::Deserialize<'de>,
-    T::Signal<T>: Ord,
-    T::Signal<T>: Serialize,
-    for<'a> T::Signal<T>: Deserialize<'a>,
+    T::Signal: Ord,
+    T::Signal: Serialize,
+    for<'a> T::Signal: Deserialize<'a>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -259,16 +259,16 @@ where
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct SerializedSignalList<T: Expression>(Vec<T::Signal<T>>)
+struct SerializedSignalList<T: Expression>(Vec<T::Signal>)
 where
-    T::Signal<T>: Ord,
-    T::Signal<T>: Serialize,
-    for<'a> T::Signal<T>: Deserialize<'a>;
+    T::Signal: Ord,
+    T::Signal: Serialize,
+    for<'a> T::Signal: Deserialize<'a>;
 impl<'a, T: Expression> Into<SerializedSignalList<T>> for &'a SignalList<T>
 where
-    T::Signal<T>: Ord,
-    T::Signal<T>: Serialize,
-    for<'de> T::Signal<T>: Deserialize<'de>,
+    T::Signal: Ord,
+    T::Signal: Serialize,
+    for<'de> T::Signal: Deserialize<'de>,
 {
     fn into(self) -> SerializedSignalList<T> {
         SerializedSignalList(self.signals.iter().cloned().collect())
@@ -276,9 +276,9 @@ where
 }
 impl<T: Expression> Into<SignalList<T>> for SerializedSignalList<T>
 where
-    T::Signal<T>: Ord,
-    T::Signal<T>: Serialize,
-    for<'de> T::Signal<T>: Deserialize<'de>,
+    T::Signal: Ord,
+    T::Signal: Serialize,
+    for<'de> T::Signal: Deserialize<'de>,
 {
     fn into(self) -> SignalList<T> {
         let SerializedSignalList(signals) = self;
@@ -356,7 +356,7 @@ impl<T: Expression> std::fmt::Display for Signal<T> {
 impl<T: Expression> serde::Serialize for Signal<T>
 where
     T: serde::Serialize,
-    T::ExpressionList<T>: serde::Serialize,
+    T::ExpressionList: serde::Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -368,7 +368,7 @@ where
 impl<'de, T: Expression> serde::Deserialize<'de> for Signal<T>
 where
     T: serde::Deserialize<'de>,
-    T::ExpressionList<T>: serde::Deserialize<'de>,
+    T::ExpressionList: serde::Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -440,10 +440,10 @@ pub type StructFieldOffset = usize;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct StructPrototype<T: Expression> {
-    keys: T::ExpressionList<T>,
+    keys: T::ExpressionList,
 }
 impl<T: Expression> StructPrototype<T> {
-    pub fn new(keys: T::ExpressionList<T>) -> Self {
+    pub fn new(keys: T::ExpressionList) -> Self {
         Self { keys }
     }
     pub fn field(&self, key: &T) -> Option<StructFieldOffset> {
@@ -461,9 +461,9 @@ impl<T: Expression> StructPrototype<T> {
     }
 }
 impl<T: Expression> StructPrototypeType<T> for StructPrototype<T> {
-    fn keys<'a>(&'a self) -> T::ExpressionListRef<'a, T>
+    fn keys<'a>(&'a self) -> T::ExpressionListRef<'a>
     where
-        T::ExpressionList<T>: 'a,
+        T::ExpressionList: 'a,
         T: 'a,
     {
         (&self.keys).into()

@@ -150,7 +150,7 @@ fn compile_graph_root<T: Expression + Rewritable<T> + Reducible<T> + Applicable<
     Ok((program, InstructionPointer::default()))
 }
 
-pub fn format_signal_result<T: Expression<SignalTerm<T> = V>, V: SignalTermType<T>>(
+pub fn format_signal_result<T: Expression<SignalTerm = V>, V: SignalTermType<T>>(
     result: &V,
 ) -> String {
     result
@@ -163,7 +163,7 @@ pub fn format_signal_result<T: Expression<SignalTerm<T> = V>, V: SignalTermType<
         .join("\n")
 }
 
-fn format_signal<T: Expression>(signal: &T::Signal<T>) -> String {
+fn format_signal<T: Expression>(signal: &T::Signal) -> String {
     match signal.signal_type() {
         SignalType::Error => {
             format!("Error: {}", signal.payload().as_deref())

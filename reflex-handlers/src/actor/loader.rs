@@ -77,7 +77,7 @@ impl LoaderKeyHash {
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 struct LoaderBatchHash(HashId);
 impl LoaderBatchHash {
-    fn new<T: Expression<ExpressionList<T> = TList>, TList: ExpressionListType<T>>(
+    fn new<T: Expression<ExpressionList = TList>, TList: ExpressionListType<T>>(
         keys: &TList,
     ) -> Self {
         Self(keys.id())
@@ -131,14 +131,14 @@ struct LoaderState<T: Expression> {
     /// Maps keylists to the corresponding loader batch
     active_batches: HashMap<LoaderBatchHash, LoaderBatch<T>>,
     /// Maps the individual entity load effect IDs to the keylist of the subscribed batch
-    entity_effect_mappings: HashMap<StateToken, T::ExpressionList<T>>,
+    entity_effect_mappings: HashMap<StateToken, T::ExpressionList>,
     /// Maps the combined loader batch evaluate effect ID to the keylist of the subscribed batch
-    batch_effect_mappings: HashMap<StateToken, T::ExpressionList<T>>,
+    batch_effect_mappings: HashMap<StateToken, T::ExpressionList>,
 }
 
 struct LoaderBatch<T: Expression> {
     /// Evaluate effect used to load the batch
-    effect: T::Signal<T>,
+    effect: T::Signal,
     /// List of entries for all the individual entities contained within this batch
     subscriptions: Vec<LoaderEntitySubscription<T>>,
     /// Maintain a list of which keys are actively subscribed - when this becomes empty the batch is unsubscribed
@@ -148,7 +148,7 @@ struct LoaderBatch<T: Expression> {
 
 struct LoaderEntitySubscription<T: Expression> {
     key: T,
-    effect: T::Signal<T>,
+    effect: T::Signal,
 }
 
 impl<T: Expression> Default for LoaderHandlerState<T> {
@@ -180,7 +180,7 @@ impl<T: Expression> LoaderHandlerState<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
         metric_names: LoaderHandlerMetricNames,
-    ) -> impl IntoIterator<Item = T::Signal<T>> {
+    ) -> impl IntoIterator<Item = T::Signal> {
         let loader_state = match self.loaders.entry(LoaderFactoryHash::new(&loader)) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => entry.insert(LoaderState::new(name.clone())),
@@ -259,7 +259,7 @@ impl<T: Expression> LoaderHandlerState<T> {
             IntoIter = impl Iterator<Item = LoaderEntitySubscription<T>> + 'a,
         >,
         metric_names: LoaderHandlerMetricNames,
-    ) -> impl IntoIterator<Item = T::Signal<T>> {
+    ) -> impl IntoIterator<Item = T::Signal> {
         let (num_previous_keys, unsubscribed_effects) =
             match self.loaders.get_mut(&LoaderFactoryHash::new(&loader)) {
                 None => (None, None),
@@ -311,10 +311,10 @@ impl<T: Expression> LoaderHandlerState<T> {
 fn create_load_batch_effect<T: Expression>(
     label: String,
     loader: T,
-    keys: T::ExpressionList<T>,
+    keys: T::ExpressionList,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> T::Signal<T> {
+) -> T::Signal {
     create_evaluate_effect(
         label,
         factory.create_application_term(
@@ -760,7 +760,7 @@ where
 }
 
 fn has_error_message_effects<T: Expression>(
-    term: &T::SignalTerm<T>,
+    term: &T::SignalTerm,
     factory: &impl ExpressionFactory<T>,
 ) -> bool {
     term.signals()
@@ -772,7 +772,7 @@ fn has_error_message_effects<T: Expression>(
 
 fn prefix_error_message_effects<T: Expression>(
     prefix: &str,
-    term: &T::SignalTerm<T>,
+    term: &T::SignalTerm,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T {
@@ -802,7 +802,7 @@ fn prefix_error_message_effects<T: Expression>(
 }
 
 fn as_error_message_effect<'a, T: Expression + 'a>(
-    effect: &'a T::Signal<T>,
+    effect: &'a T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<&'a T::String> {
     if !matches!(effect.signal_type(), SignalType::Error) {
@@ -822,7 +822,7 @@ struct LoaderEffectArgs<T: Expression> {
 }
 
 fn parse_loader_effect_args<T: Expression + Applicable<T>>(
-    effect: &T::Signal<T>,
+    effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<LoaderEffectArgs<T>, String> {
     let payload = effect.payload().as_deref();
