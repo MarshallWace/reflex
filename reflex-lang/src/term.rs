@@ -799,7 +799,9 @@ mod test {
 
         let input =
             factory.create_signal_term(allocator.create_signal_list([allocator.create_signal(
-                SignalType::Custom(String::from("foo")),
+                SignalType::Custom(
+                    factory.create_string_term(allocator.create_static_string("foo")),
+                ),
                 factory.create_int_term(3),
                 factory.create_symbol_term(123),
             )]));

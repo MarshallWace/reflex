@@ -98,7 +98,7 @@ impl<
     {
         prototype.as_deref().clone()
     }
-    fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal {
+    fn create_signal(&self, signal_type: SignalType<T>, payload: T, token: T) -> T::Signal {
         Signal::new(signal_type, payload, token)
     }
     fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal

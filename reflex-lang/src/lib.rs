@@ -289,18 +289,32 @@ where
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Signal<T: Expression> {
     id: HashId,
-    signal_type: SignalType,
+    signal_type: SignalType<T>,
     payload: T,
     token: T,
 }
 impl<T: Expression> Signal<T> {
-    pub fn new(signal_type: SignalType, payload: T, token: T) -> Self {
+    pub fn new(signal_type: SignalType<T>, payload: T, token: T) -> Self {
         let hash = {
             // FIXME: Ensure consistent hashes across alternative Condition implementations
             let mut hasher = FnvHasher::default();
-            signal_type.hash(&mut hasher);
-            payload.id().hash(&mut hasher);
-            token.id().hash(&mut hasher);
+            let enum_discriminant = match &signal_type {
+                SignalType::Custom(_) => 0u8,
+                SignalType::Pending => 1u8,
+                SignalType::Error => 2u8,
+            };
+            hasher.write_u8(enum_discriminant);
+            match &signal_type {
+                SignalType::Custom(condition_type) => {
+                    Hash::hash(&condition_type.id(), &mut hasher);
+                    Hash::hash(&payload.id(), &mut hasher);
+                    Hash::hash(&token.id(), &mut hasher);
+                }
+                SignalType::Pending => {}
+                SignalType::Error => {
+                    Hash::hash(&payload.id(), &mut hasher);
+                }
+            }
             hasher.finish()
         };
         Self {
@@ -310,7 +324,7 @@ impl<T: Expression> Signal<T> {
             token,
         }
     }
-    pub fn is_type(&self, signal_type: &SignalType) -> bool {
+    pub fn is_type(&self, signal_type: &SignalType<T>) -> bool {
         &self.signal_type == signal_type
     }
 }
@@ -333,7 +347,7 @@ impl<T: Expression> ConditionType<T> for Signal<T> {
     fn id(&self) -> StateToken {
         self.id
     }
-    fn signal_type(&self) -> SignalType {
+    fn signal_type(&self) -> SignalType<T> {
         // FIXME: Prevent unnecessary cloning of signal type
         self.signal_type.clone()
     }
@@ -381,7 +395,7 @@ where
 #[derive(Debug, Serialize, Deserialize)]
 struct SerializedSignal<T: Expression> {
     signal_type: SerializedSignalType,
-    custom_type: Option<String>,
+    custom_type: Option<T>,
     payload: T,
     token: T,
 }
@@ -416,7 +430,9 @@ enum SerializedSignalType {
     Pending,
     Custom,
 }
-fn serialize_signal_type(signal_type: &SignalType) -> (SerializedSignalType, Option<String>) {
+fn serialize_signal_type<T: Expression>(
+    signal_type: &SignalType<T>,
+) -> (SerializedSignalType, Option<T>) {
     match signal_type {
         SignalType::Pending => (SerializedSignalType::Pending, None),
         SignalType::Error => (SerializedSignalType::Error, None),
@@ -425,14 +441,17 @@ fn serialize_signal_type(signal_type: &SignalType) -> (SerializedSignalType, Opt
         }
     }
 }
-fn deserialize_signal_type(
+fn deserialize_signal_type<T: Expression>(
     signal_type: SerializedSignalType,
-    custom_type: Option<String>,
-) -> SignalType {
+    custom_type: Option<T>,
+) -> SignalType<T> {
     match signal_type {
         SerializedSignalType::Pending => SignalType::Pending,
         SerializedSignalType::Error => SignalType::Error,
-        SerializedSignalType::Custom => SignalType::Custom(custom_type.unwrap_or(String::new())),
+        SerializedSignalType::Custom => match custom_type {
+            Some(custom_type) => SignalType::Custom(custom_type),
+            None => SignalType::Error,
+        },
     }
 }
 

@@ -143,12 +143,14 @@ pub async fn main() -> Result<()> {
     >;
 
     let args = Args::parse();
+    let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
+    let allocator: TAllocator = DefaultAllocator::default();
     let mut logger = match args.log {
         Some(LogFormat::Json) => {
             EitherLogger::Left(JsonActionLogger::<_, TAction, TTask>::stderr())
         }
         _ => EitherLogger::Right(FormattedActionLogger::<_, _, TAction, TTask>::stderr(
-            PrefixedLogFormatter::new("server", DefaultActionFormatter::default()),
+            PrefixedLogFormatter::new("server", DefaultActionFormatter::new(factory.clone())),
         )),
     };
     if let Some(port) = args.metrics_port {
@@ -181,8 +183,6 @@ pub async fn main() -> Result<()> {
         let stdout_logger = args.log.map(|_| logger.clone());
         ChainLogger::new(stdout_logger, prometheus_logger)
     };
-    let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
-    let allocator: TAllocator = DefaultAllocator::default();
     let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
         None => None,
         Some(config) => {

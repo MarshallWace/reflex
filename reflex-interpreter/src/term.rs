@@ -12,7 +12,7 @@ use reflex::{
         EffectTermType, Expression, ExpressionFactory, ExpressionListType, FloatTermType,
         HashmapTermType, HashsetTermType, HeapAllocator, InstructionPointer, IntTermType,
         LambdaTermType, LetTermType, ListTermType, PartialApplicationTermType, RecordTermType,
-        RecursiveTermType, Reducible, RefType, Rewritable, SignalTermType, StackOffset,
+        RecursiveTermType, Reducible, RefType, Rewritable, SignalTermType, SignalType, StackOffset,
         StringTermType, StringValue, StructPrototypeType, Substitutions, SymbolTermType, Uid,
         VariableTermType,
     },
@@ -751,20 +751,50 @@ fn compile_signal<T: Expression + Compile<T>>(
     allocator: &impl HeapAllocator<T>,
     compiler: &mut Compiler,
 ) -> Result<Program, String> {
-    let payload = signal.payload();
-    let token = signal.token();
-    let payload = payload.as_deref();
-    let token = token.as_deref();
-    let compiled_token =
-        compiler.compile_term(token, Eagerness::Lazy, stack_offset, factory, allocator)?;
-    let compiled_payload =
-        compiler.compile_term(payload, Eagerness::Lazy, stack_offset, factory, allocator)?;
-    let mut result = compiled_token;
-    result.extend(compiled_payload);
-    result.push(Instruction::ConstructCondition {
-        signal_type: signal.signal_type().clone(),
-    });
-    Ok(result)
+    match signal.signal_type() {
+        SignalType::Custom(signal_type) => {
+            let payload = signal.payload();
+            let token = signal.token();
+            let payload = payload.as_deref();
+            let token = token.as_deref();
+            let compiled_token =
+                compiler.compile_term(token, Eagerness::Lazy, stack_offset, factory, allocator)?;
+            let compiled_payload = compiler.compile_term(
+                payload,
+                Eagerness::Lazy,
+                stack_offset,
+                factory,
+                allocator,
+            )?;
+            let compiled_signal_type = compiler.compile_term(
+                &signal_type,
+                Eagerness::Lazy,
+                stack_offset,
+                factory,
+                allocator,
+            )?;
+            let mut result = compiled_token;
+            result.extend(compiled_payload);
+            result.extend(compiled_signal_type);
+            result.push(Instruction::ConstructCustomCondition);
+            Ok(result)
+        }
+        SignalType::Pending => Ok(Program::new(once(Instruction::ConstructPendingCondition))),
+        SignalType::Error => {
+            let payload = signal.payload();
+            let payload = payload.as_deref();
+            let compiled_payload = compiler.compile_term(
+                payload,
+                Eagerness::Lazy,
+                stack_offset,
+                factory,
+                allocator,
+            )?;
+            let mut result = compiled_payload;
+            result.push(Instruction::ConstructErrorCondition);
+            Ok(result)
+        }
+    }
 }
 
 fn match_compiled_function_result(

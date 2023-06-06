@@ -16,7 +16,9 @@ pub fn create_env_args_accessor<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T::Signal {
     allocator.create_signal(
-        SignalType::Custom(String::from(EVENT_TYPE_ENV)),
+        SignalType::Custom(
+            factory.create_string_term(allocator.create_static_string(EVENT_TYPE_ENV)),
+        ),
         factory.create_list_term(allocator.create_empty_list()),
         factory.create_nil_term(),
     )

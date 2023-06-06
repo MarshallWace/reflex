@@ -3,7 +3,6 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::{
-    borrow::Cow,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     iter::once,
     marker::PhantomData,
@@ -22,7 +21,7 @@ use reflex::{
         ListTermType, RefType, SignalTermType, SignalType, StateCache, StateToken, StringTermType,
         StringValue,
     },
-    hash::{IntMap, IntSet},
+    hash::{HashId, IntMap, IntSet},
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, MessageOffset, NoopDisposeCallback,
@@ -46,6 +45,23 @@ use crate::{
 };
 
 pub const EFFECT_TYPE_EVALUATE: &'static str = "reflex::core::evaluate";
+
+pub fn is_evaluate_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_EVALUATE)
+        .unwrap_or(false)
+}
+
+pub fn create_evaluate_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_EVALUATE))
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct EvaluateHandlerMetricNames {
@@ -147,7 +163,7 @@ pub fn create_evaluate_effect<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T::Signal {
     allocator.create_signal(
-        SignalType::Custom(String::from(EFFECT_TYPE_EVALUATE)),
+        SignalType::Custom(create_evaluate_effect_type(factory, allocator)),
         factory.create_list_term(allocator.create_list([
             factory.create_string_term(allocator.create_string(label)),
             query,
@@ -231,6 +247,23 @@ fn serialize_state_token(state_token: StateToken) -> IntValue {
 
 fn deserialize_state_token(value: IntValue) -> StateToken {
     unsafe { std::mem::transmute::<i64, u64>(value) }
+}
+
+fn get_effect_type_metric_labels<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> [(&'static str, SharedString); 1] {
+    let effect_type = if let Some(effect_type) = factory.match_string_term(effect_type) {
+        let effect_type = effect_type.as_deref();
+        let effect_type = effect_type.value();
+        let effect_type = effect_type.as_deref();
+        let effect_type = effect_type.as_str();
+        let effect_type = effect_type.deref();
+        String::from(effect_type)
+    } else {
+        format!("{}", effect_type)
+    };
+    [("effect_type", SharedString::owned(effect_type))]
 }
 
 #[derive(Named, Clone)]
@@ -748,18 +781,18 @@ where
             effect_type,
             effects,
         } = action;
-        let metric_labels = [("effect_type", String::from(effect_type))];
+        let metric_labels = get_effect_type_metric_labels(effect_type, &self.factory);
         counter!(
             self.metric_names.total_effect_count,
             effects.len() as u64,
-            &metric_labels
+            &metric_labels,
         );
         increment_gauge!(
             self.metric_names.active_effect_count,
             effects.len() as f64,
-            &metric_labels
+            &metric_labels,
         );
-        if effect_type != EFFECT_TYPE_EVALUATE {
+        if !is_evaluate_effect_type(effect_type, &self.factory) {
             return None;
         }
         let queries = effects.iter().filter_map(|effect| {
@@ -826,7 +859,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_EVALUATE.into(),
+                        effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                         updates: existing_results,
                     }],
                 }
@@ -854,13 +887,18 @@ where
             effect_type,
             effects,
         } = action;
-        decrement_gauge!(self.metric_names.active_effect_count, effects.len() as f64, "effect_type" => String::from(effect_type));
-        if effect_type != EFFECT_TYPE_EVALUATE {
+        let metric_labels = get_effect_type_metric_labels(effect_type, &self.factory);
+        decrement_gauge!(
+            self.metric_names.active_effect_count,
+            effects.len() as f64,
+            &metric_labels
+        );
+        if !is_evaluate_effect_type(effect_type, &self.factory) {
             return None;
         }
         let unsubscribed_workers = effects
             .iter()
-            .flat_map(|effect| {
+            .filter_map(|effect| {
                 let state_token = effect.id();
                 let mut existing_entry = match state.workers.entry(state_token) {
                     Entry::Occupied(entry) => Some(entry),
@@ -1024,7 +1062,10 @@ where
                     self.main_pid,
                     EffectEmitAction {
                         effect_types: vec![EffectUpdateBatch {
-                            effect_type: EFFECT_TYPE_EVALUATE.into(),
+                            effect_type: create_evaluate_effect_type(
+                                &self.factory,
+                                &self.allocator,
+                            ),
                             updates: vec![(
                                 *cache_key,
                                 create_evaluate_effect_result(
@@ -1097,23 +1138,16 @@ where
             effect_types
                 .iter()
                 .flat_map(|batch| {
-                    let metric_names = match &batch.effect_type {
-                        Cow::Borrowed(effect_type) => {
-                            [("effect_type", SharedString::borrowed(effect_type))]
-                        }
-                        Cow::Owned(effect_type) => [(
-                            "effect_type",
-                            SharedString::owned(String::from(effect_type)),
-                        )],
-                    };
+                    let effect_type = &batch.effect_type;
+                    let metric_labels = get_effect_type_metric_labels(effect_type, &self.factory);
                     increment_counter!(
                         self.metric_names.total_effect_emissions_count,
-                        &metric_names,
+                        &metric_labels,
                     );
                     counter!(
                         self.metric_names.total_effect_updates_count,
                         batch.updates.len() as u64,
-                        &metric_names,
+                        &metric_labels,
                     );
                     batch.updates.iter()
                 })
@@ -1306,26 +1340,27 @@ fn update_worker_state<T: Expression>(
 
 fn group_effects_by_type<T: Expression<Signal = V>, V: ConditionType<T>>(
     effects: impl IntoIterator<Item = V>,
-) -> impl Iterator<Item = (String, Vec<V>)> {
+) -> impl Iterator<Item = (T, Vec<V>)> {
     effects
         .into_iter()
         .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
-        .fold(HashMap::<String, Vec<V>>::new(), |mut result, signal| {
-            let existing_signals = get_custom_signal_type(&signal)
-                .and_then(|signal_type| result.get_mut(&signal_type));
-            if let Some(existing_signals) = existing_signals {
-                existing_signals.push(signal);
-            } else if let Some(signal_type) = get_custom_signal_type(&signal) {
-                result.insert(String::from(signal_type), vec![signal]);
-            }
-            result
-        })
-        .into_iter()
+        .fold(
+            IntMap::<HashId, (T, Vec<V>)>::default(),
+            |mut result, signal| {
+                let mut existing_entry = get_custom_signal_type(&signal)
+                    .and_then(|signal_type| result.get_mut(&signal_type.id()));
+                if let Some((_signal_type, existing_signals)) = existing_entry.as_mut() {
+                    existing_signals.push(signal);
+                } else if let Some(signal_type) = get_custom_signal_type(&signal) {
+                    result.insert(signal_type.id(), (signal_type, vec![signal]));
+                }
+                result
+            },
+        )
+        .into_values()
 }
 
-fn get_custom_signal_type<T: Expression<Signal = V>, V: ConditionType<T>>(
-    effect: &V,
-) -> Option<String> {
+fn get_custom_signal_type<T: Expression<Signal = V>, V: ConditionType<T>>(effect: &V) -> Option<T> {
     match effect.signal_type() {
         SignalType::Custom(signal_type) => Some(signal_type),
         _ => None,

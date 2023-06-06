@@ -11,7 +11,9 @@ pub trait LogFormatter {
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>>;
+    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a;
 }
 
 pub trait LogWriter {
@@ -24,7 +26,10 @@ impl<T: LogFormatter> LogFormatter for Option<T> {
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         match self {
             Some(inner) => inner.format(message),
             None => None,
@@ -56,7 +61,10 @@ impl<T> LogFormatter for NoopLogFormatter<T> {
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, _message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, _message: &'a Self::Message) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         None
     }
 }
@@ -88,7 +96,10 @@ impl<T> LogFormatter for ConstantLogFormatter<T> {
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, _message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, _message: &'a Self::Message) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         Some(ConstantLogWriter {
             message: self.message,
         })
@@ -142,7 +153,10 @@ where
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, message: &'a T) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, message: &'a T) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         match (self.left.format(message), self.right.format(message)) {
             (Some(left), Some(right)) => Some(ChainedLogWriter { left, right }),
             _ => None,
@@ -212,7 +226,10 @@ impl<T: LogFormatter> LogFormatter for PrefixedLogFormatter<T> {
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         self.formatter
             .format(message)
             .map(|inner| PrefixedLogWriter {
@@ -266,7 +283,10 @@ where
     where
         Self: 'a,
         Self::Message: 'a;
-    fn format<'a>(&self, message: &'a V) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, message: &'a V) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         self.inner
             .format(message)
             .map(|inner| TimestampedLogWriter {

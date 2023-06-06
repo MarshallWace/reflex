@@ -192,7 +192,7 @@ fn serialize_effect<T: Expression>(effect: &impl ConditionType<T>) -> JsonValue 
     json!({
         "id": JsonValue::Number(effect.id().into()),
         "type": match effect.signal_type() {
-            SignalType::Custom(signal_type) => JsonValue::String(String::from(signal_type)),
+            SignalType::Custom(signal_type) => reflex_json::sanitize(&signal_type).unwrap_or_else(|_| json!({})),
             SignalType::Error => JsonValue::String(String::from("error")),
             SignalType::Pending => JsonValue::String(String::from("pending")),
         },

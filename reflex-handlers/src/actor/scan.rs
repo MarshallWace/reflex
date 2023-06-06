@@ -6,12 +6,13 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
+    ops::Deref,
 };
 
 use metrics::{describe_counter, describe_gauge, gauge, increment_gauge, SharedString, Unit};
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, HeapAllocator, ListTermType,
-    RefType, SignalType, StateToken,
+    RefType, SignalType, StateToken, StringTermType, StringValue,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -23,13 +24,31 @@ use reflex_runtime::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
     },
     actor::evaluate_handler::{
-        create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
+        create_evaluate_effect, create_evaluate_effect_type, is_evaluate_effect_type,
+        parse_evaluate_effect_result,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
 };
 
 pub const EFFECT_TYPE_SCAN: &'static str = "reflex::scan";
+
+pub fn is_scan_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_SCAN)
+        .unwrap_or(false)
+}
+
+pub fn create_scan_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_SCAN))
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScanHandlerMetricNames {
@@ -164,7 +183,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_SCAN
+            is_scan_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -184,7 +203,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_SCAN
+            is_scan_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -246,7 +265,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_SCAN {
+        if !is_scan_effect_type(effect_type, &self.factory) {
             return None;
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
@@ -283,7 +302,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_SCAN.into(),
+                        effect_type: create_scan_effect_type(&self.factory, &self.allocator),
                         updates: initial_values,
                     }],
                 }
@@ -311,7 +330,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_SCAN {
+        if !is_scan_effect_type(effect_type, &self.factory) {
             return None;
         }
         let unsubscribe_actions = effects.iter().filter_map(|effect| {
@@ -342,7 +361,7 @@ where
         }
         let updates = updates
             .iter()
-            .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+            .filter(|batch| is_evaluate_effect_type(&batch.effect_type, &self.factory))
             .flat_map(|batch| batch.updates.iter())
             .filter_map(|(updated_state_token, update)| {
                 let scan_effect_id = state.effect_mappings.get(updated_state_token)?;
@@ -407,7 +426,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_SCAN.into(),
+                        effect_type: create_scan_effect_type(&self.factory, &self.allocator),
                         updates,
                     }],
                 }
@@ -434,7 +453,9 @@ where
                     iteratee,
                 } = args;
                 let source_value_effect = self.allocator.create_signal(
-                    SignalType::Custom(String::from(EVENT_TYPE_SCAN_SOURCE)),
+                    SignalType::Custom(self.factory.create_string_term(
+                        self.allocator.create_static_string(EVENT_TYPE_SCAN_SOURCE),
+                    )),
                     self.factory.create_list_term(self.allocator.create_triple(
                         target.clone(),
                         seed.clone(),
@@ -443,7 +464,9 @@ where
                     self.factory.create_nil_term(),
                 );
                 let state_value_effect = self.allocator.create_signal(
-                    SignalType::Custom(String::from(EVENT_TYPE_SCAN_STATE)),
+                    SignalType::Custom(self.factory.create_string_term(
+                        self.allocator.create_static_string(EVENT_TYPE_SCAN_STATE),
+                    )),
                     self.factory.create_list_term(self.allocator.create_triple(
                         target.clone(),
                         seed.clone(),
@@ -521,7 +544,7 @@ where
             .insert(result_effect.id(), effect.id());
         Some(
             EffectSubscribeAction {
-                effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                 effects: vec![source_effect, result_effect],
             }
             .into(),
@@ -565,7 +588,7 @@ where
             state.effect_mappings.remove(&result_effect.id());
             Some(
                 EffectUnsubscribeAction {
-                    effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                    effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                     effects: vec![source_effect, result_effect],
                 }
                 .into(),

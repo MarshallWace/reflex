@@ -54,6 +54,23 @@ use crate::{
 
 pub const EFFECT_TYPE_GRPC: &'static str = "reflex::grpc";
 
+pub fn is_grpc_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_GRPC)
+        .unwrap_or(false)
+}
+
+pub fn create_grpc_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_GRPC))
+}
+
 // https://developer.mozilla.org/en-US/docs/Web/API/DOMException#error_names
 pub const ERROR_TYPE_NETWORK_ERROR: &'static str = "NetworkError";
 pub const ERROR_TYPE_SYNTAX_ERROR: &'static str = "SyntaxError";
@@ -473,6 +490,8 @@ impl GrpcHandlerState {
         error: T,
         reconnect_timeout: &impl ReconnectTimeout,
         main_pid: ProcessId,
+        factory: &impl ExpressionFactory<T>,
+        allocator: &impl HeapAllocator<T>,
         context: &mut impl HandlerContext,
     ) -> Option<impl Iterator<Item = SchedulerCommand<TAction, TTask>>>
     where
@@ -494,7 +513,7 @@ impl GrpcHandlerState {
                 main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRPC.into(),
+                        effect_type: create_grpc_effect_type(factory, allocator),
                         updates: connection_state
                             .effects
                             .values()
@@ -640,7 +659,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_GRPC
+            is_grpc_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -660,7 +679,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_GRPC
+            is_grpc_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -810,7 +829,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_GRPC {
+        if !is_grpc_effect_type(effect_type, &self.factory) {
             return None;
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
@@ -925,7 +944,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRPC.into(),
+                        effect_type: create_grpc_effect_type(&self.factory, &self.allocator),
                         updates: initial_values,
                     }],
                 }
@@ -958,7 +977,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_GRPC {
+        if !is_grpc_effect_type(effect_type, &self.factory) {
             return None;
         }
         let unsubscribe_actions = effects.iter().flat_map(|effect| {
@@ -991,7 +1010,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRPC.into(),
+                        effect_type: create_grpc_effect_type(&self.factory, &self.allocator),
                         updates: connection_state
                             .effects
                             .values()
@@ -1046,6 +1065,8 @@ where
                 error,
                 &self.reconnect_timeout,
                 self.main_pid,
+                &self.factory,
+                &self.allocator,
                 context,
             )
             .map(SchedulerTransition::new)
@@ -1093,7 +1114,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_GRPC.into(),
+                    effect_type: create_grpc_effect_type(&self.factory, &self.allocator),
                     updates: vec![(effect_id, value)],
                 }],
             }
@@ -1135,7 +1156,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_GRPC.into(),
+                    effect_type: create_grpc_effect_type(&self.factory, &self.allocator),
                     updates: vec![(effect_id, value)],
                 }],
             }
@@ -1185,6 +1206,8 @@ where
                 error,
                 &self.reconnect_timeout,
                 self.main_pid,
+                &self.factory,
+                &self.allocator,
                 context,
             )
             .map(SchedulerTransition::new)

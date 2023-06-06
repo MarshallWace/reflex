@@ -74,7 +74,8 @@ use reflex_runtime::{
             BytecodeInterpreterMetricNames,
         },
         evaluate_handler::{
-            create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
+            create_evaluate_effect, create_evaluate_effect_type, is_evaluate_effect_type,
+            parse_evaluate_effect_result,
         },
         RuntimeAction, RuntimeActor, RuntimeMetricNames,
     },
@@ -305,7 +306,7 @@ pub async fn main() -> Result<()> {
                         let EffectEmitAction { effect_types } = action.match_type()?;
                         let update = effect_types
                             .iter()
-                            .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                            .filter(|batch| is_evaluate_effect_type(&batch.effect_type, &factory))
                             .flat_map(|batch| batch.updates.iter())
                             .filter(|(key, _)| *key == evaluate_effect.id())
                             .filter_map({
@@ -349,7 +350,7 @@ fn create_query<
         allocator,
     );
     let subscribe_action = EffectSubscribeAction {
-        effect_type: String::from(EFFECT_TYPE_EVALUATE),
+        effect_type: create_evaluate_effect_type(factory, allocator),
         effects: vec![evaluate_effect.clone()],
     };
     (evaluate_effect, subscribe_action)

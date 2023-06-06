@@ -28,8 +28,11 @@ use reflex_runtime::{
 };
 
 pub use crate::stdlib::{
-    EFFECT_TYPE_VARIABLE_DECREMENT, EFFECT_TYPE_VARIABLE_GET, EFFECT_TYPE_VARIABLE_INCREMENT,
-    EFFECT_TYPE_VARIABLE_SET,
+    create_variable_decrement_effect_type, create_variable_get_effect_type,
+    create_variable_increment_effect_type, create_variable_set_effect_type,
+    is_variable_decrement_effect_type, is_variable_get_effect_type,
+    is_variable_increment_effect_type, is_variable_set_effect_type, EFFECT_TYPE_VARIABLE_DECREMENT,
+    EFFECT_TYPE_VARIABLE_GET, EFFECT_TYPE_VARIABLE_INCREMENT, EFFECT_TYPE_VARIABLE_SET,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
@@ -116,13 +119,12 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            match action.effect_type.as_str() {
-                EFFECT_TYPE_VARIABLE_GET
-                | EFFECT_TYPE_VARIABLE_SET
-                | EFFECT_TYPE_VARIABLE_INCREMENT
-                | EFFECT_TYPE_VARIABLE_DECREMENT => true,
-                _ => false,
-            }
+            let EffectSubscribeAction { effect_type, .. } = action;
+            false
+                || is_variable_get_effect_type(effect_type, &self.factory)
+                || is_variable_set_effect_type(effect_type, &self.factory)
+                || is_variable_increment_effect_type(effect_type, &self.factory)
+                || is_variable_decrement_effect_type(effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -142,13 +144,12 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            match action.effect_type.as_str() {
-                EFFECT_TYPE_VARIABLE_GET
-                | EFFECT_TYPE_VARIABLE_SET
-                | EFFECT_TYPE_VARIABLE_INCREMENT
-                | EFFECT_TYPE_VARIABLE_DECREMENT => true,
-                _ => false,
-            }
+            let EffectUnsubscribeAction { effect_type, .. } = action;
+            false
+                || is_variable_get_effect_type(effect_type, &self.factory)
+                || is_variable_set_effect_type(effect_type, &self.factory)
+                || is_variable_increment_effect_type(effect_type, &self.factory)
+                || is_variable_decrement_effect_type(effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -186,20 +187,17 @@ where
         TAction: Action + From<EffectEmitAction<T>>,
         TTask: TaskFactory<TAction, TTask>,
     {
-        match action.effect_type.as_str() {
-            EFFECT_TYPE_VARIABLE_GET => {
-                self.handle_get_effect_subscribe(state, action, metadata, context)
-            }
-            EFFECT_TYPE_VARIABLE_SET => {
-                self.handle_set_effect_subscribe(state, action, metadata, context)
-            }
-            EFFECT_TYPE_VARIABLE_INCREMENT => {
-                self.handle_increment_effect_subscribe(state, action, metadata, context)
-            }
-            EFFECT_TYPE_VARIABLE_DECREMENT => {
-                self.handle_decrement_effect_subscribe(state, action, metadata, context)
-            }
-            _ => None,
+        let EffectSubscribeAction { effect_type, .. } = action;
+        if is_variable_get_effect_type(effect_type, &self.factory) {
+            self.handle_get_effect_subscribe(state, action, metadata, context)
+        } else if is_variable_set_effect_type(effect_type, &self.factory) {
+            self.handle_set_effect_subscribe(state, action, metadata, context)
+        } else if is_variable_increment_effect_type(effect_type, &self.factory) {
+            self.handle_increment_effect_subscribe(state, action, metadata, context)
+        } else if is_variable_decrement_effect_type(effect_type, &self.factory) {
+            self.handle_decrement_effect_subscribe(state, action, metadata, context)
+        } else {
+            None
         }
     }
     fn handle_get_effect_subscribe<TAction, TTask>(
@@ -251,7 +249,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_VARIABLE_GET.into(),
+                    effect_type: create_variable_get_effect_type(&self.factory, &self.allocator),
                     updates: updates.collect(),
                 }],
             }
@@ -324,7 +322,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_VARIABLE_SET.into(),
+                    effect_type: create_variable_set_effect_type(&self.factory, &self.allocator),
                     updates,
                 }],
             }
@@ -399,7 +397,10 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_VARIABLE_INCREMENT.into(),
+                    effect_type: create_variable_increment_effect_type(
+                        &self.factory,
+                        &self.allocator,
+                    ),
                     updates,
                 }],
             }
@@ -474,7 +475,10 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_VARIABLE_DECREMENT.into(),
+                    effect_type: create_variable_decrement_effect_type(
+                        &self.factory,
+                        &self.allocator,
+                    ),
                     updates,
                 }],
             }
@@ -496,11 +500,10 @@ where
             effect_type,
             effects: _,
         } = action;
-        match effect_type.as_str() {
-            EFFECT_TYPE_VARIABLE_GET => {
-                self.handle_get_effect_unsubscribe(state, action, metadata, context)
-            }
-            _ => None,
+        if is_variable_get_effect_type(effect_type, &self.factory) {
+            self.handle_get_effect_unsubscribe(state, action, metadata, context)
+        } else {
+            None
         }
     }
     fn handle_get_effect_unsubscribe<TAction, TTask>(

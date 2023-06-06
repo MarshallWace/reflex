@@ -6,12 +6,13 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     iter::once,
     marker::PhantomData,
+    ops::Deref,
     time::{Duration, SystemTime},
 };
 
 use reflex::core::{
     ConditionType, Expression, ExpressionFactory, ExpressionListType, FloatTermType, HeapAllocator,
-    IntTermType, ListTermType, RefType, SignalType, StateToken, Uuid,
+    IntTermType, ListTermType, RefType, SignalType, StateToken, StringTermType, StringValue, Uuid,
 };
 use reflex_dispatcher::{
     Action, ActorEvents, HandlerContext, MessageData, NoopDisposeCallback, ProcessId,
@@ -32,6 +33,23 @@ use crate::{
 };
 
 pub const EFFECT_TYPE_TIMESTAMP: &'static str = "reflex::timestamp";
+
+pub fn is_timestamp_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_TIMESTAMP)
+        .unwrap_or(false)
+}
+
+pub fn create_timestamp_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_TIMESTAMP))
+}
 
 #[derive(Named, Clone)]
 pub struct TimestampHandler<T, TFactory, TAllocator>
@@ -124,7 +142,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_TIMESTAMP
+            is_timestamp_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -144,7 +162,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_TIMESTAMP
+            is_timestamp_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -206,7 +224,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_TIMESTAMP {
+        if !is_timestamp_effect_type(effect_type, &self.factory) {
             return None;
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) =
@@ -246,7 +264,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_TIMESTAMP.into(),
+                        effect_type: create_timestamp_effect_type(&self.factory, &self.allocator),
                         updates: initial_values,
                     }],
                 }
@@ -274,7 +292,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_TIMESTAMP {
+        if !is_timestamp_effect_type(effect_type, &self.factory) {
             return None;
         }
         let active_pids = effects
@@ -307,7 +325,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_TIMESTAMP.into(),
+                    effect_type: create_timestamp_effect_type(&self.factory, &self.allocator),
                     updates: vec![(effect_id, result.clone())],
                 }],
             }

@@ -16,7 +16,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         Applicable, Eagerness, Expression, ExpressionFactory, HeapAllocator, InstructionPointer,
-        IntValue, Internable, Reducible, Rewritable, SignalType, StackOffset, SymbolId, Uuid,
+        IntValue, Internable, Reducible, Rewritable, StackOffset, SymbolId, Uuid,
     },
     hash::{hash_object, FnvHashMap, FnvHasher, HashId, IntMap},
 };
@@ -189,9 +189,9 @@ pub enum Instruction {
     ConstructHashSet {
         size: usize,
     },
-    ConstructCondition {
-        signal_type: SignalType,
-    },
+    ConstructErrorCondition,
+    ConstructPendingCondition,
+    ConstructCustomCondition,
     CombineSignals {
         count: usize,
     },

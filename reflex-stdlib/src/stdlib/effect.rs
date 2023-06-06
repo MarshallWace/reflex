@@ -1,11 +1,9 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::{iter::once, ops::Deref};
-
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, RefType, SignalType, StringTermType, StringValue, Uid, Uuid,
+    FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
 };
 
 pub struct Effect;
@@ -42,23 +40,10 @@ impl<T: Expression> Applicable<T> for Effect {
         let signal_type = args.next().unwrap();
         let payload = args.next().unwrap();
         let token = args.next().unwrap();
-        if let Some(signal_type) = factory.match_string_term(&signal_type) {
-            Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(
-                    signal_type.value().as_deref().as_str().deref(),
-                )),
-                payload,
-                token,
-            )))
-        } else {
-            Err(format!(
-                "Expected (String, ...), received ({})",
-                once(signal_type)
-                    .chain(args)
-                    .map(|arg| format!("{}", arg))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ))
-        }
+        Ok(factory.create_effect_term(allocator.create_signal(
+            SignalType::Custom(signal_type),
+            payload,
+            token,
+        )))
     }
 }

@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
             EitherLogger::Left(JsonActionLogger::<_, TAction, TTask>::stderr())
         }
         None => EitherLogger::Right(FormattedActionLogger::<_, _, TAction, TTask>::stderr(
-            PrefixedLogFormatter::new("server", DefaultActionFormatter::default()),
+            PrefixedLogFormatter::new("server", DefaultActionFormatter::new(factory.clone())),
         )),
     });
     let module_loader = Some(default_js_loaders(

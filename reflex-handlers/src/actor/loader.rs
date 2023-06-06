@@ -28,13 +28,31 @@ use reflex_runtime::{
         EffectEmitAction, EffectSubscribeAction, EffectUnsubscribeAction, EffectUpdateBatch,
     },
     actor::evaluate_handler::{
-        create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
+        create_evaluate_effect, create_evaluate_effect_type, is_evaluate_effect_type,
+        parse_evaluate_effect_result,
     },
     AsyncExpression, AsyncExpressionFactory, AsyncHeapAllocator, QueryEvaluationMode,
     QueryInvalidationStrategy,
 };
 
 pub const EFFECT_TYPE_LOADER: &'static str = "reflex::loader";
+
+pub fn is_loader_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_LOADER)
+        .unwrap_or(false)
+}
+
+pub fn create_loader_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_LOADER))
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct LoaderHandlerMetricNames {
@@ -357,7 +375,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_LOADER
+            is_loader_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -377,7 +395,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_LOADER
+            is_loader_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -400,7 +418,7 @@ dispatcher!({
             action
                 .effect_types
                 .iter()
-                .any(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                .any(|batch| is_evaluate_effect_type(&batch.effect_type, &self.factory))
         }
         fn schedule(
             &self,
@@ -413,7 +431,7 @@ dispatcher!({
             let has_relevant_updates = action
                 .effect_types
                 .iter()
-                .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                .filter(|batch| is_evaluate_effect_type(&batch.effect_type, &self.factory))
                 .flat_map(|batch| batch.updates.iter())
                 .any(|(state_token, _update)| {
                     state.loader_effect_mappings.contains_key(state_token)
@@ -456,7 +474,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_LOADER {
+        if !is_loader_effect_type(effect_type, &self.factory) {
             return None;
         }
         let (initial_values, effects_by_loader) = effects.iter().fold(
@@ -517,7 +535,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_LOADER.into(),
+                        effect_type: create_loader_effect_type(&self.factory, &self.allocator),
                         updates: initial_values,
                     }],
                 }
@@ -530,7 +548,7 @@ where
             Some(SchedulerCommand::Send(
                 self.main_pid,
                 EffectSubscribeAction {
-                    effect_type: EFFECT_TYPE_EVALUATE.into(),
+                    effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                     effects: load_effects,
                 }
                 .into(),
@@ -555,7 +573,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_LOADER {
+        if !is_loader_effect_type(effect_type, &self.factory) {
             return None;
         }
         let effects_by_loader = effects.iter().fold(
@@ -592,7 +610,7 @@ where
             Some(SchedulerCommand::Send(
                 self.main_pid,
                 EffectUnsubscribeAction {
-                    effect_type: EFFECT_TYPE_EVALUATE.into(),
+                    effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                     effects: unsubscribe_effects,
                 }
                 .into(),
@@ -617,7 +635,7 @@ where
         }
         let updates = effect_types
             .iter()
-            .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+            .filter(|batch| is_evaluate_effect_type(&batch.effect_type, &self.factory))
             .flat_map(|batch| batch.updates.iter())
             .filter_map(|(state_token, update)| {
                 let loader = state.loader_effect_mappings.get(state_token)?;
@@ -741,7 +759,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_LOADER.into(),
+                        effect_type: create_loader_effect_type(&self.factory, &self.allocator),
                         updates,
                     }],
                 }

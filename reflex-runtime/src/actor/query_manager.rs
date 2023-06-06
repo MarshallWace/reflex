@@ -23,10 +23,12 @@ use crate::{
         query::{QueryEmitAction, QuerySubscribeAction, QueryUnsubscribeAction},
     },
     actor::evaluate_handler::{
-        create_evaluate_effect, parse_evaluate_effect_result, EFFECT_TYPE_EVALUATE,
+        create_evaluate_effect, create_evaluate_effect_type, parse_evaluate_effect_result,
     },
     QueryEvaluationMode, QueryInvalidationStrategy,
 };
+
+use super::evaluate_handler::is_evaluate_effect_type;
 
 #[derive(Clone, Copy, Debug)]
 pub struct QueryManagerMetricNames {
@@ -249,7 +251,7 @@ where
                 let subscribe_action = SchedulerCommand::Send(
                     self.main_pid,
                     EffectSubscribeAction {
-                        effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                        effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                         effects: vec![query_effect],
                     }
                     .into(),
@@ -289,7 +291,7 @@ where
         let unsubscribe_action = SchedulerCommand::Send(
             self.main_pid,
             EffectUnsubscribeAction {
-                effect_type: String::from(EFFECT_TYPE_EVALUATE),
+                effect_type: create_evaluate_effect_type(&self.factory, &self.allocator),
                 effects: vec![subscription.effect],
             }
             .into(),
@@ -313,7 +315,7 @@ where
         let updated_queries = {
             updates
                 .iter()
-                .filter(|batch| &batch.effect_type == EFFECT_TYPE_EVALUATE)
+                .filter(|batch| is_evaluate_effect_type(&batch.effect_type, &self.factory))
                 .flat_map(|batch| batch.updates.iter())
                 .filter_map(|(effect_id, update)| {
                     let subscription = state.subscriptions.get_mut(effect_id)?;

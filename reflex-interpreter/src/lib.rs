@@ -20,7 +20,7 @@ pub use interpreter::stack::{CallStack, VariableStack};
 use reflex::core::{
     ApplicationTermType, CompiledFunctionTermType, ConditionListType, ConditionType,
     EffectTermType, InstructionPointer, PartialApplicationTermType, RecursiveTermType, RefType,
-    SignalTermType, StateCache, VariableTermType,
+    SignalTermType, SignalType, StateCache, VariableTermType,
 };
 use reflex::hash::{hash_iter, FnvHasher, IntSet};
 use reflex::{
@@ -952,19 +952,50 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
             }
         }
-        Instruction::ConstructCondition { signal_type } => {
-            trace!(instruction = "Instruction::ConstructCondition");
-            match stack
-                .pop()
-                .and_then(|payload| stack.pop().map(|token| (payload, token)))
-            {
-                None => Err(format!(
-                    "Unable to construct {} condition: insufficient arguments on stack",
-                    signal_type,
+        Instruction::ConstructPendingCondition => {
+            trace!(instruction = "Instruction::ConstructPendingCondition");
+            let signal = factory.create_signal_term(allocator.create_signal_list(once(
+                allocator.create_signal(
+                    SignalType::Pending,
+                    factory.create_nil_term(),
+                    factory.create_nil_term(),
+                ),
+            )));
+            stack.push(signal);
+            Ok((ExecutionResult::Advance, DependencyList::empty()))
+        }
+        Instruction::ConstructCustomCondition => {
+            trace!(instruction = "Instruction::ConstructCustomCondition");
+            match stack.pop().and_then(|signal_type| {
+                stack
+                    .pop()
+                    .and_then(|payload| stack.pop().map(|token| (signal_type, payload, token)))
+            }) {
+                None => Err(String::from(
+                    "Unable to construct custom condition: insufficient arguments on stack",
                 )),
-                Some((payload, token)) => {
+                Some((signal_type, payload, token)) => {
                     let signal = factory.create_signal_term(allocator.create_signal_list(once(
-                        allocator.create_signal(signal_type.clone(), payload, token),
+                        allocator.create_signal(SignalType::Custom(signal_type), payload, token),
+                    )));
+                    stack.push(signal);
+                    Ok((ExecutionResult::Advance, DependencyList::empty()))
+                }
+            }
+        }
+        Instruction::ConstructErrorCondition => {
+            trace!(instruction = "Instruction::ConstructErrorCondition");
+            match stack.pop() {
+                None => Err(String::from(
+                    "Unable to construct error condition: insufficient arguments on stack",
+                )),
+                Some(payload) => {
+                    let signal = factory.create_signal_term(allocator.create_signal_list(once(
+                        allocator.create_signal(
+                            SignalType::Error,
+                            payload,
+                            factory.create_nil_term(),
+                        ),
                     )));
                     stack.push(signal);
                     Ok((ExecutionResult::Advance, DependencyList::empty()))
@@ -1706,7 +1737,7 @@ mod tests {
         let mut cache = DefaultInterpreterCache::default();
         let target = parse("(lambda (foo bar) (+ foo bar))", &factory, &allocator).unwrap();
         let condition = allocator.create_signal(
-            SignalType::Custom(String::from("foo")),
+            SignalType::Custom(factory.create_string_term(allocator.create_static_string("foo"))),
             factory.create_string_term(allocator.create_string("bar")),
             factory.create_symbol_term(123),
         );

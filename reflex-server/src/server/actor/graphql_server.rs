@@ -30,15 +30,13 @@ use reflex_dispatcher::{
     SchedulerCommand, SchedulerMode, SchedulerTransition, TaskFactory, TaskInbox,
 };
 use reflex_graphql::{graphql_variables_are_equal, GraphQlOperation, GraphQlParserBuiltin};
-use reflex_handlers::actor::{
-    loader::EFFECT_TYPE_LOADER,
-    scan::EFFECT_TYPE_SCAN,
-    timeout::EFFECT_TYPE_TIMEOUT,
-    timestamp::EFFECT_TYPE_TIMESTAMP,
-    variable::{
-        EFFECT_TYPE_VARIABLE_DECREMENT, EFFECT_TYPE_VARIABLE_GET, EFFECT_TYPE_VARIABLE_INCREMENT,
-        EFFECT_TYPE_VARIABLE_SET,
-    },
+use reflex_handlers::actor::loader::is_loader_effect_type;
+use reflex_handlers::actor::scan::is_scan_effect_type;
+use reflex_handlers::actor::timeout::is_timeout_effect_type;
+use reflex_handlers::actor::timestamp::is_timestamp_effect_type;
+use reflex_handlers::stdlib::{
+    is_variable_decrement_effect_type, is_variable_get_effect_type,
+    is_variable_increment_effect_type, is_variable_set_effect_type,
 };
 use reflex_json::JsonValue;
 use reflex_macros::{dispatcher, Named};
@@ -49,7 +47,7 @@ use reflex_runtime::action::evaluate::{
 use reflex_runtime::action::query::{
     QueryEmitAction, QuerySubscribeAction, QueryUnsubscribeAction,
 };
-use reflex_runtime::actor::evaluate_handler::EFFECT_TYPE_EVALUATE;
+use reflex_runtime::actor::evaluate_handler::is_evaluate_effect_type;
 use reflex_runtime::actor::query_manager::create_query_evaluate_effect;
 
 use crate::server::action::graphql_server::{
@@ -289,20 +287,37 @@ fn get_span_attributes(
     .chain(attributes)
 }
 
-fn get_effect_span_label(signal_type: &SignalType) -> String {
-    format!("effect:{}", signal_type)
+fn get_signal_type_label<T: Expression>(
+    prefix: &str,
+    signal_type: &SignalType<T>,
+    factory: &impl ExpressionFactory<T>,
+) -> String {
+    match signal_type {
+        SignalType::Custom(effect_type) => {
+            if let Some(effect_type) = factory.match_string_term(effect_type) {
+                format!(
+                    "{prefix}:{}",
+                    effect_type.value().as_deref().as_str().deref()
+                )
+            } else {
+                format!("{prefix}:{effect_type}")
+            }
+        }
+        SignalType::Pending | SignalType::Error => format!("{prefix}:{signal_type}",),
+    }
 }
 
-fn get_effect_span_attributes(
-    signal_type: &SignalType,
+fn get_effect_span_attributes<T: Expression>(
+    signal_type: &SignalType<T>,
     attributes: impl IntoIterator<Item = KeyValue>,
+    factory: &impl ExpressionFactory<T>,
 ) -> impl IntoIterator<Item = KeyValue> {
     once(KeyValue::new(
         Key::from("type"),
         match signal_type {
             SignalType::Error => Value::from("error"),
             SignalType::Pending => Value::from("pending"),
-            SignalType::Custom(signal_type) => Value::from(signal_type.clone()),
+            SignalType::Custom(_) => Value::from(get_signal_type_label("", signal_type, factory)),
         },
     ))
     .chain(attributes)
@@ -384,7 +399,7 @@ struct GraphQlOperationState<T: Expression, TSpan: Span> {
 struct GraphQlOperationEffectState<T: Expression> {
     #[allow(dead_code)]
     condition: T::Signal,
-    signal_type: SignalType,
+    signal_type: SignalType<T>,
     status: EffectStatus<T>,
     active_span: Option<StateToken>,
 }
@@ -461,11 +476,12 @@ impl<TSpan: Span + Send + Sync + 'static> GraphQlTransactionTrace<TSpan> {
         span.end();
         Some((trace_id, span_id))
     }
-    fn start_effect_span(
+    fn start_effect_span<T: Expression>(
         &mut self,
         state_token: StateToken,
-        effect_type: &SignalType,
+        effect_type: &SignalType<T>,
         attributes: impl IntoIterator<Item = KeyValue>,
+        factory: &impl ExpressionFactory<T>,
         tracer: &impl Tracer<Span = TSpan>,
     ) -> (TraceId, SpanId) {
         match self.effect_spans.entry(state_token) {
@@ -478,8 +494,8 @@ impl<TSpan: Span + Send + Sync + 'static> GraphQlTransactionTrace<TSpan> {
             }
             Entry::Vacant(entry) => {
                 let span = create_span(
-                    get_effect_span_label(effect_type),
-                    get_effect_span_attributes(effect_type, attributes),
+                    get_signal_type_label("effect:", effect_type, factory),
+                    get_effect_span_attributes(effect_type, attributes, factory),
                     tracer,
                     &self.root,
                 );
@@ -1519,7 +1535,7 @@ where
                             )
                         }),
                 )
-                .chain(effect_status_metrics.as_span_labels()),
+                .chain(effect_status_metrics.as_span_labels(&self.factory)),
                 &self.tracer,
             );
         }
@@ -1577,7 +1593,7 @@ where
             for trace in active_traces {
                 trace.enter_span(
                     updated_phase,
-                    effect_status_metrics.as_span_labels(),
+                    effect_status_metrics.as_span_labels(&self.factory),
                     &self.tracer,
                 );
             }
@@ -1609,7 +1625,7 @@ where
         let EffectEmitAction { effect_types, .. } = action;
         let filtered_effect_types = effect_types
             .iter()
-            .filter(|batch| !is_internal_effect_type(&*batch.effect_type))
+            .filter(|batch| !is_internal_effect_type(&batch.effect_type, &self.factory))
             .collect::<Vec<_>>();
         if filtered_effect_types.is_empty() {
             return None;
@@ -1699,19 +1715,20 @@ where
     }
 }
 
-fn is_internal_effect_type(effect_type: &str) -> bool {
-    match effect_type {
-        EFFECT_TYPE_EVALUATE
-        | EFFECT_TYPE_LOADER
-        | EFFECT_TYPE_SCAN
-        | EFFECT_TYPE_TIMEOUT
-        | EFFECT_TYPE_TIMESTAMP
-        | EFFECT_TYPE_VARIABLE_DECREMENT
-        | EFFECT_TYPE_VARIABLE_GET
-        | EFFECT_TYPE_VARIABLE_INCREMENT
-        | EFFECT_TYPE_VARIABLE_SET => true,
-        _ => false,
-    }
+fn is_internal_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    false
+        || is_evaluate_effect_type(effect_type, factory)
+        || is_loader_effect_type(effect_type, factory)
+        || is_scan_effect_type(effect_type, factory)
+        || is_timeout_effect_type(effect_type, factory)
+        || is_timestamp_effect_type(effect_type, factory)
+        || is_variable_decrement_effect_type(effect_type, factory)
+        || is_variable_get_effect_type(effect_type, factory)
+        || is_variable_increment_effect_type(effect_type, factory)
+        || is_variable_set_effect_type(effect_type, factory)
 }
 
 fn parse_effect_value_status<T: Expression>(
@@ -1741,7 +1758,7 @@ fn parse_effect_value_status<T: Expression>(
 
 fn get_operation_effect_status_metrics<'a, T: Expression>(
     effect_state: &'a IntMap<StateToken, GraphQlOperationEffectState<T>>,
-) -> EffectStatusMetrics<'a> {
+) -> EffectStatusMetrics<'a, T> {
     let queued =
         count_item_occurrences(
             effect_state
@@ -1796,19 +1813,17 @@ fn get_operation_effect_status_metrics<'a, T: Expression>(
     }
 }
 
-fn format_effect_status_type_metric_labels<'a>(
+fn format_effect_status_type_metric_labels<'a, T: Expression + 'a>(
     prefix: &'static str,
-    counts: impl Iterator<Item = (&'a &'a SignalType, &'a usize)> + 'a,
+    counts: impl Iterator<Item = (&'a &'a SignalType<T>, &'a usize)> + 'a,
+    factory: &'a impl ExpressionFactory<T>,
 ) -> impl Iterator<Item = KeyValue> + 'a {
     counts
         .into_iter()
-        .filter_map(|(effect_type, count)| match effect_type {
-            SignalType::Custom(effect_type) => Some((effect_type, count)),
-            _ => None,
-        })
+        .filter(|(effect_type, _)| matches!(effect_type, SignalType::Custom(_)))
         .map(move |(effect_type, count)| {
             KeyValue::new(
-                Key::from(format!("{}{}", prefix, effect_type)),
+                Key::from(get_signal_type_label(prefix, effect_type, factory)),
                 Value::from(*count as i64),
             )
         })
@@ -1817,7 +1832,7 @@ fn format_effect_status_type_metric_labels<'a>(
 fn count_state_updates<T: Expression>(
     state_tokens: impl IntoIterator<Item = StateToken>,
     active_effects: &IntMap<StateToken, GraphQlOperationEffectState<T>>,
-) -> HashMap<&SignalType, usize> {
+) -> HashMap<&SignalType<T>, usize> {
     let effect_updates = state_tokens
         .into_iter()
         .filter_map(|state_token| active_effects.get(&state_token));
@@ -1847,7 +1862,7 @@ fn update_operation_effect_mappings<
         let effect_type = effect.signal_type();
         let is_internal_effect = match &effect_type {
             SignalType::Error | SignalType::Pending => true,
-            SignalType::Custom(effect_type) => is_internal_effect_type(effect_type),
+            SignalType::Custom(effect_type) => is_internal_effect_type(effect_type, factory),
         };
         if !is_internal_effect {
             let active_traces = subscriptions
@@ -1860,11 +1875,7 @@ fn update_operation_effect_mappings<
                     [
                         KeyValue::new(
                             Key::from("effect_type"),
-                            match &effect_type {
-                                SignalType::Error => Value::from("error"),
-                                SignalType::Pending => Value::from("pending"),
-                                SignalType::Custom(signal_type) => Value::from(signal_type.clone()),
-                            },
+                            get_signal_type_label("", &effect_type, factory),
                         ),
                         KeyValue::new(
                             Key::from("payload"),
@@ -1875,6 +1886,7 @@ fn update_operation_effect_mappings<
                             Value::from(format!("{}", effect.token().as_deref())),
                         ),
                     ],
+                    factory,
                     tracer,
                 );
             }
@@ -2009,35 +2021,43 @@ fn count_item_occurrences<T: std::hash::Hash + Eq + PartialEq>(
 }
 
 #[derive(Debug)]
-pub(super) struct EffectStatusMetrics<'a> {
-    queued: HashMap<&'a SignalType, usize>,
-    pending: HashMap<&'a SignalType, usize>,
-    error: HashMap<&'a SignalType, usize>,
-    emitted: HashMap<&'a SignalType, usize>,
-    resolved: HashMap<&'a SignalType, usize>,
+pub(super) struct EffectStatusMetrics<'a, T: Expression> {
+    queued: HashMap<&'a SignalType<T>, usize>,
+    pending: HashMap<&'a SignalType<T>, usize>,
+    error: HashMap<&'a SignalType<T>, usize>,
+    emitted: HashMap<&'a SignalType<T>, usize>,
+    resolved: HashMap<&'a SignalType<T>, usize>,
 }
-impl<'a> EffectStatusMetrics<'a> {
-    fn as_span_labels(&self) -> impl Iterator<Item = KeyValue> + '_ {
+impl<'a, T: Expression> EffectStatusMetrics<'a, T> {
+    fn as_span_labels(
+        &'a self,
+        factory: &'a impl ExpressionFactory<T>,
+    ) -> impl Iterator<Item = KeyValue> + 'a {
         empty()
             .chain(format_effect_status_type_metric_labels(
                 "effects.queued.",
                 self.queued.iter(),
+                factory,
             ))
             .chain(format_effect_status_type_metric_labels(
                 "effects.pending.",
                 self.pending.iter(),
+                factory,
             ))
             .chain(format_effect_status_type_metric_labels(
                 "effects.error.",
                 self.error.iter(),
+                factory,
             ))
             .chain(format_effect_status_type_metric_labels(
                 "effects.emitted.",
                 self.emitted.iter(),
+                factory,
             ))
             .chain(format_effect_status_type_metric_labels(
                 "effects.resolved.",
                 self.resolved.iter(),
+                factory,
             ))
     }
 }
@@ -3026,7 +3046,9 @@ mod tests {
         EvaluationResult::new(
             factory.create_signal_term(allocator.create_signal_list(vec![
                 allocator.create_signal(
-                    SignalType::Custom(String::from("foo")),
+                    SignalType::Custom(
+                        factory.create_string_term(allocator.create_static_string("foo")),
+                    ),
                     factory.create_string_term(allocator.create_static_string("bar")),
                     factory.create_symbol_term(123),
                 ),

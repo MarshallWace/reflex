@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::marker::PhantomData;
 
-use reflex::core::Expression;
+use reflex::core::{Expression, ExpressionFactory};
 use reflex_dispatcher::{Action, Matcher};
 use reflex_grpc::action::{
     GrpcHandlerConnectErrorAction, GrpcHandlerConnectSuccessAction, GrpcHandlerTransportErrorAction,
@@ -16,7 +16,7 @@ use reflex_runtime::{
     action::effect::{
         EffectEmitAction, EffectSubscribeAction, EffectThrottleEmitAction, EffectUnsubscribeAction,
     },
-    actor::evaluate_handler::EFFECT_TYPE_EVALUATE,
+    actor::evaluate_handler::is_evaluate_effect_type,
 };
 
 use crate::{
@@ -55,47 +55,48 @@ blanket_trait!(
 );
 
 #[derive(Debug)]
-pub struct DefaultActionFormatter<T, TAction>
+pub struct DefaultActionFormatter<T, TFactory, TAction>
 where
     T: Expression,
+    TFactory: ExpressionFactory<T>,
     TAction: Action,
 {
+    factory: TFactory,
     _expression: PhantomData<T>,
     _action: PhantomData<TAction>,
 }
-impl<T, TAction> Clone for DefaultActionFormatter<T, TAction>
+impl<T, TFactory, TAction> DefaultActionFormatter<T, TFactory, TAction>
 where
     T: Expression,
+    TFactory: ExpressionFactory<T>,
+    TAction: Action,
+{
+    pub fn new(factory: TFactory) -> Self {
+        Self {
+            factory,
+            _expression: PhantomData,
+            _action: PhantomData,
+        }
+    }
+}
+impl<T, TFactory, TAction> Clone for DefaultActionFormatter<T, TFactory, TAction>
+where
+    T: Expression,
+    TFactory: ExpressionFactory<T> + Clone,
     TAction: Action,
 {
     fn clone(&self) -> Self {
         Self {
+            factory: self.factory.clone(),
             _expression: PhantomData,
             _action: PhantomData,
         }
     }
 }
-impl<T, TAction> Copy for DefaultActionFormatter<T, TAction>
+impl<T, TFactory, TAction> LogFormatter for DefaultActionFormatter<T, TFactory, TAction>
 where
     T: Expression,
-    TAction: Action,
-{
-}
-impl<T, TAction> Default for DefaultActionFormatter<T, TAction>
-where
-    T: Expression,
-    TAction: Action,
-{
-    fn default() -> Self {
-        Self {
-            _expression: PhantomData,
-            _action: PhantomData,
-        }
-    }
-}
-impl<T, TAction> LogFormatter for DefaultActionFormatter<T, TAction>
-where
-    T: Expression,
+    TFactory: ExpressionFactory<T>,
     TAction: Action + DefaultActionFormatterAction<T>,
 {
     type Message = TAction;
@@ -103,7 +104,10 @@ where
     where
         Self: 'a,
         TAction: 'a;
-    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>> {
+    fn format<'a>(&self, message: &'a Self::Message) -> Option<Self::Writer<'a>>
+    where
+        Self: 'a,
+    {
         if let Option::<&InitPrometheusMetricsAction>::Some(action) = message.match_type() {
             Some(DefaultActionFormatWriter::InitPrometheusMetrics(action))
         } else if let Option::<&InitOpenTelemetryAction>::Some(action) = message.match_type() {
@@ -142,13 +146,13 @@ where
         {
             Some(DefaultActionFormatWriter::GrpcHandlerTransportError(action))
         } else if let Option::<&EffectSubscribeAction<T>>::Some(action) = message.match_type() {
-            if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+            if !is_evaluate_effect_type(&action.effect_type, &self.factory) {
                 Some(DefaultActionFormatWriter::EffectSubscribe(action))
             } else {
                 None
             }
         } else if let Option::<&EffectUnsubscribeAction<T>>::Some(action) = message.match_type() {
-            if action.effect_type.as_str() != EFFECT_TYPE_EVALUATE {
+            if !is_evaluate_effect_type(&action.effect_type, &self.factory) {
                 Some(DefaultActionFormatWriter::EffectUnsubscribe(action))
             } else {
                 None

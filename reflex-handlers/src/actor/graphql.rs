@@ -61,6 +61,23 @@ use crate::{
 
 pub const EFFECT_TYPE_GRAPHQL: &'static str = "reflex::graphql";
 
+pub fn is_graphql_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_GRAPHQL)
+        .unwrap_or(false)
+}
+
+pub fn create_graphql_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_GRAPHQL))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct GraphQlHandlerMetricNames {
     pub graphql_effect_connection_count: &'static str,
@@ -521,7 +538,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_GRAPHQL
+            is_graphql_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -541,7 +558,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_GRAPHQL
+            is_graphql_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -692,7 +709,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_GRAPHQL {
+        if !is_graphql_effect_type(effect_type, &self.factory) {
             return None;
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
@@ -792,7 +809,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                         updates: initial_values,
                     }],
                 }
@@ -822,7 +839,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_GRAPHQL {
+        if !is_graphql_effect_type(effect_type, &self.factory) {
             return None;
         }
         let unsubscribe_actions = effects.iter().flat_map(|effect| {
@@ -866,7 +883,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                         updates: vec![(effect_id, result)],
                     }],
                 }
@@ -903,7 +920,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                         updates: vec![(effect_id, result)],
                     }],
                 }
@@ -961,7 +978,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                         updates: connection_state
                             .effects
                             .values()
@@ -1106,7 +1123,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                        effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                         updates: connection_state
                             .effects
                             .values()
@@ -1140,7 +1157,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                    effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                     updates: vec![(*effect_id, value)],
                 }],
             }
@@ -1173,7 +1190,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                    effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                     updates: vec![(*effect_id, value)],
                 }],
             }
@@ -1201,7 +1218,7 @@ where
             self.main_pid,
             EffectEmitAction {
                 effect_types: vec![EffectUpdateBatch {
-                    effect_type: EFFECT_TYPE_GRAPHQL.into(),
+                    effect_type: create_graphql_effect_type(&self.factory, &self.allocator),
                     updates: vec![(*effect_id, value)],
                 }],
             }

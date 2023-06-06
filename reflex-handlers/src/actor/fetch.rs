@@ -41,6 +41,23 @@ use crate::{
 
 pub const EFFECT_TYPE_FETCH: &'static str = "reflex::fetch";
 
+pub fn is_fetch_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_FETCH)
+        .unwrap_or(false)
+}
+
+pub fn create_fetch_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_FETCH))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct FetchHandlerMetricNames {
     pub fetch_effect_total_request_count: &'static str,
@@ -175,7 +192,6 @@ impl FetchHandlerState {
         Some(task_pid)
     }
 }
-
 struct RequestState {
     operation_id: Uuid,
     task_pid: ProcessId,
@@ -217,7 +233,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectSubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_FETCH
+            is_fetch_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -237,7 +253,7 @@ dispatcher!({
         }
 
         fn accept(&self, action: &EffectUnsubscribeAction<T>) -> bool {
-            action.effect_type.as_str() == EFFECT_TYPE_FETCH
+            is_fetch_effect_type(&action.effect_type, &self.factory)
         }
         fn schedule(
             &self,
@@ -320,7 +336,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_FETCH {
+        if !is_fetch_effect_type(effect_type, &self.factory) {
             return None;
         }
         let (initial_values, tasks): (Vec<_>, Vec<_>) = effects
@@ -363,7 +379,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_FETCH.into(),
+                        effect_type: create_fetch_effect_type(&self.factory, &self.allocator),
                         updates: initial_values,
                     }],
                 }
@@ -391,7 +407,7 @@ where
             effect_type,
             effects,
         } = action;
-        if effect_type.as_str() != EFFECT_TYPE_FETCH {
+        if !is_fetch_effect_type(effect_type, &self.factory) {
             return None;
         }
         let active_pids = effects
@@ -437,7 +453,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_FETCH.into(),
+                        effect_type: create_fetch_effect_type(&self.factory, &self.allocator),
                         updates: vec![(effect_id, result)],
                     }],
                 }
@@ -470,7 +486,7 @@ where
                 self.main_pid,
                 EffectEmitAction {
                     effect_types: vec![EffectUpdateBatch {
-                        effect_type: EFFECT_TYPE_FETCH.into(),
+                        effect_type: create_fetch_effect_type(&self.factory, &self.allocator),
                         updates: vec![(effect_id, result)],
                     }],
                 }

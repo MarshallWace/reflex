@@ -1,16 +1,97 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
+use std::ops::Deref;
+
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HeapAllocator, SignalType, Uid, Uuid,
+    FunctionArity, HeapAllocator, RefType, SignalType, StringTermType, StringValue, Uid, Uuid,
 };
 use reflex_stdlib::Stdlib;
 
 pub const EFFECT_TYPE_VARIABLE_GET: &'static str = "reflex::variable::get";
+
+pub fn is_variable_get_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| {
+            effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_VARIABLE_GET
+        })
+        .unwrap_or(false)
+}
+
+pub fn create_variable_get_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_VARIABLE_GET))
+}
+
 pub const EFFECT_TYPE_VARIABLE_SET: &'static str = "reflex::state::set";
+
+pub fn is_variable_set_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| {
+            effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_VARIABLE_SET
+        })
+        .unwrap_or(false)
+}
+
+pub fn create_variable_set_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_VARIABLE_SET))
+}
+
 pub const EFFECT_TYPE_VARIABLE_INCREMENT: &'static str = "reflex::state::increment";
+
+pub fn is_variable_increment_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| {
+            effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_VARIABLE_INCREMENT
+        })
+        .unwrap_or(false)
+}
+
+pub fn create_variable_increment_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_VARIABLE_INCREMENT))
+}
+
 pub const EFFECT_TYPE_VARIABLE_DECREMENT: &'static str = "reflex::state::decrement";
+
+pub fn is_variable_decrement_effect_type<T: Expression>(
+    effect_type: &T,
+    factory: &impl ExpressionFactory<T>,
+) -> bool {
+    factory
+        .match_string_term(effect_type)
+        .map(|effect_type| {
+            effect_type.value().as_deref().as_str().deref() == EFFECT_TYPE_VARIABLE_DECREMENT
+        })
+        .unwrap_or(false)
+}
+
+pub fn create_variable_decrement_effect_type<T: Expression>(
+    factory: &impl ExpressionFactory<T>,
+    allocator: &impl HeapAllocator<T>,
+) -> T {
+    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_VARIABLE_DECREMENT))
+}
 
 pub struct GetVariable;
 impl GetVariable {
@@ -51,7 +132,11 @@ where
         let initial_value = args.next().unwrap();
         if let Some(_) = factory.match_symbol_term(&state_token) {
             Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_GET)),
+                SignalType::Custom(
+                    factory.create_string_term(
+                        allocator.create_static_string(EFFECT_TYPE_VARIABLE_GET),
+                    ),
+                ),
                 factory.create_list_term(allocator.create_pair(state_token, initial_value)),
                 factory.create_nil_term(),
             )))
@@ -106,11 +191,15 @@ where
             factory.match_symbol_term(&state_token),
             factory.match_symbol_term(&update_token),
         ) {
-            (Some(_), Some(_)) => Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_SET)),
-                factory.create_list_term(allocator.create_pair(state_token, value)),
-                update_token,
-            ))),
+            (Some(_), Some(_)) => {
+                Ok(factory.create_effect_term(allocator.create_signal(
+                    SignalType::Custom(factory.create_string_term(
+                        allocator.create_static_string(EFFECT_TYPE_VARIABLE_SET),
+                    )),
+                    factory.create_list_term(allocator.create_pair(state_token, value)),
+                    update_token,
+                )))
+            }
             _ => Err(format!(
                 "Expected (Symbol, <any>, Symbol), received ({}, {}, {})",
                 state_token, value, update_token
@@ -161,7 +250,9 @@ where
             factory.match_symbol_term(&update_token),
         ) {
             (Some(_), Some(_)) => Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_INCREMENT)),
+                SignalType::Custom(factory.create_string_term(
+                    allocator.create_static_string(EFFECT_TYPE_VARIABLE_INCREMENT),
+                )),
                 factory.create_list_term(allocator.create_unit_list(state_token)),
                 update_token,
             ))),
@@ -215,7 +306,9 @@ where
             factory.match_symbol_term(&update_token),
         ) {
             (Some(_), Some(_)) => Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(EFFECT_TYPE_VARIABLE_DECREMENT)),
+                SignalType::Custom(factory.create_string_term(
+                    allocator.create_static_string(EFFECT_TYPE_VARIABLE_DECREMENT),
+                )),
                 factory.create_list_term(allocator.create_unit_list(state_token)),
                 update_token,
             ))),

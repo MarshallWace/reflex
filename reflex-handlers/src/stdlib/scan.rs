@@ -49,7 +49,9 @@ impl<T: Expression> Applicable<T> for Scan {
             Err(format!("Scan iteratee must be a pure expression"))
         } else {
             Ok(factory.create_effect_term(allocator.create_signal(
-                SignalType::Custom(String::from(EFFECT_TYPE_SCAN)),
+                SignalType::Custom(
+                    factory.create_string_term(allocator.create_static_string(EFFECT_TYPE_SCAN)),
+                ),
                 factory.create_list_term(allocator.create_list([target, seed, iteratee])),
                 factory.create_nil_term(),
             )))

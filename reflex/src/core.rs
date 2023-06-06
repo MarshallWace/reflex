@@ -231,7 +231,7 @@ pub trait ConditionType<T: Expression>:
     Clone + PartialEq + Eq + std::fmt::Display + std::fmt::Debug
 {
     fn id(&self) -> StateToken;
-    fn signal_type(&self) -> SignalType;
+    fn signal_type(&self) -> SignalType<T>;
     fn payload<'a>(&'a self) -> T::ExpressionRef<'a>;
     fn token<'a>(&'a self) -> T::ExpressionRef<'a>;
 }
@@ -1177,7 +1177,7 @@ pub trait HeapAllocator<T: Expression> {
     ) -> T::StructPrototype
     where
         Self: 'a;
-    fn create_signal(&self, signal_type: SignalType, payload: T, token: T) -> T::Signal;
+    fn create_signal(&self, signal_type: SignalType<T>, payload: T, token: T) -> T::Signal;
     fn clone_signal<'a>(&self, signal: T::SignalRef<'a>) -> T::Signal
     where
         Self: 'a;
@@ -1196,13 +1196,23 @@ pub enum Eagerness {
 
 pub type SignalId = HashId;
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub enum SignalType {
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
+pub enum SignalType<T: Expression> {
     Error,
     Pending,
-    Custom(String),
+    Custom(T),
 }
-impl std::fmt::Display for SignalType {
+
+impl<T: Expression> Hash for SignalType<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        if let Self::Custom(effect_type) = self {
+            effect_type.id().hash(state);
+        }
+    }
+}
+
+impl<T: Expression> std::fmt::Display for SignalType<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }

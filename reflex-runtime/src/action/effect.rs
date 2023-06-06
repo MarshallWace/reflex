@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-use std::borrow::Cow;
-
 use reflex::core::{ConditionType, Expression, RefType, StateToken};
 use reflex_dispatcher::{Action, Named, SerializableAction, SerializedAction};
 use reflex_json::{JsonMap, JsonValue};
@@ -132,7 +130,7 @@ impl<'a, T: Expression> From<&'a EffectActions<T>> for Option<&'a EffectThrottle
 
 #[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectSubscribeAction<T: Expression> {
-    pub effect_type: String,
+    pub effect_type: T,
     #[serde(bound(
         serialize = "<T as Expression>::Signal: Serialize",
         deserialize = "<T as Expression>::Signal: Deserialize<'de>"
@@ -143,7 +141,7 @@ impl<T: Expression> Action for EffectSubscribeAction<T> {}
 impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
-            ("effect_type", JsonValue::from(self.effect_type.clone())),
+            ("effect_type", sanitize_expression(&self.effect_type)),
             (
                 "effects",
                 JsonValue::from(
@@ -171,7 +169,7 @@ impl<T: Expression> SerializableAction for EffectSubscribeAction<T> {
 
 #[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectUnsubscribeAction<T: Expression> {
-    pub effect_type: String,
+    pub effect_type: T,
     #[serde(bound(
         serialize = "<T as Expression>::Signal: Serialize",
         deserialize = "<T as Expression>::Signal: Deserialize<'de>"
@@ -182,7 +180,7 @@ impl<T: Expression> Action for EffectUnsubscribeAction<T> {}
 impl<T: Expression> SerializableAction for EffectUnsubscribeAction<T> {
     fn to_json(&self) -> SerializedAction {
         SerializedAction::from_iter([
-            ("effect_type", JsonValue::from(self.effect_type.clone())),
+            ("effect_type", sanitize_expression(&self.effect_type)),
             (
                 "effects",
                 JsonValue::from(
@@ -249,7 +247,7 @@ impl SerializableAction for EffectThrottleEmitAction {
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct EffectUpdateBatch<T: Expression> {
-    pub effect_type: Cow<'static, str>,
+    pub effect_type: T,
     pub updates: Vec<(StateToken, T)>,
 }
 
