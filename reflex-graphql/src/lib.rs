@@ -10,6 +10,7 @@ use reflex::core::{
 };
 use reflex_json::{sanitize, JsonMap, JsonValue};
 use reflex_stdlib::Stdlib;
+use reflex_utils::json::json_object;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{
@@ -22,7 +23,6 @@ pub use graphql_parser;
 pub mod ast;
 mod operation;
 pub use operation::{graphql_variables_are_equal, GraphQlOperation};
-use reflex_utils::json::json_object;
 
 pub mod stdlib;
 pub mod subscriptions;

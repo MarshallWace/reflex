@@ -9,9 +9,9 @@ edition = "2021"
 
 [dependencies]
 reflex = { path = "../reflex" }
-reflex-utils = { path = "../reflex-utils" }
 reflex-json = { path = "../reflex-json" }
 reflex-stdlib = { path = "../reflex-stdlib" }
+reflex-utils = { path = "../reflex-utils" }
 graphql-parser = "0.4.0"
 serde = { version = "1.0", features = ["derive"] }
 strum = "0.22"
