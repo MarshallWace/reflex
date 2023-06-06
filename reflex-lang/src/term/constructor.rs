@@ -108,7 +108,6 @@ impl<T: Expression> std::fmt::Display for ConstructorTerm<T> {
                 .keys()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .map(|key| format!("{}", key))
                 .collect::<Vec<_>>()
                 .join(","),

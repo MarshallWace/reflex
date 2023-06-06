@@ -11,8 +11,8 @@ use serde_json::Value as JsonValue;
 use reflex::core::{
     transform_expression_list, CompoundNode, DependencyList, DynamicState, Eagerness,
     EvaluationCache, Expression, ExpressionFactory, ExpressionListIter, ExpressionListType,
-    GraphNode, HeapAllocator, Internable, ListTermType, RefType, Rewritable, SerializeJson,
-    StackOffset, Substitutions,
+    GraphNode, HeapAllocator, Internable, ListTermType, Rewritable, SerializeJson, StackOffset,
+    Substitutions,
 };
 use reflex_utils::json;
 
@@ -160,14 +160,12 @@ impl<T: Expression> std::fmt::Display for ListTerm<T> {
             if num_items <= max_displayed_items {
                 items
                     .iter()
-                    .map(|item| item.as_deref())
                     .map(|item| format!("{}", item))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 items
                     .iter()
-                    .map(|item| item.as_deref())
                     .take(max_displayed_items - 1)
                     .map(|item| format!("{}", item))
                     .chain(once(format!(
@@ -185,7 +183,6 @@ impl<T: Expression + SerializeJson + Clone> SerializeJson for ListTerm<T> {
     fn to_json(&self) -> Result<JsonValue, String> {
         self.items
             .iter()
-            .map(|item| item.as_deref())
             .map(|key| key.to_json())
             .collect::<Result<Vec<_>, String>>()
             .map(|values| JsonValue::Array(values))
@@ -194,14 +191,12 @@ impl<T: Expression + SerializeJson + Clone> SerializeJson for ListTerm<T> {
         let updates = target
             .items
             .iter()
-            .map(|item| item.as_deref())
-            .zip(self.items.iter().map(|item| item.as_deref()))
-            .map(|(current, previous)| previous.patch(current))
+            .zip(self.items.iter())
+            .map(|(current, previous)| previous.patch(&current))
             .chain(
                 target
                     .items
                     .iter()
-                    .map(|item| item.as_deref())
                     .skip(self.items.len())
                     .map(|item| item.to_json().map(Some)),
             )

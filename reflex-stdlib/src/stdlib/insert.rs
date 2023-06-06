@@ -45,7 +45,7 @@ impl<T: Expression> Applicable<T> for Insert {
         if let Some(existing) = factory.match_hashmap_term(&target) {
             let (has_value, is_unchanged) = existing
                 .get(&key)
-                .map(|item| item.as_deref())
+                .map(|item| item.as_deref().clone())
                 .map(|existing_value| (true, existing_value.id() == value.id()))
                 .unwrap_or((false, false));
             Ok(if is_unchanged {
@@ -54,7 +54,6 @@ impl<T: Expression> Applicable<T> for Insert {
                 let existing_index = if has_value {
                     existing
                         .keys()
-                        .map(|item| item.as_deref())
                         .position(|existing_key| existing_key.id() == key.id())
                 } else {
                     None
@@ -62,36 +61,24 @@ impl<T: Expression> Applicable<T> for Insert {
                 let entries = if let Some(existing_index) = existing_index {
                     existing
                         .keys()
-                        .map(|item| item.as_deref())
-                        .cloned()
                         .zip(
                             existing
                                 .values()
-                                .map(|item| item.as_deref())
                                 .enumerate()
                                 .map(|(index, existing_value)| {
                                     if index == existing_index {
-                                        &value
+                                        value.clone()
                                     } else {
                                         existing_value
                                     }
-                                })
-                                .cloned(),
+                                }),
                         )
                         .collect::<Vec<_>>()
                 } else {
                     existing
                         .keys()
-                        .map(|item| item.as_deref())
-                        .cloned()
                         .chain(once(key))
-                        .zip(
-                            existing
-                                .values()
-                                .map(|item| item.as_deref())
-                                .cloned()
-                                .chain(once(value)),
-                        )
+                        .zip(existing.values().chain(once(value)))
                         .collect::<Vec<_>>()
                 };
                 factory.create_hashmap_term(entries)

@@ -1278,24 +1278,30 @@ fn parse_grpc_effect_args<T: AsyncExpression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GrpcEffectArgs<T>, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 6)
+        .filter(|args| args.items().as_deref().len() == 6)
         .ok_or_else(|| {
             format!(
                 "Invalid grpc signal: Expected 6 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|iter| iter.as_deref());
-    let proto_id = parse_symbol_arg(args.next().unwrap(), factory);
-    let url = parse_string_arg(args.next().unwrap(), factory);
-    let service = parse_string_arg(args.next().unwrap(), factory);
-    let method = parse_string_arg(args.next().unwrap(), factory);
-    let input = args.next().unwrap().clone();
-    let metadata = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let args = args.items();
+    let mut args = args.as_deref().iter();
+    let proto_id = args.next().unwrap();
+    let url = args.next().unwrap();
+    let service = args.next().unwrap();
+    let method = args.next().unwrap();
+    let input = args.next().unwrap();
+    let metadata = args.next().unwrap();
+    let proto_id = parse_symbol_arg(&proto_id, factory);
+    let url = parse_string_arg(&url, factory);
+    let service = parse_string_arg(&service, factory);
+    let method = parse_string_arg(&method, factory);
+    let metadata = parse_optional_object_arg(&metadata, factory)?;
     match (proto_id, url, service, method, input, metadata) {
         (
             Some(protocol),
@@ -1355,11 +1361,10 @@ fn parse_object_arg<T: Expression>(
                 .keys()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
+                .zip(value.values().as_deref().iter())
                 .filter_map(|(key, value)| {
-                    factory.match_string_term(key).map(|key| {
-                        reflex_json::sanitize(value).map(|value| {
+                    factory.match_string_term(&key).map(|key| {
+                        reflex_json::sanitize(&value).map(|value| {
                             (String::from(key.value().as_deref().as_str().deref()), value)
                         })
                     })

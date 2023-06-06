@@ -658,25 +658,19 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                     let condition = factory
                         .match_signal_term(&effect)
                         .filter(|effect| effect.signals().as_deref().len() == 1)
-                        .and_then(|effect| {
-                            effect
-                                .signals()
-                                .as_deref()
-                                .iter()
-                                .map(|item| item.as_deref())
-                                .next()
-                        });
+                        .and_then(|effect| effect.signals().as_deref().iter().next());
                     match condition {
                         None => Err(format!("Invalid effect condition: {}", effect)),
                         Some(condition) => {
-                            let value = match state.get(&condition.id()) {
+                            let state_token = condition.id();
+                            let value = match state.get(&state_token) {
                                 Some(value) => value.clone(),
                                 None => factory.create_signal_term(
-                                    allocator.create_signal_list(once(condition.clone())),
+                                    allocator.create_signal_list(once(condition)),
                                 ),
                             };
                             stack.push(value);
-                            Ok((ExecutionResult::Advance, DependencyList::of(condition.id())))
+                            Ok((ExecutionResult::Advance, DependencyList::of(state_token)))
                         }
                     }
                 }
@@ -801,7 +795,7 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                         apply_metadata = %target,
                     );
                     let arity = get_function_arity(&target)?;
-                    if has_unresolved_args(&arity, stack.slice(num_args)) {
+                    if has_unresolved_args(&arity, stack.slice(num_args).iter().cloned()) {
                         let args = stack.pop_multiple(num_args);
                         Ok((
                             ExecutionResult::ResolveApplicationArgs {
@@ -983,12 +977,7 @@ fn evaluate_instruction<'a, T: Expression + Rewritable<T> + Reducible<T> + Appli
                     .pop_multiple(count)
                     .into_iter()
                     .map(|arg| match factory.match_signal_term(&arg) {
-                        Some(signal) => Ok(signal
-                            .signals()
-                            .as_deref()
-                            .iter()
-                            .map(|signal| allocator.clone_signal(signal))
-                            .collect::<Vec<_>>()),
+                        Some(signal) => Ok(signal.signals().as_deref().iter().collect::<Vec<_>>()),
                         None => Err(format!(
                             "Invalid combined signal: Expected <signal>, received {}",
                             arg
@@ -1024,14 +1013,13 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
             stack.push(result);
             Ok((ExecutionResult::Advance, dependencies))
         } else if let Some(application) = factory.match_application_term(expression) {
-            let target = application.target().as_deref();
+            let target = application.target();
             let args = application.args();
+            let target = target.as_deref();
+            let args = args.as_deref();
             let (target, partial_args) = extract_partial_args(target, factory);
             let num_combined_args = partial_args.len() + args.as_deref().len();
-            let combined_args = partial_args
-                .iter()
-                .chain(args.as_deref().iter().map(|item| item.as_deref()))
-                .cloned();
+            let combined_args = partial_args.iter().cloned().chain(args.iter());
             if !target.is_static() {
                 Ok((
                     ExecutionResult::ResolveApplicationTarget {
@@ -1039,15 +1027,15 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                         args: if partial_args.len() > 0 {
                             allocator.create_sized_list(num_combined_args, combined_args)
                         } else {
-                            allocator.clone_list(args)
+                            args.clone()
                         },
                     },
                     DependencyList::empty(),
                 ))
-            } else if let Some(_) = factory.match_signal_term(target) {
+            } else if let Some(_) = factory.match_signal_term(&target) {
                 stack.push(target.clone());
                 Ok((ExecutionResult::Advance, DependencyList::empty()))
-            } else if let Some(compiled_function) = factory.match_compiled_function_term(target) {
+            } else if let Some(compiled_function) = factory.match_compiled_function_term(&target) {
                 let target_address = compiled_function.address();
                 let caller_address = call_stack.program_counter();
                 let resume_address = call_stack.program_counter();
@@ -1063,12 +1051,10 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                     DependencyList::empty(),
                 ))
             } else {
-                let arity = get_function_arity(target)?;
+                let arity = get_function_arity(&target)?;
                 if has_unresolved_args(
                     &arity,
-                    partial_args
-                        .iter()
-                        .chain(args.as_deref().iter().map(|item| item.as_deref())),
+                    partial_args.iter().cloned().chain(args.as_deref().iter()),
                 ) {
                     Ok((
                         ExecutionResult::ResolveApplicationArgs {
@@ -1082,15 +1068,11 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 } else {
                     if let Some(signal) = get_combined_short_circuit_signal(
                         get_num_short_circuit_signals(
-                            partial_args
-                                .iter()
-                                .chain(args.as_deref().iter().map(|item| item.as_deref())),
+                            partial_args.iter().cloned().chain(args.as_deref().iter()),
                             &arity,
                             factory,
                         ),
-                        partial_args
-                            .iter()
-                            .chain(args.as_deref().iter().map(|item| item.as_deref())),
+                        partial_args.iter().cloned().chain(args.as_deref().iter()),
                         &arity,
                         factory,
                         allocator,
@@ -1099,7 +1081,7 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                         Ok((ExecutionResult::Advance, DependencyList::empty()))
                     } else {
                         let result = apply_function(
-                            target,
+                            &target,
                             WithExactSizeIterator::new(num_combined_args, combined_args),
                             factory,
                             allocator,
@@ -1119,7 +1101,8 @@ fn evaluate_expression<T: Expression + Applicable<T>>(
                 }
             }
         } else if let Some(expression) = factory.match_effect_term(expression) {
-            let condition = expression.condition().as_deref();
+            let condition = expression.condition();
+            let condition = condition.as_deref();
             let value = match state.get(&condition.id()) {
                 Some(value) => value.clone(),
                 None => factory
@@ -1148,10 +1131,7 @@ fn get_function_arity<T: Expression + Applicable<T>>(target: &T) -> Result<Arity
         .ok_or_else(|| format!("Invalid function application target: {}", target))
 }
 
-fn has_unresolved_args<'a, T: Expression + 'a>(
-    arity: &Arity,
-    args: impl IntoIterator<Item = &'a T>,
-) -> bool {
+fn has_unresolved_args<T: Expression>(arity: &Arity, args: impl IntoIterator<Item = T>) -> bool {
     args.into_iter()
         .zip(arity.iter())
         .any(|(arg, arg_type)| match arg_type {
@@ -1283,10 +1263,10 @@ fn is_evaluate_instruction(instruction: &Instruction) -> bool {
 fn match_compiled_application_target<'a, T: Expression>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> Option<(&'a T::CompiledFunctionTerm, Vec<T>)> {
+) -> Option<(T::CompiledFunctionTerm, Vec<T>)> {
     let (target, partial_args) = extract_partial_args(target, factory);
-    match factory.match_compiled_function_term(target) {
-        Some(target) => Some((target, partial_args)),
+    match factory.match_compiled_function_term(&target) {
+        Some(target) => Some((target.clone(), partial_args)),
         None => None,
     }
 }
@@ -1294,19 +1274,13 @@ fn match_compiled_application_target<'a, T: Expression>(
 fn extract_partial_args<'a, T: Expression>(
     target: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> (&'a T, Vec<T>) {
+) -> (T, Vec<T>) {
     let mut partial_args = Vec::new();
-    let mut current = target;
-    while let Some(partial) = factory.match_partial_application_term(current) {
-        partial_args.extend(
-            partial
-                .args()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .cloned(),
-        );
-        current = partial.target().as_deref();
+    let mut current = target.clone();
+    while let Some(partial) = factory.match_partial_application_term(&current) {
+        partial_args.extend(partial.args().as_deref().iter());
+        let next = partial.target().as_deref().clone();
+        current = next;
     }
     (current, partial_args)
 }
@@ -1685,7 +1659,7 @@ mod tests {
         assert_eq!(
             match_compiled_application_target(&expression, &factory),
             Some((
-                &compiled_function,
+                compiled_function,
                 vec![
                     factory.create_int_term(3),
                     factory.create_int_term(4),

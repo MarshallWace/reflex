@@ -33,14 +33,6 @@ impl<T: Expression> RecordTerm<T> {
     pub fn new(prototype: T::StructPrototype, values: T::ExpressionList) -> Self {
         Self { prototype, values }
     }
-    pub fn entries(&self) -> impl IntoIterator<Item = (&T, &T)> {
-        self.prototype
-            .keys()
-            .as_deref()
-            .iter()
-            .map(|item| item.as_deref())
-            .zip(self.values.iter().map(|item| item.as_deref()))
-    }
 }
 impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
     fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a>
@@ -66,7 +58,6 @@ impl<T: Expression> RecordTermType<T> for RecordTerm<T> {
             .keys()
             .as_deref()
             .iter()
-            .map(|item| item.as_deref())
             .position(|field_name| field_name.id() == key.id())?;
         self.values.get(index)
     }
@@ -210,8 +201,7 @@ impl<T: Expression> std::fmt::Display for RecordTerm<T> {
                     .keys()
                     .as_deref()
                     .iter()
-                    .map(|item| item.as_deref())
-                    .zip(self.values.iter().map(|item| item.as_deref()))
+                    .zip(self.values.iter())
                     .map(|(key, value)| format!("{}: {}", key, value))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -222,8 +212,11 @@ impl<T: Expression> std::fmt::Display for RecordTerm<T> {
 impl<T: Expression> SerializeJson for RecordTerm<T> {
     fn to_json(&self) -> Result<JsonValue, String> {
         let fields = self
-            .entries()
-            .into_iter()
+            .prototype
+            .keys()
+            .as_deref()
+            .iter()
+            .zip(self.values.iter())
             .map(|(key, value)| {
                 let key = key.to_json()?;
                 let value = value.to_json()?;
@@ -245,21 +238,22 @@ impl<T: Expression> SerializeJson for RecordTerm<T> {
         }
         let updates = JsonValue::Object(
             target
-                .entries()
-                .into_iter()
+                .prototype
+                .keys()
+                .as_deref()
+                .iter()
+                .zip(target.values.iter())
                 .map(|(key, new_value)| {
-                    let previous_value = self
-                        .get(&key)
-                        .ok_or_else(|| {
-                            format!(
-                                "Prototype has changed, key {} not present in {}",
-                                key.to_string(),
-                                self.prototype
-                            )
-                        })?
-                        .as_deref();
+                    let previous_value = self.get(&key).ok_or_else(|| {
+                        format!(
+                            "Prototype has changed, key {} not present in {}",
+                            key.to_string(),
+                            self.prototype
+                        )
+                    })?;
                     Ok(previous_value
-                        .patch(new_value)?
+                        .as_deref()
+                        .patch(&new_value)?
                         .map(|value_patch| (key, value_patch)))
                 })
                 .filter_map(|entry| entry.transpose()) // Filter out unchanged fields

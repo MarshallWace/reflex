@@ -1134,7 +1134,7 @@ where
             );
         }
         let result_status = if let Some(err) = error_result {
-            Err(parse_error_message(err, &self.factory, &self.allocator)
+            Err(parse_error_message(&err, &self.factory, &self.allocator)
                 .unwrap_or_else(|| String::from("Error")))
         } else {
             Ok(())
@@ -1399,39 +1399,33 @@ where
 fn parse_custom_effect_types<T: Expression>(
     result: &T,
     factory: &impl ExpressionFactory<T>,
-) -> impl IntoIterator<Item = String> {
-    factory
-        .match_signal_term(result)
-        .into_iter()
-        .flat_map(|term| {
-            term.signals()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .filter_map(|effect| match effect.signal_type() {
-                    SignalType::Custom(effect_type) => Some(effect_type),
-                    _ => None,
-                })
-        })
-        .collect::<HashSet<_>>()
+) -> HashSet<String> {
+    match factory.match_signal_term(result) {
+        None => HashSet::new(),
+        Some(term) => term
+            .signals()
+            .as_deref()
+            .iter()
+            .filter_map(|effect| match effect.signal_type() {
+                SignalType::Custom(effect_type) => Some(effect_type),
+                _ => None,
+            })
+            .collect::<HashSet<_>>(),
+    }
 }
 
 fn match_error_expression<'a, T: Expression>(
     expression: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> Option<&'a T::Signal> {
+) -> Option<T::Signal> {
     factory.match_signal_term(expression).and_then(|term| {
-        term.signals()
-            .as_deref()
-            .iter()
-            .map(|item| item.as_deref())
-            .find_map(|effect| {
-                if matches!(effect.signal_type(), SignalType::Error) {
-                    Some(effect)
-                } else {
-                    None
-                }
-            })
+        term.signals().as_deref().iter().find_map(|effect| {
+            if matches!(effect.signal_type(), SignalType::Error) {
+                Some(effect)
+            } else {
+                None
+            }
+        })
     })
 }
 
@@ -1440,7 +1434,8 @@ fn parse_error_message<'a, T: Expression + 'a>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<String> {
-    let payload = error.payload().as_deref();
+    let payload = error.payload();
+    let payload = payload.as_deref();
     if let Some(term) = factory.match_string_term(payload) {
         Some(String::from(term.value().as_deref().as_str().deref()))
     } else if let Some(term) = factory.match_record_term(payload) {
@@ -1455,11 +1450,11 @@ fn parse_error_object_payload_message<'a, T: Expression + 'a>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<String> {
-    let message = value
-        .get(&factory.create_string_term(allocator.create_static_string("message")))
-        .map(|value| value.as_deref())?;
-    let term = factory.match_string_term(message)?;
-    Some(String::from(term.value().as_deref().as_str().deref()))
+    let message =
+        value.get(&factory.create_string_term(allocator.create_static_string("message")))?;
+    let message = factory.match_string_term(message.as_deref())?;
+    let message = String::from(message.value().as_deref().as_str().deref());
+    Some(message)
 }
 
 fn is_error_result_payload<T: Expression>(
@@ -1479,7 +1474,6 @@ fn is_blocked_result_payload<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .any(|effect| matches!(effect.signal_type(), SignalType::Custom(_)))
         })
         .unwrap_or(false)
@@ -1495,7 +1489,6 @@ fn is_pending_result_payload<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .any(|effect| matches!(effect.signal_type(), SignalType::Pending))
         })
         .unwrap_or(false)

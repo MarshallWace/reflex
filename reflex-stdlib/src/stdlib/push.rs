@@ -51,8 +51,6 @@ impl<T: Expression> Applicable<T> for Push {
                         .items()
                         .as_deref()
                         .iter()
-                        .map(|item| item.as_deref())
-                        .cloned()
                         .chain(once(value)),
                 ),
             ))
@@ -63,8 +61,6 @@ impl<T: Expression> Applicable<T> for Push {
                 let values = collection.values();
                 factory.create_hashset_term(
                     values
-                        .map(|item| item.as_deref())
-                        .cloned()
                         .chain(once(value))
                         .collect::<Vec<_>>(),
                 )

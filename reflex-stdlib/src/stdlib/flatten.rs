@@ -39,43 +39,20 @@ impl<T: Expression> Applicable<T> for Flatten {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let result = if let Some(target) = factory.match_list_term(&target) {
-            let items = target
-                .items()
+            let items = target.items();
+            let items = items
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .flat_map(|item| {
-                    let (list_items, standalone_item) =
-                        if let Some(inner) = factory.match_list_term(item) {
-                            (
-                                Some(
-                                    inner
-                                        .items()
-                                        .as_deref()
-                                        .iter()
-                                        .map(|item| item.as_deref())
-                                        .cloned(),
-                                ),
-                                None,
-                            )
-                        } else {
-                            (None, Some(item.clone()))
-                        };
-                    list_items.into_iter().flatten().chain(standalone_item)
-                });
-            let num_items = target
-                .items()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .fold(0, |num_items, item| {
-                    if let Some(inner) = factory.match_list_term(item) {
-                        num_items + inner.items().as_deref().len()
+                // TODO: avoid unnecessary intermediate allocations
+                .fold(Vec::<T>::new(), |mut results, item| {
+                    if let Some(inner) = factory.match_list_term(&item) {
+                        results.extend(inner.items().as_deref().iter());
                     } else {
-                        num_items + 1
-                    }
+                        results.push(item)
+                    };
+                    results
                 });
-            Some(factory.create_list_term(allocator.create_sized_list(num_items, items)))
+            Some(factory.create_list_term(allocator.create_list(items)))
         } else {
             None
         };

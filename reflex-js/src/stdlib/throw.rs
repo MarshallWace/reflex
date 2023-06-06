@@ -52,8 +52,6 @@ impl<T: Expression> Applicable<T> for Throw {
             allocator.create_signal_list(
                 errors
                     .iter()
-                    .map(|item| item.as_deref())
-                    .cloned()
                     .map(|error| create_error_signal(error, factory, allocator)),
             )
         } else {
@@ -63,17 +61,17 @@ impl<T: Expression> Applicable<T> for Throw {
     }
 }
 
-fn parse_aggregate_error<'a, T: Expression + 'a>(
-    target: &'a T,
+fn parse_aggregate_error<T: Expression>(
+    target: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
-) -> Option<&'a T::ExpressionList> {
+) -> Option<T::ExpressionList> {
     factory.match_record_term(target).and_then(|target| {
         target
             .as_deref()
             .get(&factory.create_string_term(allocator.create_static_string("name")))
-            .map(|item| item.as_deref())
-            .and_then(|error_type| {
+            .and_then(|term| {
+                let error_type = term.as_deref();
                 factory.match_string_term(error_type).and_then(|name| {
                     if name.value().as_deref().as_str().deref() == "AggregateError" {
                         target
@@ -81,11 +79,11 @@ fn parse_aggregate_error<'a, T: Expression + 'a>(
                                 &factory
                                     .create_string_term(allocator.create_static_string("errors")),
                             )
-                            .map(|item| item.as_deref())
-                            .and_then(|errors| {
+                            .and_then(|term| {
+                                let errors = term.as_deref();
                                 factory
                                     .match_list_term(errors)
-                                    .map(|errors| errors.items().as_deref())
+                                    .map(|errors| errors.items().as_deref().clone())
                             })
                     } else {
                         None

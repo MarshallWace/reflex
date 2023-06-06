@@ -13,7 +13,7 @@ use reflex::{
     cache::SubstitutionCache,
     core::{
         Builtin, EvaluationCache, Expression, ExpressionFactory, ExpressionListType, HeapAllocator,
-        Reducible, RefType, Rewritable, Substitutions, SymbolId,
+        Reducible, Rewritable, Substitutions, SymbolId,
     },
 };
 use reflex_stdlib::*;
@@ -752,19 +752,9 @@ where
                 BindingExpressionType::LetRec => match num_bindings {
                     1 => factory.create_application_term(
                         factory.create_lambda_term(1, body),
-                        allocator.create_list(once(
-                            factory.create_recursive_term(
-                                factory.create_lambda_term(
-                                    1,
-                                    initializers
-                                        .iter()
-                                        .map(|item| item.as_deref())
-                                        .next()
-                                        .unwrap()
-                                        .clone(),
-                                ),
-                            ),
-                        )),
+                        allocator.create_list(once(factory.create_recursive_term(
+                            factory.create_lambda_term(1, initializers.iter().next().unwrap()),
+                        ))),
                     ),
                     _ => {
                         let initializer_replacements = (0..num_bindings)
@@ -786,18 +776,16 @@ where
                         let bindings = factory.create_recursive_term(factory.create_lambda_term(
                             1,
                             factory.create_list_term(allocator.create_list(
-                                initializers.iter().map(|item| item.as_deref()).map(
-                                    |initializer| {
-                                        initializer
-                                            .substitute_static(
-                                                &initializer_substitutions,
-                                                factory,
-                                                allocator,
-                                                evaluation_cache,
-                                            )
-                                            .unwrap_or_else(|| initializer.clone())
-                                    },
-                                ),
+                                initializers.iter().map(|initializer| {
+                                    initializer
+                                        .substitute_static(
+                                            &initializer_substitutions,
+                                            factory,
+                                            allocator,
+                                            evaluation_cache,
+                                        )
+                                        .unwrap_or(initializer)
+                                }),
                             )),
                         ));
                         factory.create_application_term(

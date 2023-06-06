@@ -3,7 +3,7 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator, RefType, Uid, Uuid,
+    FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator, Uid, Uuid,
 };
 
 pub struct Values;
@@ -44,13 +44,9 @@ impl<T: Expression> Applicable<T> for Values {
         let result = if let Some(_) = factory.match_list_term(&target) {
             Some(target.clone())
         } else if let Some(target) = factory.match_hashmap_term(&target) {
-            Some(factory.create_list_term(
-                allocator.create_list(target.values().map(|item| item.as_deref()).cloned()),
-            ))
+            Some(factory.create_list_term(allocator.create_list(target.values())))
         } else if let Some(target) = factory.match_hashset_term(&target) {
-            Some(factory.create_list_term(
-                allocator.create_list(target.values().map(|item| item.as_deref()).cloned()),
-            ))
+            Some(factory.create_list_term(allocator.create_list(target.values())))
         } else {
             None
         };

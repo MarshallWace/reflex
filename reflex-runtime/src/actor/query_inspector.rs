@@ -120,8 +120,7 @@ fn is_unresolved_effect_state<T: Expression>(
                 term.signals()
                     .as_deref()
                     .iter()
-                    .map(|item| item.as_deref())
-                    .any(is_unresolved_effect)
+                    .any(|effect| is_unresolved_effect(&effect))
             })
             .unwrap_or(false),
     }
@@ -151,8 +150,7 @@ fn serialize_value<T: Expression>(value: &T, factory: &impl ExpressionFactory<T>
                 .signals()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .map(serialize_effect)
+                .map(|effect| serialize_effect(&effect))
                 .collect(),
         )
     } else {

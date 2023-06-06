@@ -51,9 +51,9 @@ impl<T: Expression> Applicable<T> for Cons {
 pub(crate) fn match_cons_cell<'a, T: Expression>(
     target: &'a T,
     factory: &'a impl ExpressionFactory<T>,
-) -> Option<(&'a T, &'a T)> {
+) -> Option<(T, T)> {
     match_triple(target, factory).and_then(|(enum_discriminant, head, tail)| {
-        match factory.match_int_term(enum_discriminant) {
+        match factory.match_int_term(&enum_discriminant) {
             Some(term) if term.value() == 1 => Some((head, tail)),
             _ => None,
         }
@@ -63,10 +63,11 @@ pub(crate) fn match_cons_cell<'a, T: Expression>(
 fn match_triple<'a, T: Expression>(
     target: &'a T,
     factory: &'a impl ExpressionFactory<T>,
-) -> Option<(&'a T, &'a T, &'a T)> {
+) -> Option<(T, T, T)> {
     match factory.match_list_term(target) {
         Some(term) if term.items().as_deref().len() == 3 => {
-            let mut values = term.items().as_deref().iter().map(|item| item.as_deref());
+            let items = term.items();
+            let mut values = items.as_deref().iter();
             let first = values.next().unwrap();
             let second = values.next().unwrap();
             let third = values.next().unwrap();

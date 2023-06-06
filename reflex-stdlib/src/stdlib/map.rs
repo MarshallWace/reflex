@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
-
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HashmapTermType, HeapAllocator, ListTermType, RefType, Uid,
@@ -51,11 +48,10 @@ impl<T: Expression> Applicable<T> for Map {
                             .items()
                             .as_deref()
                             .iter()
-                            .map(|item| item.as_deref())
                             .map(|item| {
                                 factory.create_application_term(
                                     iteratee.clone(),
-                                    allocator.create_list(once(item.clone())),
+                                    allocator.create_unit_list(item),
                                 )
                             }),
                     ),
@@ -64,11 +60,9 @@ impl<T: Expression> Applicable<T> for Map {
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(
                 factory.create_hashmap_term(
-                    target.keys().map(|item| item.as_deref()).cloned().zip(
+                    target.keys().zip(
                         target
                             .values()
-                            .map(|item| item.as_deref())
-                            .cloned()
                             .map(|value| {
                                 factory.create_application_term(
                                     iteratee.clone(),

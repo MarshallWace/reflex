@@ -52,18 +52,17 @@ impl<T: Expression> Applicable<T> for FormatErrorMessage {
                 if let Some(value) = factory.match_list_term(&operand) {
                     let max_displayed_errors = 10;
                     let num_errors = value.items().as_deref().len();
-                    let messages = value
-                        .items()
+                    let items = value.items();
+                    let messages = items
                         .as_deref()
                         .iter()
-                        .map(|item| item.as_deref())
                         .take(if num_errors > max_displayed_errors {
                             max_displayed_errors - 1
                         } else {
                             num_errors
                         })
                         .map(|item| {
-                            parse_error_message(item, factory, allocator)
+                            parse_error_message(&item, factory, allocator)
                                 .unwrap_or_else(|| String::from(UNKNOWN_ERROR_MESSAGE))
                         });
                     Some(
@@ -99,8 +98,8 @@ fn parse_error_message<T: Expression>(
         value
             .as_deref()
             .get(&factory.create_string_term(allocator.create_static_string("message")))
-            .map(|value| value.as_deref())
             .and_then(|value| {
+                let value = value.as_deref();
                 factory
                     .match_string_term(value)
                     .map(|message| String::from(message.value().as_deref().as_str().deref()))

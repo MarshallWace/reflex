@@ -49,15 +49,11 @@ impl<T: Expression> Applicable<T> for Entries {
                             .keys()
                             .as_deref()
                             .iter()
-                            .map(|item| item.as_deref())
-                            .cloned()
                             .zip(
                                 target
                                     .values()
                                     .as_deref()
-                                    .iter()
-                                    .map(|item| item.as_deref())
-                                    .cloned(),
+                                    .iter(),
                             )
                             .map(|(key, value)| {
                                 factory.create_list_term(allocator.create_pair(key, value))
@@ -73,12 +69,11 @@ impl<T: Expression> Applicable<T> for Entries {
                             .items()
                             .as_deref()
                             .iter()
-                            .map(|item| item.as_deref())
                             .enumerate()
                             .map(|(index, item)| {
                                 factory.create_list_term(allocator.create_pair(
                                     factory.create_int_term(index as i32),
-                                    item.clone(),
+                                    item,
                                 ))
                             }),
                     ),
@@ -90,7 +85,7 @@ impl<T: Expression> Applicable<T> for Entries {
             ))
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Some(factory.create_list_term(
-                allocator.create_list(target.values().map(|item| item.as_deref()).cloned().map(
+                allocator.create_list(target.values().map(
                     |value| factory.create_list_term(allocator.create_pair(value.clone(), value)),
                 )),
             ))

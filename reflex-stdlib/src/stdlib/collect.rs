@@ -53,7 +53,6 @@ where
                 .items()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .any(|item| !item.is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
@@ -64,23 +63,17 @@ where
                 )
             })
         } else if let Some(collection) = factory.match_hashset_term(&target) {
-            let has_dynamic_values = collection
-                .values()
-                .map(|item| item.as_deref())
-                .any(|item| !item.is_static());
+            let has_dynamic_values = collection.values().any(|item| !item.is_static());
             Ok(if !has_dynamic_values {
                 target.clone()
             } else {
                 factory.create_application_term(
                     factory.create_builtin_term(CollectHashSet),
-                    allocator.create_list(collection.values().map(|item| item.as_deref()).cloned()),
+                    allocator.create_list(collection.values()),
                 )
             })
         } else if let Some(collection) = factory.match_hashmap_term(&target) {
-            let has_dynamic_keys = collection
-                .keys()
-                .map(|item| item.as_deref())
-                .any(|item| !item.is_static());
+            let has_dynamic_keys = collection.keys().any(|item| !item.is_static());
             Ok(if !has_dynamic_keys {
                 target.clone()
             } else {
@@ -261,10 +254,18 @@ where
             args.map(|arg| {
                 let static_entry = if let Some(entry) = factory.match_list_term(&arg) {
                     match (
-                        entry.items().as_deref().get(0).map(|item| item.as_deref()),
-                        entry.items().as_deref().get(1).map(|item| item.as_deref()),
+                        entry
+                            .items()
+                            .as_deref()
+                            .get(0)
+                            .map(|item| item.as_deref().clone()),
+                        entry
+                            .items()
+                            .as_deref()
+                            .get(1)
+                            .map(|item| item.as_deref().clone()),
                     ) {
-                        (Some(key), Some(value)) => Ok(Some((key.clone(), value.clone()))),
+                        (Some(key), Some(value)) => Ok(Some((key, value))),
                         _ => Err(format!("Invalid HashMap entry: {}", arg)),
                     }
                 } else {

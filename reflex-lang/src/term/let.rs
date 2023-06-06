@@ -92,7 +92,7 @@ impl<T: Expression> GraphNode for LetTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for LetTerm<T> {
-    type Children<'a> = std::iter::Chain<std::iter::Once<T::ExpressionRef<'a>>, std::iter::Once<T::ExpressionRef<'a>>>
+    type Children<'a> = std::iter::Chain<std::iter::Once<T>, std::iter::Once<T>>
         where
             T: 'a,
             Self: 'a;
@@ -100,7 +100,7 @@ impl<T: Expression> CompoundNode<T> for LetTerm<T> {
     where
         T: 'a,
     {
-        once((&self.initializer).into()).chain(once((&self.body).into()))
+        once(self.initializer.clone()).chain(once(self.body.clone()))
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T>> Rewritable<T> for LetTerm<T> {

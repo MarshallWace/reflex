@@ -41,7 +41,7 @@ impl<T: Expression> Applicable<T> for Cdr {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         match match_cons_cell(&target, factory) {
-            Some((_head, tail)) => Ok(tail.clone()),
+            Some((_head, tail)) => Ok(tail),
             _ => Err(format!("Expected list, received {}", target,)),
         }
     }

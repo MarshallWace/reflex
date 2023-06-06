@@ -52,12 +52,12 @@ where
                 .values()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .any(|item| !item.is_static());
             if !has_dynamic_values {
                 Ok(target)
             } else {
-                let values = value.values().as_deref();
+                let values = value.values();
+                let values = values.as_deref();
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(CollectRecord),
                     allocator.create_sized_list(
@@ -65,7 +65,7 @@ where
                         once(factory.create_constructor_term(
                             allocator.clone_struct_prototype(value.prototype()),
                         ))
-                        .chain(values.iter().map(|item| item.as_deref()).cloned()),
+                        .chain(values.iter()),
                     ),
                 ))
             }
@@ -115,21 +115,13 @@ where
                 .items()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .any(|item| !item.is_static());
             if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(CollectList),
-                    allocator.create_list(
-                        value
-                            .items()
-                            .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
-                    ),
+                    allocator.create_list(value.items().as_deref().iter()),
                 ))
             }
         } else {
@@ -174,16 +166,13 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_hashset_term(&target) {
-            let has_dynamic_values = value
-                .values()
-                .map(|item| item.as_deref())
-                .any(|item| !item.is_static());
+            let has_dynamic_values = value.values().any(|item| !item.is_static());
             if !has_dynamic_values {
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
                     factory.create_builtin_term(CollectHashSet),
-                    allocator.create_list(value.values().map(|item| item.as_deref()).cloned()),
+                    allocator.create_list(value.values()),
                 ))
             }
         } else {
@@ -228,10 +217,7 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         if let Some(value) = factory.match_hashmap_term(&target) {
-            let has_dynamic_keys = value
-                .keys()
-                .map(|item| item.as_deref())
-                .any(|item| !item.is_static());
+            let has_dynamic_keys = value.keys().any(|item| !item.is_static());
             if !has_dynamic_keys {
                 Ok(target)
             } else {
@@ -240,13 +226,9 @@ where
                     allocator.create_pair(
                         factory.create_application_term(
                             factory.create_builtin_term(CollectList),
-                            allocator
-                                .create_list(value.keys().map(|item| item.as_deref()).cloned()),
+                            allocator.create_list(value.keys()),
                         ),
-                        factory.create_list_term(
-                            allocator
-                                .create_list(value.values().map(|item| item.as_deref()).cloned()),
-                        ),
+                        factory.create_list_term(allocator.create_list(value.values())),
                     ),
                 ))
             }

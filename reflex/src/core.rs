@@ -69,35 +69,43 @@ impl std::fmt::Debug for InstructionPointer {
     }
 }
 
-pub trait NilTermType {}
-pub trait BooleanTermType {
+pub trait NilTermType: Clone {}
+
+pub trait BooleanTermType: Clone {
     fn value(&self) -> bool;
 }
-pub trait IntTermType {
+
+pub trait IntTermType: Clone {
     fn value(&self) -> IntValue;
 }
-pub trait FloatTermType {
+
+pub trait FloatTermType: Clone {
     fn value(&self) -> FloatValue;
 }
-pub trait StringTermType<T: Expression> {
+
+pub trait StringTermType<T: Expression>: Clone {
     fn value<'a>(&'a self) -> T::StringRef<'a>
     where
         T::String: 'a,
         T: 'a;
 }
-pub trait SymbolTermType {
+
+pub trait SymbolTermType: Clone {
     fn id(&self) -> SymbolId;
 }
-pub trait VariableTermType {
+
+pub trait VariableTermType: Clone {
     fn offset(&self) -> StackOffset;
 }
-pub trait EffectTermType<T: Expression> {
+
+pub trait EffectTermType<T: Expression>: Clone {
     fn condition<'a>(&'a self) -> T::SignalRef<'a>
     where
         T::Signal: 'a,
         T: 'a;
 }
-pub trait LetTermType<T: Expression> {
+
+pub trait LetTermType<T: Expression>: Clone {
     fn initializer<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a;
@@ -105,13 +113,15 @@ pub trait LetTermType<T: Expression> {
     where
         T: 'a;
 }
-pub trait LambdaTermType<T: Expression> {
+
+pub trait LambdaTermType<T: Expression>: Clone {
     fn num_args(&self) -> StackOffset;
     fn body<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a;
 }
-pub trait ApplicationTermType<T: Expression> {
+
+pub trait ApplicationTermType<T: Expression>: Clone {
     fn target<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a;
@@ -120,7 +130,8 @@ pub trait ApplicationTermType<T: Expression> {
         T: 'a,
         T::ExpressionList: 'a;
 }
-pub trait PartialApplicationTermType<T: Expression> {
+
+pub trait PartialApplicationTermType<T: Expression>: Clone {
     fn target<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a;
@@ -129,24 +140,28 @@ pub trait PartialApplicationTermType<T: Expression> {
         T: 'a,
         T::ExpressionList: 'a;
 }
-pub trait RecursiveTermType<T: Expression> {
+
+pub trait RecursiveTermType<T: Expression>: Clone {
     fn factory<'a>(&'a self) -> T::ExpressionRef<'a>
     where
         T: 'a;
 }
-pub trait BuiltinTermType<T: Expression> {
+
+pub trait BuiltinTermType<T: Expression>: Clone {
     fn target<'a>(&'a self) -> T::Builtin
     where
         T: 'a,
         T::Builtin: 'a;
 }
-pub trait CompiledFunctionTermType {
+
+pub trait CompiledFunctionTermType: Clone {
     fn address(&self) -> InstructionPointer;
     fn hash(&self) -> HashId;
     fn required_args(&self) -> StackOffset;
     fn optional_args(&self) -> StackOffset;
 }
-pub trait RecordTermType<T: Expression> {
+
+pub trait RecordTermType<T: Expression>: Clone {
     fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a>
     where
         T::StructPrototype: 'a,
@@ -159,24 +174,27 @@ pub trait RecordTermType<T: Expression> {
     where
         T: 'a;
 }
-pub trait ConstructorTermType<T: Expression> {
+
+pub trait ConstructorTermType<T: Expression>: Clone {
     fn prototype<'a>(&'a self) -> T::StructPrototypeRef<'a>
     where
         T::StructPrototype: 'a,
         T: 'a;
 }
-pub trait ListTermType<T: Expression> {
+
+pub trait ListTermType<T: Expression>: Clone {
     fn items<'a>(&'a self) -> T::ExpressionListRef<'a>
     where
         T::ExpressionList: 'a,
         T: 'a;
 }
-pub trait HashmapTermType<T: Expression> {
-    type KeysIterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
+
+pub trait HashmapTermType<T: Expression>: Clone {
+    type KeysIterator<'a>: ExactSizeIterator<Item = T>
     where
         T: 'a,
         Self: 'a;
-    type ValuesIterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
+    type ValuesIterator<'a>: ExactSizeIterator<Item = T>
     where
         T: 'a,
         Self: 'a;
@@ -190,8 +208,9 @@ pub trait HashmapTermType<T: Expression> {
     where
         T: 'a;
 }
-pub trait HashsetTermType<T: Expression> {
-    type ValuesIterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
+
+pub trait HashsetTermType<T: Expression>: Clone {
+    type ValuesIterator<'a>: ExactSizeIterator<Item = T>
     where
         T: 'a,
         Self: 'a;
@@ -200,7 +219,8 @@ pub trait HashsetTermType<T: Expression> {
     where
         T: 'a;
 }
-pub trait SignalTermType<T: Expression> {
+
+pub trait SignalTermType<T: Expression>: Clone {
     fn signals<'a>(&'a self) -> T::SignalListRef<'a>
     where
         T::SignalList: 'a,
@@ -222,7 +242,7 @@ pub type ExpressionListIter<'a, T> =
 pub trait ExpressionListType<T: Expression>:
     Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug + GraphNode
 {
-    type Iterator<'a>: ExactSizeIterator<Item = T::ExpressionRef<'a>>
+    type Iterator<'a>: ExactSizeIterator<Item = T>
     where
         T: 'a,
         Self: 'a;
@@ -239,7 +259,7 @@ pub trait ExpressionListType<T: Expression>:
 pub trait ConditionListType<T: Expression>:
     Sized + PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug
 {
-    type Iterator<'a>: ExactSizeIterator<Item = T::SignalRef<'a>>
+    type Iterator<'a>: ExactSizeIterator<Item = T::Signal>
     where
         T::Signal: 'a,
         T: 'a,
@@ -267,7 +287,8 @@ pub fn parse_record_values<'a, T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Option<Option<T::ExpressionList>> {
     if let Some(input_values) = factory.match_record_term(values) {
-        let input_prototype = input_values.prototype().as_deref();
+        let input_prototype = input_values.prototype();
+        let input_prototype = input_prototype.as_deref();
         if input_prototype.keys().as_deref().id() == prototype.keys().as_deref().id() {
             Some(None)
         } else if input_prototype.keys().as_deref().len()
@@ -278,8 +299,7 @@ pub fn parse_record_values<'a, T: Expression>(
                 .keys()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .map(|key| input_values.get(key).map(|item| item.as_deref()).cloned())
+                .map(|key| input_values.get(&key).map(|item| item.as_deref().clone()))
                 .collect::<Option<Vec<_>>>();
             match values {
                 Some(field_values) => Some(Some(allocator.create_list(field_values))),
@@ -293,13 +313,13 @@ pub fn parse_record_values<'a, T: Expression>(
     }
 }
 
-pub trait RefType<'a, T> {
-    fn as_deref(&self) -> &'a T;
+pub trait RefType<T> {
+    fn as_deref(&self) -> &T;
 }
 
-impl<'a, T> RefType<'a, T> for &'a T {
-    fn as_deref(&self) -> &'a T {
-        *self
+impl<'a, T> RefType<T> for &'a T {
+    fn as_deref(&self) -> &T {
+        self
     }
 }
 
@@ -311,20 +331,20 @@ pub struct IntoRefTypeIterator<T, TRef, TIter> {
 impl<'iter, T: 'iter, TRef, TIter> IntoRefTypeIterator<T, TRef, TIter>
 where
     TIter: Iterator<Item = &'iter T>,
-    TRef: RefType<'iter, T> + From<&'iter T>,
+    TRef: RefType<T> + From<&'iter T>,
 {
     pub fn new(inner: TIter) -> Self {
         Self {
             inner,
-            _ref: Default::default(),
-            _type: Default::default(),
+            _ref: PhantomData,
+            _type: PhantomData,
         }
     }
 }
 impl<'iter, T: 'iter, TRef, TIter> Iterator for IntoRefTypeIterator<T, TRef, TIter>
 where
     TIter: Iterator<Item = &'iter T> + ExactSizeIterator,
-    TRef: RefType<'iter, T> + From<&'iter T>,
+    TRef: RefType<T> + From<&'iter T>,
 {
     type Item = TRef;
     fn next(&mut self) -> Option<Self::Item> {
@@ -347,7 +367,7 @@ where
 impl<'iter, T: 'iter, TRef, TIter> ExactSizeIterator for IntoRefTypeIterator<T, TRef, TIter>
 where
     TIter: Iterator<Item = &'iter T> + ExactSizeIterator,
-    TRef: RefType<'iter, T> + From<&'iter T>,
+    TRef: RefType<T> + From<&'iter T>,
 {
     fn len(&self) -> usize {
         let Self { inner, .. } = self;
@@ -355,39 +375,42 @@ where
     }
 }
 
-pub struct FromRefTypeIterator<'iter, T, TRef, TIter> {
+pub struct FromRefTypeIterator<T, TRef, TIter> {
     inner: TIter,
     _ref: PhantomData<TRef>,
-    _type: PhantomData<&'iter T>,
+    _type: PhantomData<T>,
 }
-impl<'iter, T: 'iter, TRef, TIter> FromRefTypeIterator<'iter, T, TRef, TIter>
+impl<T, TRef, TIter> FromRefTypeIterator<T, TRef, TIter>
 where
     TIter: Iterator<Item = TRef>,
-    TRef: RefType<'iter, T>,
+    TRef: RefType<T>,
+    T: Clone,
 {
     pub fn new(inner: TIter) -> Self {
         Self {
             inner,
-            _ref: Default::default(),
-            _type: Default::default(),
+            _ref: PhantomData,
+            _type: PhantomData,
         }
     }
 }
-impl<'iter, T: 'iter, TRef, TIter> Iterator for FromRefTypeIterator<'iter, T, TRef, TIter>
+impl<T, TRef, TIter> Iterator for FromRefTypeIterator<T, TRef, TIter>
 where
     TIter: Iterator<Item = TRef>,
-    TRef: RefType<'iter, T>,
+    TRef: RefType<T>,
+    T: Clone,
 {
-    type Item = &'iter T;
+    type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         let Self { inner, .. } = self;
-        inner.next().map(|item| item.as_deref())
+        inner.next().map(|item| item.as_deref().clone())
     }
 }
-impl<'iter, T: 'iter, TRef, TIter> ExactSizeIterator for FromRefTypeIterator<'iter, T, TRef, TIter>
+impl<T, TRef, TIter> ExactSizeIterator for FromRefTypeIterator<T, TRef, TIter>
 where
     TIter: Iterator<Item = TRef> + ExactSizeIterator,
-    TRef: RefType<'iter, T>,
+    TRef: RefType<T>,
+    T: Clone,
 {
     fn len(&self) -> usize {
         let Self { inner, .. } = self;
@@ -435,36 +458,36 @@ where
     type HashsetTerm: HashsetTermType<Self>;
     type SignalTerm: SignalTermType<Self>;
 
-    type StringRef<'a>: RefType<'a, Self::String> + From<&'a Self::String> + Clone
+    type StringRef<'a>: RefType<Self::String> + From<&'a Self::String> + Clone
     where
         Self::String: 'a,
         Self: 'a;
 
-    type SignalRef<'a>: RefType<'a, Self::Signal> + From<&'a Self::Signal> + Clone
+    type SignalRef<'a>: RefType<Self::Signal> + From<&'a Self::Signal> + Clone
     where
         Self::Signal: 'a,
         Self: 'a;
 
-    type StructPrototypeRef<'a>: RefType<'a, Self::StructPrototype>
+    type StructPrototypeRef<'a>: RefType<Self::StructPrototype>
         + From<&'a Self::StructPrototype>
         + Clone
     where
         Self::StructPrototype: 'a,
         Self: 'a;
 
-    type SignalListRef<'a>: RefType<'a, Self::SignalList> + From<&'a Self::SignalList> + Clone
+    type SignalListRef<'a>: RefType<Self::SignalList> + From<&'a Self::SignalList> + Clone
     where
         Self::SignalList: 'a,
         Self: 'a;
 
-    type ExpressionListRef<'a>: RefType<'a, Self::ExpressionList>
+    type ExpressionListRef<'a>: RefType<Self::ExpressionList>
         + From<&'a Self::ExpressionList>
         + Clone
     where
         Self::ExpressionList: 'a,
         Self: 'a;
 
-    type ExpressionRef<'a>: RefType<'a, Self> + From<&'a Self> + Clone
+    type ExpressionRef<'a>: RefType<Self> + From<&'a Self> + Clone
     where
         Self: 'a;
 }
@@ -515,7 +538,7 @@ pub trait GraphNode {
 }
 
 pub trait CompoundNode<T: Expression> {
-    type Children<'a>: Iterator<Item = T::ExpressionRef<'a>>
+    type Children<'a>: Iterator<Item = T>
     where
         T: 'a,
         Self: 'a;
@@ -1430,24 +1453,19 @@ pub fn match_typed_expression_list<'a, T: Expression + 'a, V, E>(
 pub fn transform_expression_list<T: Expression>(
     expressions: &T::ExpressionList,
     allocator: &impl HeapAllocator<T>,
-    transform: impl FnMut(&T) -> Option<T>,
+    mut transform: impl FnMut(&T) -> Option<T>,
 ) -> Option<T::ExpressionList> {
     // Create a lazy iterator that collects transformed values along with their indices
     // Note that we don't pre-emptively collect the iterator because there might be no transformed expressions,
     // in which case we don't need to allocate a vector
     let mut iter = expressions
         .iter()
-        .map(|item| item.as_deref())
-        .map(transform)
+        .map(|item| transform(&item))
         .enumerate()
         .filter_map(|(index, result)| result.map(|result| (index, result)));
     // Pull the first value from the iterator, returning if there were no transformed expressions
     let (index, replaced) = iter.next()?;
-    let mut results = expressions
-        .iter()
-        .map(|item| item.as_deref())
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut results = expressions.iter().collect::<Vec<_>>();
     results[index] = replaced.clone();
     // Post-fill with the remaining transformed expressions
     for (index, replaced) in iter {
@@ -1587,8 +1605,8 @@ pub fn get_short_circuit_signal<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T> {
     get_combined_short_circuit_signal(
-        get_num_short_circuit_signals(args, arity, factory),
-        args,
+        get_num_short_circuit_signals(args.iter().cloned(), arity, factory),
+        args.iter().cloned(),
         arity,
         factory,
         allocator,
@@ -1611,16 +1629,16 @@ impl ShortCircuitCount {
     }
 }
 
-pub fn get_num_short_circuit_signals<'a, T: Expression + 'a>(
-    args: impl IntoIterator<Item = &'a T>,
+pub fn get_num_short_circuit_signals<T: Expression>(
+    args: impl IntoIterator<Item = T>,
     arity: &Arity,
-    factory: &'a impl ExpressionFactory<T>,
+    factory: &impl ExpressionFactory<T>,
 ) -> ShortCircuitCount {
     let short_circuit_args = args
         .into_iter()
         .zip(arity.iter())
         .filter(|(arg, arg_type)| match arg_type {
-            ArgType::Strict => factory.match_signal_term(arg).is_some(),
+            ArgType::Strict => factory.match_signal_term(&arg).is_some(),
             _ => false,
         });
     let mut num_short_circuit_args = ShortCircuitCount::None;
@@ -1634,54 +1652,50 @@ pub fn get_num_short_circuit_signals<'a, T: Expression + 'a>(
     num_short_circuit_args
 }
 
-pub fn get_combined_short_circuit_signal<'a, T: Expression + 'a>(
+pub fn get_combined_short_circuit_signal<T: Expression>(
     num_short_circuit_args: ShortCircuitCount,
-    args: impl IntoIterator<Item = &'a T>,
+    args: impl IntoIterator<Item = T>,
     arity: &Arity,
-    factory: &'a impl ExpressionFactory<T>,
+    factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> Option<T> {
     match num_short_circuit_args.into() {
         ShortCircuitCount::None => None,
         ShortCircuitCount::Single => Some(
-            filter_short_circuit_args(args.into_iter(), arity, factory)
+            filter_short_circuit_args(args, arity, factory)
                 .into_iter()
                 .map(|(arg, _)| arg)
-                .cloned()
                 .next()
                 .unwrap(),
         ),
         ShortCircuitCount::Multiple => {
-            let combined_signal = factory.create_signal_term(
-                allocator.create_signal_list(
-                    filter_short_circuit_args(args.into_iter(), arity, factory)
-                        .into_iter()
-                        .flat_map(|(_, signal)| {
-                            signal
-                                .signals()
-                                .as_deref()
-                                .iter()
-                                .map(|signal| allocator.clone_signal(signal))
-                        }),
+            let combined_signal = factory.create_signal_term(allocator.create_signal_list(
+                filter_short_circuit_args(args, arity, factory).fold(
+                    // TODO: avoid unnecessary intermediate allocations
+                    Vec::<T::Signal>::new(),
+                    |mut results, (_, signal)| {
+                        results.extend(signal.signals().as_deref().iter());
+                        results
+                    },
                 ),
-            );
+            ));
             Some(combined_signal)
         }
     }
 }
 
 fn filter_short_circuit_args<'a, T: Expression + 'a>(
-    args: impl IntoIterator<Item = &'a T>,
+    args: impl IntoIterator<Item = T, IntoIter = impl Iterator<Item = T> + 'a>,
     arity: &Arity,
     matcher: &'a impl ExpressionFactory<T>,
-) -> impl IntoIterator<Item = (&'a T, &'a T::SignalTerm)> {
+) -> impl Iterator<Item = (T, T::SignalTerm)> + 'a {
     args.into_iter()
         .zip(arity.iter())
-        .filter_map(move |(arg, arg_type)| match arg_type {
+        .filter_map(|(arg, arg_type)| match arg_type {
             ArgType::Strict => matcher
-                .match_signal_term(arg)
-                .map(|value| value.as_deref())
-                .map(move |signal| (arg, signal)),
+                .match_signal_term(&arg)
+                .map(|value| value.clone())
+                .map(|signal| (arg, signal)),
             ArgType::Eager | ArgType::Lazy => None,
         })
 }
@@ -1694,20 +1708,12 @@ pub fn get_hashmap_entries<'a, T: Expression + 'a>(
     target
         .keys()
         .into_iter()
-        .map(|expression| expression.as_deref())
-        .cloned()
-        .zip(
-            target
-                .values()
-                .into_iter()
-                .map(|expression| expression.as_deref())
-                .cloned(),
-        )
+        .zip(target.values().into_iter())
         .map(move |(key, value)| factory.create_list_term(allocator.create_pair(key, value)))
 }
 
 pub fn deduplicate_hashmap_entries<T: Expression>(keys: &[T], values: &[T]) -> Option<Vec<(T, T)>> {
-    let lookup = build_hashmap_lookup_table(keys.iter());
+    let lookup = build_hashmap_lookup_table(keys.iter().cloned());
     if lookup.len() == keys.len() {
         None
     } else {
@@ -1729,8 +1735,8 @@ pub fn deduplicate_hashmap_entries<T: Expression>(keys: &[T], values: &[T]) -> O
     }
 }
 
-pub fn build_hashmap_lookup_table<'a, T: Expression + 'a>(
-    keys: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
+pub fn build_hashmap_lookup_table<T: Expression>(
+    keys: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
 ) -> IntMap<HashId, usize> {
     keys.into_iter()
         .enumerate()
@@ -1739,7 +1745,7 @@ pub fn build_hashmap_lookup_table<'a, T: Expression + 'a>(
 }
 
 pub fn deduplicate_hashset_entries<T: Expression>(values: &[T]) -> Option<Vec<T>> {
-    let lookup = build_hashset_lookup_table(values.iter());
+    let lookup = build_hashset_lookup_table(values.iter().cloned());
     if lookup.len() == values.len() {
         None
     } else {
@@ -1759,8 +1765,8 @@ pub fn deduplicate_hashset_entries<T: Expression>(values: &[T]) -> Option<Vec<T>
     }
 }
 
-pub fn build_hashset_lookup_table<'a, T: Expression + 'a>(
-    values: impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
+pub fn build_hashset_lookup_table<T: Expression>(
+    values: impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T>>,
 ) -> HashSet<HashId> {
     let values = values.into_iter();
     values.into_iter().map(|value| value.id()).collect()

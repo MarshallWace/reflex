@@ -5,13 +5,13 @@
 use std::{
     collections::{BTreeSet, HashSet},
     hash::{Hash, Hasher},
+    iter::Cloned,
 };
 
 use reflex::{
     core::{
         ConditionListType, ConditionType, DependencyList, Expression, ExpressionListType,
-        GraphNode, IntoRefTypeIterator, RefType, SignalType, StackOffset, StateToken,
-        StructPrototypeType,
+        GraphNode, SignalType, StackOffset, StateToken, StructPrototypeType,
     },
     hash::{hash_iter, hash_object, FnvHasher, HashId},
 };
@@ -60,7 +60,7 @@ impl<T: Expression> ExpressionList<T> {
 }
 
 impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
-    type Iterator<'a> = IntoRefTypeIterator<T, T::ExpressionRef<'a>, std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
+    type Iterator<'a> = Cloned<std::slice::Iter<'a, T>> where T: 'a, Self: 'a;
     fn id(&self) -> HashId {
         self.id
     }
@@ -77,7 +77,7 @@ impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
     where
         T: 'a,
     {
-        IntoRefTypeIterator::new(self.items.iter())
+        self.items.iter().cloned()
     }
 }
 impl<T: Expression> GraphNode for ExpressionList<T> {
@@ -198,7 +198,7 @@ where
     }
 }
 impl<T: Expression> ConditionListType<T> for SignalList<T> {
-    type Iterator<'a> = IntoRefTypeIterator<T::Signal, T::SignalRef<'a>, std::collections::btree_set::Iter<'a, T::Signal>>
+    type Iterator<'a> = Cloned<std::collections::btree_set::Iter<'a, T::Signal>>
         where
             T::Signal: 'a,
             T: 'a,
@@ -214,7 +214,7 @@ impl<T: Expression> ConditionListType<T> for SignalList<T> {
         T::Signal: 'a,
         T: 'a,
     {
-        IntoRefTypeIterator::new(self.signals.iter())
+        self.signals.iter().cloned()
     }
 }
 impl<T: Expression> std::fmt::Display for SignalList<T> {
@@ -449,7 +449,6 @@ impl<T: Expression> StructPrototype<T> {
     pub fn field(&self, key: &T) -> Option<StructFieldOffset> {
         self.keys
             .iter()
-            .map(|item| item.as_deref())
             .enumerate()
             .find_map(|(offset, existing_key)| {
                 if existing_key.id() == key.id() {
@@ -476,7 +475,6 @@ impl<T: Expression> std::fmt::Display for StructPrototype<T> {
             "{{{}}}",
             self.keys
                 .iter()
-                .map(|item| item.as_deref())
                 .map(|key| format!("{}", key))
                 .collect::<Vec<_>>()
                 .join(",")

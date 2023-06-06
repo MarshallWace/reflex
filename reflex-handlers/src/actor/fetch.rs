@@ -504,22 +504,27 @@ fn parse_fetch_effect_args<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<FetchRequest, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 4)
+        .filter(|args| args.items().as_deref().len() == 4)
         .ok_or_else(|| {
             format!(
                 "Invalid fetch signal: Expected 4 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|iter| iter.as_deref());
-    let url = parse_string_arg(args.next().unwrap(), factory);
-    let method = parse_string_arg(args.next().unwrap(), factory);
-    let headers = parse_key_values_arg(args.next().unwrap(), factory);
-    let body = parse_optional_string_arg(args.next().unwrap(), factory);
+    let args = args.items();
+    let mut args = args.as_deref().iter();
+    let url = args.next().unwrap();
+    let method = args.next().unwrap();
+    let headers = args.next().unwrap();
+    let body = args.next().unwrap();
+    let url = parse_string_arg(&url, factory);
+    let method = parse_string_arg(&method, factory);
+    let headers = parse_key_values_arg(&headers, factory);
+    let body = parse_optional_string_arg(&body, factory);
     match (method, url, headers, body) {
         (Some(method), Some(url), Some(headers), Some(body)) => {
             let headers = format_request_headers(headers)?;
@@ -585,12 +590,11 @@ fn parse_key_values_arg<T: Expression>(
             .keys()
             .as_deref()
             .iter()
-            .map(|item| item.as_deref())
-            .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
+            .zip(value.values().as_deref().iter())
             .map(|(key, value)| {
                 match (
-                    factory.match_string_term(key),
-                    factory.match_string_term(value),
+                    factory.match_string_term(&key),
+                    factory.match_string_term(&value),
                 ) {
                     (Some(key), Some(value)) => Some((
                         String::from(key.value().as_deref().as_str().deref()),

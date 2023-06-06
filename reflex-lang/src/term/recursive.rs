@@ -68,7 +68,7 @@ impl<T: Expression> GraphNode for RecursiveTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for RecursiveTerm<T> {
-    type Children<'a> = std::iter::Once<T::ExpressionRef<'a>>
+    type Children<'a> = std::iter::Once<T>
         where
             T: 'a,
             Self: 'a;
@@ -76,7 +76,7 @@ impl<T: Expression> CompoundNode<T> for RecursiveTerm<T> {
     where
         T: 'a,
     {
-        once((&self.factory).into())
+        once(self.factory.clone())
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for RecursiveTerm<T> {

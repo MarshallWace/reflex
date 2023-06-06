@@ -411,7 +411,7 @@ pub enum TermChildren<'a, T: Expression + 'a> {
     Empty,
 }
 impl<'a, T: Expression + 'a> Iterator for TermChildren<'a, T> {
-    type Item = T::ExpressionRef<'a>;
+    type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Let(iter) => iter.next(),

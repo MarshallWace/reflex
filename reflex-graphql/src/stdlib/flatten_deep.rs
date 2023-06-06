@@ -49,18 +49,12 @@ where
         } else if let Some(list) = factory.match_list_term(&target) {
             Ok(factory.create_application_term(
                 factory.create_builtin_term(CollectList),
-                allocator.create_list(
-                    list.items()
-                        .as_deref()
-                        .iter()
-                        .map(|item| item.as_deref())
-                        .map(|item| {
-                            factory.create_application_term(
-                                factory.create_builtin_term(FlattenDeep),
-                                allocator.create_unit_list(item.clone()),
-                            )
-                        }),
-                ),
+                allocator.create_list(list.items().as_deref().iter().map(|item| {
+                    factory.create_application_term(
+                        factory.create_builtin_term(FlattenDeep),
+                        allocator.create_unit_list(item),
+                    )
+                })),
             ))
         } else {
             Ok(target)

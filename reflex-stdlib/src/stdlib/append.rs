@@ -50,24 +50,21 @@ impl<T: Expression> Applicable<T> for Append {
                 |arg| format!("Expected List, received {}", arg),
             )?;
             let combined_collections = once(collection).chain(additional_collections);
-            let combined_items = combined_collections.flat_map(|arg| {
-                arg.items()
-                    .as_deref()
-                    .iter()
-                    .map(|item| item.as_deref())
-                    .cloned()
+            // TODO: avoid unnecessary intermediate allocations
+            let combined_items = combined_collections.fold(Vec::<T>::new(), |mut results, arg| {
+                results.extend(arg.items().as_deref().iter());
+                results
             });
-            Ok(factory.create_list_term(allocator.create_unsized_list(combined_items)))
+            Ok(factory.create_list_term(allocator.create_list(combined_items)))
         } else if let Some(collection) = factory.match_hashset_term(&target) {
             let args = args.collect::<Vec<_>>();
             let additional_collections = match_typed_expression_list(
-                args.iter().map(|item| item.as_deref()),
+                args.iter(),
                 |term| factory.match_hashset_term(term),
                 |arg| format!("Expected HashSet, received {}", arg),
             )?;
             let combined_collections = once(collection).chain(additional_collections);
-            let combined_values = combined_collections
-                .flat_map(|arg| arg.values().map(|item| item.as_deref()).cloned());
+            let combined_values = combined_collections.flat_map(|arg| arg.values());
             let values = combined_values.collect::<Vec<_>>();
             let deduplicated_values = match deduplicate_hashset_entries(&values) {
                 Some(values) => values,

@@ -45,13 +45,7 @@ impl<T: Expression> Applicable<T> for ConstructRecord {
                 let num_keys = keys.items().as_deref().len();
                 Ok((
                     num_keys,
-                    allocator.create_list(
-                        keys.items()
-                            .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
-                    ),
+                    allocator.create_list(keys.items().as_deref().iter()),
                 ))
             }
             None => Err(format!("Invalid property keys: {}", keys)),
@@ -111,12 +105,8 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
         let values = args.next().unwrap();
         let keys = match factory.match_list_term(&keys) {
             Some(keys) => {
-                if let Some(dynamic_key) = keys
-                    .items()
-                    .as_deref()
-                    .iter()
-                    .map(|item| item.as_deref())
-                    .find(|key| !key.is_static())
+                if let Some(dynamic_key) =
+                    keys.items().as_deref().iter().find(|key| !key.is_static())
                 {
                     Err(format!("Invalid HashMap key: {}", dynamic_key))
                 } else {
@@ -138,18 +128,8 @@ impl<T: Expression> Applicable<T> for ConstructHashMap {
                     let values = values.items();
                     // FIXME: prevent unnecessary vector allocations
                     let entries = {
-                        let keys = keys
-                            .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        let values = values
-                            .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned()
-                            .collect::<Vec<_>>();
+                        let keys = keys.as_deref().iter().collect::<Vec<_>>();
+                        let values = values.as_deref().iter().collect::<Vec<_>>();
                         let entries = match deduplicate_hashmap_entries(&keys, &values) {
                             Some(entries) => entries,
                             None => keys.into_iter().zip(values).collect::<Vec<_>>(),

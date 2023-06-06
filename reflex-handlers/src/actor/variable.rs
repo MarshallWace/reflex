@@ -220,18 +220,21 @@ where
         let updates = effects.iter().map(|effect| {
             match parse_get_effect_args(effect, &self.factory, &self.allocator) {
                 Ok((state_token, initial_value)) => {
-                    match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
+                    match state
+                        .subscriptions
+                        .entry(VariableKeyHash::new(&state_token))
+                    {
                         Entry::Vacant(entry) => {
                             entry.insert(VariableState {
                                 value: None,
                                 effect_ids: once(effect.id()).collect(),
                             });
-                            (effect.id(), initial_value.clone())
+                            (effect.id(), initial_value)
                         }
                         Entry::Occupied(mut entry) => {
                             let value = {
-                                let existing_value = entry.get().value.as_ref();
-                                existing_value.unwrap_or(initial_value).clone()
+                                let existing_value = entry.get().value.as_ref().cloned();
+                                existing_value.unwrap_or(initial_value)
                             };
                             entry.get_mut().effect_ids.insert(effect.id());
                             (effect.id(), value)
@@ -276,32 +279,34 @@ where
                 let entry = parse_set_effect_args(effect, &self.factory, &self.allocator);
                 let (value, updates) = match entry {
                     Ok((state_token, value)) => {
-                        let (value, updates) =
-                            match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
-                                Entry::Vacant(entry) => {
-                                    let updated_value = value.clone();
-                                    entry.insert(VariableState {
-                                        value: Some(updated_value.clone()),
-                                        effect_ids: Default::default(),
-                                    });
-                                    (updated_value, None)
-                                }
-                                Entry::Occupied(mut entry) => {
-                                    let updated_value = value.clone();
-                                    entry.get_mut().value = Some(updated_value.clone());
-                                    let updates = entry
-                                        .get()
-                                        .effect_ids
-                                        .iter()
-                                        .cloned()
-                                        .map({
-                                            let updated_value = updated_value.clone();
-                                            move |state_token| (state_token, updated_value.clone())
-                                        })
-                                        .collect::<Vec<_>>();
-                                    (updated_value, Some(updates))
-                                }
-                            };
+                        let (value, updates) = match state
+                            .subscriptions
+                            .entry(VariableKeyHash::new(&state_token))
+                        {
+                            Entry::Vacant(entry) => {
+                                let updated_value = value;
+                                entry.insert(VariableState {
+                                    value: Some(updated_value.clone()),
+                                    effect_ids: Default::default(),
+                                });
+                                (updated_value, None)
+                            }
+                            Entry::Occupied(mut entry) => {
+                                let updated_value = value;
+                                entry.get_mut().value = Some(updated_value.clone());
+                                let updates = entry
+                                    .get()
+                                    .effect_ids
+                                    .iter()
+                                    .cloned()
+                                    .map({
+                                        let updated_value = updated_value.clone();
+                                        move |state_token| (state_token, updated_value.clone())
+                                    })
+                                    .collect::<Vec<_>>();
+                                (updated_value, Some(updates))
+                            }
+                        };
                         (value, updates)
                     }
                     Err(err) => (
@@ -347,34 +352,36 @@ where
                 let entry = parse_increment_effect_args(effect, &self.factory, &self.allocator);
                 let (value, actions) = match entry {
                     Ok(state_token) => {
-                        let (value, actions) =
-                            match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
-                                Entry::Vacant(entry) => {
-                                    let updated_value =
-                                        increment_variable(None, &self.factory, &self.allocator);
-                                    entry.insert(VariableState {
-                                        value: Some(updated_value.clone()),
-                                        effect_ids: Default::default(),
-                                    });
-                                    (updated_value, None)
-                                }
-                                Entry::Occupied(mut entry) => {
-                                    let updated_value = increment_variable(
-                                        entry.get().value.as_ref(),
-                                        &self.factory,
-                                        &self.allocator,
-                                    );
-                                    entry.get_mut().value = Some(updated_value.clone());
-                                    let updates = entry
-                                        .get()
-                                        .effect_ids
-                                        .iter()
-                                        .cloned()
-                                        .map(|state_token| (state_token, updated_value.clone()))
-                                        .collect::<Vec<_>>();
-                                    (updated_value, Some(updates))
-                                }
-                            };
+                        let (value, actions) = match state
+                            .subscriptions
+                            .entry(VariableKeyHash::new(&state_token))
+                        {
+                            Entry::Vacant(entry) => {
+                                let updated_value =
+                                    increment_variable(None, &self.factory, &self.allocator);
+                                entry.insert(VariableState {
+                                    value: Some(updated_value.clone()),
+                                    effect_ids: Default::default(),
+                                });
+                                (updated_value, None)
+                            }
+                            Entry::Occupied(mut entry) => {
+                                let updated_value = increment_variable(
+                                    entry.get().value.as_ref(),
+                                    &self.factory,
+                                    &self.allocator,
+                                );
+                                entry.get_mut().value = Some(updated_value.clone());
+                                let updates = entry
+                                    .get()
+                                    .effect_ids
+                                    .iter()
+                                    .cloned()
+                                    .map(|state_token| (state_token, updated_value.clone()))
+                                    .collect::<Vec<_>>();
+                                (updated_value, Some(updates))
+                            }
+                        };
                         (value, actions)
                     }
                     Err(err) => (
@@ -420,34 +427,36 @@ where
                 let entry = parse_decrement_effect_args(effect, &self.factory, &self.allocator);
                 let (value, updates) = match entry {
                     Ok(state_token) => {
-                        let (value, updates) =
-                            match state.subscriptions.entry(VariableKeyHash::new(state_token)) {
-                                Entry::Vacant(entry) => {
-                                    let updated_value =
-                                        decrement_variable(None, &self.factory, &self.allocator);
-                                    entry.insert(VariableState {
-                                        value: Some(updated_value.clone()),
-                                        effect_ids: Default::default(),
-                                    });
-                                    (updated_value, None)
-                                }
-                                Entry::Occupied(mut entry) => {
-                                    let updated_value = decrement_variable(
-                                        entry.get().value.as_ref(),
-                                        &self.factory,
-                                        &self.allocator,
-                                    );
-                                    entry.get_mut().value = Some(updated_value.clone());
-                                    let updates = entry
-                                        .get()
-                                        .effect_ids
-                                        .iter()
-                                        .cloned()
-                                        .map(|state_token| (state_token, updated_value.clone()))
-                                        .collect::<Vec<_>>();
-                                    (updated_value, Some(updates))
-                                }
-                            };
+                        let (value, updates) = match state
+                            .subscriptions
+                            .entry(VariableKeyHash::new(&state_token))
+                        {
+                            Entry::Vacant(entry) => {
+                                let updated_value =
+                                    decrement_variable(None, &self.factory, &self.allocator);
+                                entry.insert(VariableState {
+                                    value: Some(updated_value.clone()),
+                                    effect_ids: Default::default(),
+                                });
+                                (updated_value, None)
+                            }
+                            Entry::Occupied(mut entry) => {
+                                let updated_value = decrement_variable(
+                                    entry.get().value.as_ref(),
+                                    &self.factory,
+                                    &self.allocator,
+                                );
+                                entry.get_mut().value = Some(updated_value.clone());
+                                let updates = entry
+                                    .get()
+                                    .effect_ids
+                                    .iter()
+                                    .cloned()
+                                    .map(|state_token| (state_token, updated_value.clone()))
+                                    .collect::<Vec<_>>();
+                                (updated_value, Some(updates))
+                            }
+                        };
                         (value, updates)
                     }
                     Err(err) => (
@@ -513,8 +522,9 @@ where
             if let Ok((state_token, _)) =
                 parse_get_effect_args(effect, &self.factory, &self.allocator)
             {
-                if let Entry::Occupied(mut entry) =
-                    state.subscriptions.entry(VariableKeyHash::new(state_token))
+                if let Entry::Occupied(mut entry) = state
+                    .subscriptions
+                    .entry(VariableKeyHash::new(&state_token))
                 {
                     entry.get_mut().effect_ids.remove(&effect.id());
                     if entry.get().effect_ids.is_empty() {
@@ -581,84 +591,88 @@ fn parse_get_effect_args<'a, T: Expression>(
     effect: &'a T::Signal,
     factory: &'a impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
-) -> Result<(&'a T, &'a T), String> {
-    let payload = effect.payload().as_deref();
+) -> Result<(T, T), String> {
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 2)
+        .filter(|args| args.items().as_deref().len() == 2)
         .ok_or_else(|| {
             format!(
                 "Invalid variable get signal: Expected 2 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|item| item.as_deref());
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let state_token = args.next().unwrap();
     let initial_value = args.next().unwrap();
     Ok((state_token, initial_value))
 }
 
-fn parse_set_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal,
-    factory: &'a impl ExpressionFactory<T>,
+fn parse_set_effect_args<T: Expression>(
+    effect: &T::Signal,
+    factory: &impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
-) -> Result<(&'a T, &'a T), String> {
-    let payload = effect.payload().as_deref();
+) -> Result<(T, T), String> {
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 2)
+        .filter(|args| args.items().as_deref().len() == 2)
         .ok_or_else(|| {
             format!(
                 "Invalid variable set signal: Expected 2 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|item| item.as_deref());
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let state_token = args.next().unwrap();
     let value = args.next().unwrap();
     Ok((state_token, value))
 }
 
-fn parse_increment_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal,
-    factory: &'a impl ExpressionFactory<T>,
+fn parse_increment_effect_args<T: Expression>(
+    effect: &T::Signal,
+    factory: &impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
-) -> Result<&'a T, String> {
-    let payload = effect.payload().as_deref();
+) -> Result<T, String> {
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 1)
+        .filter(|args| args.items().as_deref().len() == 1)
         .ok_or_else(|| {
             format!(
                 "Invalid variable increment signal: Expected 1 argument, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|item| item.as_deref());
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let state_token = args.next().unwrap();
     Ok(state_token)
 }
 
-fn parse_decrement_effect_args<'a, T: Expression>(
-    effect: &'a T::Signal,
-    factory: &'a impl ExpressionFactory<T>,
+fn parse_decrement_effect_args<T: Expression>(
+    effect: &T::Signal,
+    factory: &impl ExpressionFactory<T>,
     _allocator: &impl HeapAllocator<T>,
-) -> Result<&'a T, String> {
-    let payload = effect.payload().as_deref();
+) -> Result<T, String> {
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 1)
+        .filter(|args| args.items().as_deref().len() == 1)
         .ok_or_else(|| {
             format!(
                 "Invalid variable decrement signal: Expected 1 argument, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|item| item.as_deref());
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let state_token = args.next().unwrap();
     Ok(state_token)
 }

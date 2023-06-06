@@ -52,9 +52,7 @@ impl<T: Expression> Applicable<T> for IfPending {
             } else if !non_pending_signals.is_empty() {
                 Ok(factory.create_signal_term(
                     allocator.create_signal_list(
-                        non_pending_signals
-                            .into_iter()
-                            .map(|signal| allocator.clone_signal(signal)),
+                        non_pending_signals,
                     ),
                 ))
             } else {

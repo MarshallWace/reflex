@@ -166,8 +166,7 @@ pub fn format_signal_result<T: Expression<SignalTerm = V>, V: SignalTermType<T>>
         .signals()
         .as_deref()
         .iter()
-        .map(|item| item.as_deref())
-        .map(|signal| format_signal::<T>(signal))
+        .map(|signal| format_signal::<T>(&signal))
         .collect::<Vec<_>>()
         .join("\n")
 }

@@ -48,9 +48,7 @@ impl<T: Expression> Applicable<T> for Keys {
                             .as_deref()
                             .keys()
                             .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
+                            .iter(),
                     ),
                 ),
             )
@@ -62,7 +60,6 @@ impl<T: Expression> Applicable<T> for Keys {
                             .items()
                             .as_deref()
                             .iter()
-                            .map(|item| item.as_deref())
                             .enumerate()
                             .map(|(index, _)| factory.create_int_term(index as i32)),
                     ),
@@ -70,7 +67,7 @@ impl<T: Expression> Applicable<T> for Keys {
             )
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Some(factory.create_list_term(
-                allocator.create_list(target.keys().map(|item| item.as_deref()).cloned()),
+                allocator.create_list(target.keys()),
             ))
         } else {
             None

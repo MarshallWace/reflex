@@ -32,52 +32,33 @@ impl<T: Expression> HashMapTerm<T> {
         factory: &impl ExpressionFactory<T>,
         allocator: &impl HeapAllocator<T>,
     ) -> Option<T> {
-        let existing = self.lookup.get(&key.id()).copied().and_then(|index| {
-            self.values
-                .get(index)
-                .map(|item| item.as_deref())
-                .map(|value| (index, value))
-        });
+        let existing = self
+            .lookup
+            .get(&key.id())
+            .copied()
+            .and_then(|index| self.values.get(index).map(|value| (index, value)));
         let updated_entries = match existing {
             Some((existing_index, existing_value)) => {
-                if value.id() == existing_value.id() {
+                if value.id() == existing_value.as_deref().id() {
                     None
                 } else {
                     let values = allocator.create_sized_list(
                         self.values.len(),
                         self.values
                             .iter()
-                            .map(|item| item.as_deref())
                             .take(existing_index)
-                            .cloned()
                             .chain(once(value))
-                            .chain(
-                                self.values
-                                    .iter()
-                                    .map(|item| item.as_deref())
-                                    .skip(existing_index + 1)
-                                    .cloned(),
-                            ),
+                            .chain(self.values.iter().skip(existing_index + 1)),
                     );
                     Some((None, values))
                 }
             }
             None => {
-                let keys = allocator.create_sized_list(
-                    self.keys.len() + 1,
-                    self.keys
-                        .iter()
-                        .map(|item| item.as_deref())
-                        .cloned()
-                        .chain(once(key)),
-                );
+                let keys = allocator
+                    .create_sized_list(self.keys.len() + 1, self.keys.iter().chain(once(key)));
                 let values = allocator.create_sized_list(
                     self.values.len() + 1,
-                    self.values
-                        .iter()
-                        .map(|item| item.as_deref())
-                        .cloned()
-                        .chain(once(value)),
+                    self.values.iter().chain(once(value)),
                 );
                 Some((Some(keys), values))
             }
@@ -88,9 +69,7 @@ impl<T: Expression> HashMapTerm<T> {
                 factory.create_hashmap_term(
                     keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                         .iter()
-                        .map(|item| item.as_deref())
-                        .cloned()
-                        .zip(values.iter().map(|item| item.as_deref()).cloned()),
+                        .zip(values.iter()),
                 ),
             ),
         }
@@ -104,7 +83,7 @@ impl<T: Expression> Hash for HashMapTerm<T> {
 }
 impl<T: Expression> HashMapTerm<T> {
     pub fn new(keys: T::ExpressionList, values: T::ExpressionList) -> Self {
-        let lookup = build_hashmap_lookup_table(keys.iter().map(|item| item.as_deref()));
+        let lookup = build_hashmap_lookup_table(keys.iter());
         Self {
             lookup,
             keys,
@@ -118,8 +97,7 @@ impl<T: Expression> HashMapTerm<T> {
     ) -> impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T> + 'a> + 'a {
         self.keys
             .iter()
-            .map(|item| item.as_deref())
-            .zip(self.values.iter().map(|item| item.as_deref()))
+            .zip(self.values.iter())
             .map(move |(key, value)| {
                 factory.create_list_term(allocator.create_pair(key.clone(), value.clone()))
             })
@@ -236,14 +214,10 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
-                    .map(|item| item.as_deref())
-                    .cloned()
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
+                            .iter(),
                     ),
             ),
         )
@@ -273,14 +247,10 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
-                    .map(|item| item.as_deref())
-                    .cloned()
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
+                            .iter(),
                     ),
             ),
         )
@@ -303,14 +273,10 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
-                    .map(|item| item.as_deref())
-                    .cloned()
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
+                            .iter(),
                     ),
             ),
         )
@@ -334,14 +300,10 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashMapTerm<T> {
             factory.create_hashmap_term(
                 keys.unwrap_or_else(|| allocator.clone_list((&self.keys).into()))
                     .iter()
-                    .map(|item| item.as_deref())
-                    .cloned()
                     .zip(
                         values
                             .unwrap_or_else(|| allocator.clone_list((&self.values).into()))
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
+                            .iter(),
                     ),
             ),
         )
@@ -357,11 +319,7 @@ impl<T: Expression> Internable for HashMapTerm<T> {
 impl<T: Expression> std::fmt::Display for HashMapTerm<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let max_displayed_entries = 10;
-        let entries = self
-            .keys
-            .iter()
-            .map(|item| item.as_deref())
-            .zip(self.values.iter().map(|item| item.as_deref()));
+        let entries = self.keys.iter().zip(self.values.iter());
         let num_entries = entries.len();
         write!(
             f,

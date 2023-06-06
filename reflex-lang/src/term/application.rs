@@ -85,7 +85,7 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
             let eager_args = self
                 .target
                 .arity()
-                .map(|arity| get_eager_args(self.args.iter().map(|item| item.as_deref()), &arity));
+                .map(|arity| get_eager_args(self.args.iter(), &arity));
             match eager_args {
                 None => target_dependencies,
                 Some(args) => args.into_iter().fold(target_dependencies, |acc, arg| {
@@ -99,18 +99,19 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
             || (if deep {
                 self.args().as_deref().has_dynamic_dependencies(deep)
             } else {
-                let eager_args =
-                    self.target().as_deref().arity().map(|arity| {
-                        self.args().as_deref().iter().zip(arity.iter()).filter_map(
+                let arity = self.target().as_deref().arity();
+                match arity {
+                    None => false,
+                    Some(arity) => {
+                        let args = self.args();
+                        let mut eager_args = args.as_deref().iter().zip(arity.iter()).filter_map(
                             |(arg, arg_type)| match arg_type {
                                 ArgType::Strict | ArgType::Eager => Some(arg),
                                 _ => None,
                             },
-                        )
-                    });
-                match eager_args {
-                    None => false,
-                    Some(mut args) => args.any(|arg| arg.as_deref().has_dynamic_dependencies(deep)),
+                        );
+                        eager_args.any(|arg| arg.has_dynamic_dependencies(deep))
+                    }
                 }
             })
     }
@@ -125,7 +126,7 @@ impl<T: Expression + Applicable<T>> GraphNode for ApplicationTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for ApplicationTerm<T> {
-    type Children<'a> = std::iter::Chain<std::iter::Once<T::ExpressionRef<'a>>, ExpressionListIter<'a, T>>
+    type Children<'a> = std::iter::Chain<std::iter::Once<T>, ExpressionListIter<'a, T>>
         where
             T: 'a,
             Self: 'a;
@@ -133,7 +134,7 @@ impl<T: Expression> CompoundNode<T> for ApplicationTerm<T> {
     where
         T: 'a,
     {
-        once((&self.target).into()).chain(self.args.iter())
+        once(self.target.clone()).chain(self.args.iter())
     }
 }
 impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>> Rewritable<T>
@@ -214,23 +215,17 @@ impl<T: Expression + Rewritable<T> + Reducible<T> + Applicable<T> + Evaluate<T>>
         let normalized_args = transform_expression_list(&self.args, allocator, |arg| {
             arg.normalize(factory, allocator, cache)
         });
-        let target = normalized_target
-            .as_ref()
-            .unwrap_or(&self.target().as_deref());
-        let args = normalized_args.as_ref().unwrap_or(&self.args().as_deref());
+        let target = self.target();
+        let args = self.args();
+        let target = normalized_target.as_ref().unwrap_or(&target.as_deref());
+        let args = normalized_args.as_ref().unwrap_or(&args.as_deref());
         if let Some(partial) = factory.match_partial_application_term(target) {
             factory
                 .create_application_term(
                     partial.target().as_deref().clone(),
                     allocator.create_sized_list(
                         partial.args().as_deref().len() + args.len(),
-                        partial
-                            .args()
-                            .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .chain(args.iter().map(|item| item.as_deref()))
-                            .cloned(),
+                        partial.args().as_deref().iter().chain(args.iter()),
                     ),
                 )
                 .normalize(factory, allocator, cache)
@@ -298,7 +293,6 @@ impl<T: Expression> std::fmt::Display for ApplicationTerm<T> {
             self.args()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .map(|arg| format!("{}", arg))
                 .collect::<Vec<_>>()
                 .join(",")
@@ -349,10 +343,9 @@ fn normalize_lambda_application<T: Expression + Rewritable<T>>(
         let num_args = target.num_args();
         let (inlined_args, remaining_args): (Vec<_>, Vec<_>) = args
             .iter()
-            .map(|arg| arg.as_deref())
             .take(num_args)
             .enumerate()
-            .map(|(index, arg)| (num_args - index - 1, arg.clone()))
+            .map(|(index, arg)| (num_args - index - 1, arg))
             .partition(|(offset, arg)| {
                 !arg.is_complex() || target.body().as_deref().count_variable_usages(*offset) <= 1
             });
@@ -439,10 +432,10 @@ fn normalize_builtin_application<
     }
 }
 
-fn get_eager_args<'a, T: Expression + 'a>(
-    args: impl IntoIterator<Item = &'a T>,
+fn get_eager_args<T: Expression>(
+    args: impl IntoIterator<Item = T>,
     arity: &Arity,
-) -> impl Iterator<Item = &'a T> {
+) -> impl Iterator<Item = T> {
     arity
         .iter()
         .zip(args)
@@ -513,8 +506,7 @@ fn evaluate_function_application<
                         && expression
                             .args
                             .iter()
-                            .map(|item| item.as_deref())
-                            .zip(reduced_args.iter().map(|item| item.as_deref()))
+                            .zip(reduced_args.iter())
                             .all(|(arg, evaluated_arg)| arg.id() == evaluated_arg.id())
                     {
                         None
@@ -578,15 +570,14 @@ fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: Dy
             let mut num_short_circuit_signals = ShortCircuitCount::None;
             let (mut resolved_args, dependencies) = args
                 .iter()
-                .map(|item| item.as_deref())
                 .take(num_args)
                 .zip(arity.iter())
                 .map(|(arg, arg_type)| match arg_type {
                     ArgType::Strict | ArgType::Eager => {
                         let resolved_arg =
-                            resolve_eager_value(arg, state, factory, allocator, cache)
+                            resolve_eager_value(&arg, state, factory, allocator, cache)
                                 .unwrap_or_else(|| {
-                                    EvaluationResult::new(arg.clone(), DependencyList::empty())
+                                    EvaluationResult::new(arg, DependencyList::empty())
                                 });
                         let value = resolved_arg.result();
                         if is_unresolved_arg(value) {
@@ -599,7 +590,7 @@ fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: Dy
                         }
                         resolved_arg
                     }
-                    ArgType::Lazy => EvaluationResult::new(arg.clone(), DependencyList::empty()),
+                    ArgType::Lazy => EvaluationResult::new(arg, DependencyList::empty()),
                 })
                 .fold(
                     (Vec::<T>::with_capacity(num_args), DependencyList::empty()),
@@ -613,7 +604,7 @@ fn evaluate_function_args<T: Expression + Reducible<T> + Evaluate<T>, TState: Dy
                 (FunctionArgs::Unresolved(resolved_args), dependencies)
             } else if let Some(signal) = get_combined_short_circuit_signal(
                 num_short_circuit_signals,
-                &resolved_args,
+                resolved_args.iter().cloned(),
                 arity,
                 factory,
                 allocator,

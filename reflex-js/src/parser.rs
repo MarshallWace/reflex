@@ -2165,27 +2165,23 @@ mod tests {
         let signals = factory
             .match_signal_term(&combined_signal)
             .unwrap()
-            .signals()
-            .as_deref();
+            .signals();
+        let signals = signals.as_deref();
         signals
             .iter()
-            .map(|item| item.as_deref())
             .map(|signal| {
+                let payload = signal.payload();
                 let message = factory
-                    .match_record_term(signal.as_deref().payload().as_deref())
+                    .match_record_term(payload.as_deref())
                     .unwrap()
                     .get(&factory.create_string_term(allocator.create_static_string("message")))
-                    .map(|item| item.as_deref())
                     .unwrap();
-                String::from(
-                    factory
-                        .match_string_term(message)
-                        .unwrap()
-                        .value()
-                        .as_deref()
-                        .as_str()
-                        .deref(),
-                )
+                let value = factory
+                    .match_string_term(message.as_deref())
+                    .unwrap()
+                    .value();
+                let value = String::from(value.as_deref().as_str().deref());
+                value
             })
             .collect()
     }

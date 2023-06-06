@@ -1379,24 +1379,31 @@ fn parse_graphql_effect_args<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<GraphQlEffectArgs, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 6)
+        .filter(|args| args.items().as_deref().len() == 6)
         .ok_or_else(|| {
             format!(
                 "Invalid graphql signal: Expected 6 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|iter| iter.as_deref());
-    let url = parse_string_arg(args.next().unwrap(), factory);
-    let query = parse_string_arg(args.next().unwrap(), factory);
-    let operation_name = parse_optional_string_arg(args.next().unwrap(), factory);
-    let variables = parse_optional_object_arg(args.next().unwrap(), factory)?;
-    let extensions = parse_optional_object_arg(args.next().unwrap(), factory)?;
-    let headers = parse_optional_object_arg(args.next().unwrap(), factory)?;
+    let args = args.items();
+    let mut args = args.as_deref().iter();
+    let url = args.next().unwrap();
+    let query = args.next().unwrap();
+    let operation_name = args.next().unwrap();
+    let variables = args.next().unwrap();
+    let extensions = args.next().unwrap();
+    let headers = args.next().unwrap();
+    let url = parse_string_arg(&url, factory);
+    let query = parse_string_arg(&query, factory);
+    let operation_name = parse_optional_string_arg(&operation_name, factory);
+    let variables = parse_optional_object_arg(&variables, factory)?;
+    let extensions = parse_optional_object_arg(&extensions, factory)?;
+    let headers = parse_optional_object_arg(&headers, factory)?;
     match (url, query, operation_name, variables, extensions, headers) {
         (
             Some(url),
@@ -1454,11 +1461,10 @@ fn parse_object_arg<T: Expression>(
                 .keys()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .zip(value.values().as_deref().iter().map(|item| item.as_deref()))
+                .zip(value.values().as_deref().iter())
                 .filter_map(|(key, value)| {
-                    factory.match_string_term(key).map(|key| {
-                        reflex_json::sanitize(value).map(|value| {
+                    factory.match_string_term(&key).map(|key| {
+                        reflex_json::sanitize(&value).map(|value| {
                             (String::from(key.value().as_deref().as_str().deref()), value)
                         })
                     })

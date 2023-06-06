@@ -586,25 +586,26 @@ fn parse_scan_effect_args<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<ScanEffectArgs<T>, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 3)
+        .filter(|args| args.items().as_deref().len() == 3)
         .ok_or_else(|| {
             format!(
                 "Invalid scan signal: Expected 3 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|iter| iter.as_deref());
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let target = args.next().unwrap();
     let seed = args.next().unwrap();
     let iteratee = args.next().unwrap();
     Ok(ScanEffectArgs {
-        target: target.clone(),
-        seed: seed.clone(),
-        iteratee: iteratee.clone(),
+        target,
+        seed,
+        iteratee,
     })
 }
 

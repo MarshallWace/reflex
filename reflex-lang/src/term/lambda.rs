@@ -92,7 +92,7 @@ impl<T: Expression> GraphNode for LambdaTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for LambdaTerm<T> {
-    type Children<'a> = std::iter::Once<T::ExpressionRef<'a>>
+    type Children<'a> = std::iter::Once<T>
         where
             T: 'a,
             Self: 'a;
@@ -100,7 +100,7 @@ impl<T: Expression> CompoundNode<T> for LambdaTerm<T> {
     where
         T: 'a,
     {
-        once((&self.body).into())
+        once(self.body.clone())
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
@@ -190,8 +190,9 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for LambdaTerm<T> {
         eta_reduced_body
             .and_then(|eta_reduced_body| {
                 eta_reduced_body
+                    .as_deref()
                     .normalize(factory, allocator, cache)
-                    .or_else(|| Some(eta_reduced_body.clone()))
+                    .or_else(|| Some(eta_reduced_body.as_deref().clone()))
             })
             .or_else(|| normalized_body.map(|body| factory.create_lambda_term(self.num_args, body)))
     }
@@ -246,11 +247,12 @@ impl<T: Expression> SerializeJson for LambdaTerm<T> {
         ))
     }
 }
+
 fn apply_eta_reduction<'a, T: Expression>(
     body: &'a T,
     num_args: StackOffset,
     factory: &'a impl ExpressionFactory<T>,
-) -> Option<&'a T> {
+) -> Option<T::ExpressionRef<'a>> {
     match factory.match_application_term(body) {
         Some(term)
             if term.target().as_deref().capture_depth() == 0
@@ -259,14 +261,13 @@ fn apply_eta_reduction<'a, T: Expression>(
                     .args()
                     .as_deref()
                     .iter()
-                    .map(|arg| arg.as_deref())
                     .enumerate()
-                    .all(|(index, arg)| match factory.match_variable_term(arg) {
+                    .all(|(index, arg)| match factory.match_variable_term(&arg) {
                         Some(term) => term.offset() == num_args - index - 1,
                         _ => false,
                     }) =>
         {
-            Some(term.target().as_deref())
+            Some(term.target())
         }
         _ => None,
     }

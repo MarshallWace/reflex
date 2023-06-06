@@ -40,29 +40,28 @@ impl<T: Expression> Applicable<T> for Match {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let matcher = args.next().unwrap();
-        let result = match (
-            match_enum(&target, factory),
-            factory.match_list_term(&matcher),
-        ) {
-            (Some((discriminant, enum_args)), Some(matcher_term)) => Some({
-                match matcher_term
-                    .items()
-                    .as_deref()
-                    .get(discriminant)
-                    .map(|item| item.as_deref())
-                {
-                    Some(handler) => Ok(factory.create_application_term(
-                        handler.clone(),
-                        allocator.create_list(enum_args.into_iter().cloned()),
-                    )),
-                    None => Err(format!(
-                        "Unhandled enum index: {} for matcher {}",
-                        discriminant, matcher
-                    )),
-                }
-            }),
-            _ => None,
-        };
+        let result =
+            match (
+                match_enum(&target, factory),
+                factory.match_list_term(&matcher),
+            ) {
+                (Some((discriminant, enum_args)), Some(matcher_term)) => Some({
+                    match matcher_term
+                        .items()
+                        .as_deref()
+                        .get(discriminant)
+                        .map(|item| item.as_deref().clone())
+                    {
+                        Some(handler) => Ok(factory
+                            .create_application_term(handler, allocator.create_list(enum_args))),
+                        None => Err(format!(
+                            "Unhandled enum index: {} for matcher {}",
+                            discriminant, matcher
+                        )),
+                    }
+                }),
+                _ => None,
+            };
         match result {
             Some(result) => result,
             None => Err(format!(
@@ -78,23 +77,19 @@ pub(crate) fn match_enum<'a, T: Expression>(
     factory: &'a impl ExpressionFactory<T>,
 ) -> Option<(
     usize,
-    impl IntoIterator<Item = &'a T, IntoIter = impl ExactSizeIterator<Item = &'a T>>,
+    impl IntoIterator<Item = T, IntoIter = impl ExactSizeIterator<Item = T> + 'a> + 'a,
 )> {
     match factory.match_list_term(target) {
         Some(target) => target
             .items()
             .as_deref()
             .get(0)
-            .map(|item| item.as_deref())
-            .and_then(|discriminant| match factory.match_int_term(discriminant) {
+            .map(|item| item.as_deref().clone())
+            .and_then(|discriminant| match factory.match_int_term(&discriminant) {
                 Some(term) if term.value() >= 0 => Some((
                     term.value() as usize,
-                    target
-                        .items()
-                        .as_deref()
-                        .iter()
-                        .map(|item| item.as_deref())
-                        .skip(1),
+                    // TODO: avoid unnecessary intermediate allocations
+                    target.items().as_deref().iter().skip(1).collect::<Vec<_>>(),
                 )),
                 _ => None,
             }),

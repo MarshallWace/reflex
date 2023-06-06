@@ -60,10 +60,8 @@ impl<T: Expression> Applicable<T> for Slice {
                         .items()
                         .as_deref()
                         .iter()
-                        .map(|item| item.as_deref())
                         .skip(start_index)
-                        .take(end_index - start_index)
-                        .cloned(),
+                        .take(end_index - start_index),
                 ),
             )),
             _ => Err(format!(

@@ -37,11 +37,11 @@ pub(crate) fn serialize_generic_message<T: Expression>(
         .filter_map(|field_type| {
             // TODO: cache protobuf schema field name strings
             term.get(&factory.create_string_term(allocator.create_string(field_type.json_name())))
-                .map(|item| item.as_deref())
-                .filter(|value| factory.match_nil_term(value).is_none())
+                .filter(|value| factory.match_nil_term(value.as_deref()).is_none())
                 .map(|value| (field_type, value))
         })
         .map(|(field_type, value)| {
+            let value = value.as_deref();
             let field_value =
                 serialize_field_value(value, &field_type, transcoder, factory, allocator).map_err(
                     |err| TranscodeError {
@@ -87,8 +87,8 @@ fn serialize_oneof_field<T: Expression>(
         .filter_map(|field_type| {
             // TODO: cache protobuf schema field name strings
             term.get(&factory.create_string_term(allocator.create_string(field_type.json_name())))
-                .map(|item| item.as_deref())
-                .and_then(|field_value| {
+                .and_then(|term| {
+                    let field_value = term.as_deref();
                     if let Some(_) = factory.match_nil_term(field_value) {
                         None
                     } else {
@@ -156,10 +156,9 @@ fn serialize_list_field_value<T: Expression>(
             term.items()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .enumerate()
                 .map(|(index, value)| {
-                    serialize_simple_field_value(value, field_type, transcoder, factory, allocator)
+                    serialize_simple_field_value(&value, field_type, transcoder, factory, allocator)
                         .map_err(|err| err.with_path_prefix(index.into()))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
@@ -188,12 +187,11 @@ fn serialize_map_field_value<T: Expression>(
                 .keys()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .zip(term.values().as_deref().iter().map(|item| item.as_deref()))
+                .zip(term.values().as_deref().iter())
                 .map(|(key, value)| {
-                    serialize_map_key(key, factory).and_then(|key| {
+                    serialize_map_key(&key, factory).and_then(|key| {
                         match serialize_simple_field_value(
-                            value, field_type, transcoder, factory, allocator,
+                            &value, field_type, transcoder, factory, allocator,
                         ) {
                             Ok(value) => Ok((key, value)),
                             Err(err) => Err(err.with_path_prefix(key.into())),
@@ -205,12 +203,11 @@ fn serialize_map_field_value<T: Expression>(
     } else if let Some(term) = factory.match_hashmap_term(value) {
         Ok(Value::Map(
             term.keys()
-                .map(|item| item.as_deref())
-                .zip(term.values().map(|item| item.as_deref()))
+                .zip(term.values())
                 .map(|(key, value)| {
-                    serialize_map_key(key, factory).and_then(|key| {
+                    serialize_map_key(&key, factory).and_then(|key| {
                         match serialize_simple_field_value(
-                            value, field_type, transcoder, factory, allocator,
+                            &value, field_type, transcoder, factory, allocator,
                         ) {
                             Ok(value) => Ok((key, value)),
                             Err(err) => Err(err.with_path_prefix(key.into())),

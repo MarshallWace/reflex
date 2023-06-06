@@ -51,10 +51,9 @@ where
                 .items()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .map(|entry| {
-                    match get_indexed_field(entry, 0, factory, allocator).and_then(|key| {
-                        get_indexed_field(entry, 1, factory, allocator).map(|value| (key, value))
+                    match get_indexed_field(&entry, 0, factory, allocator).and_then(|key| {
+                        get_indexed_field(&entry, 1, factory, allocator).map(|value| (key, value))
                     }) {
                         Some((key, value)) => Ok((key, value)),
                         None => Err(format!(
@@ -110,8 +109,7 @@ where
             .items()
             .as_deref()
             .get(index)
-            .map(|value| value.as_deref())
-            .cloned()
+            .map(|value| value.as_deref().clone())
     } else if target.is_static() {
         None
     } else {

@@ -46,25 +46,23 @@ impl<T: Expression> Applicable<T> for Reduce {
                 .items()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
                 .fold(seed, |result, item| {
                     factory.create_application_term(
                         iteratee.clone(),
-                        allocator.create_pair(result, item.clone()),
+                        allocator.create_pair(result, item),
                     )
                 }))
         } else if let Some(target) = factory.match_hashmap_term(&target) {
             Ok(target
                 .keys()
-                .map(|item| item.as_deref())
-                .zip(target.values().map(|item| item.as_deref()))
+                .zip(target.values())
                 .fold(seed, |result, (key, value)| {
                     factory.create_application_term(
                         iteratee.clone(),
                         allocator.create_pair(
                             result,
                             factory.create_list_term(
-                                allocator.create_pair(key.clone(), value.clone()),
+                                allocator.create_pair(key, value),
                             ),
                         ),
                     )
@@ -72,11 +70,10 @@ impl<T: Expression> Applicable<T> for Reduce {
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Ok(target
                 .values()
-                .map(|item| item.as_deref())
                 .fold(seed, |result, value| {
                     factory.create_application_term(
                         iteratee.clone(),
-                        allocator.create_pair(result, value.clone()),
+                        allocator.create_pair(result, value),
                     )
                 }))
         } else {

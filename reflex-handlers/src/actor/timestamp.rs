@@ -335,19 +335,21 @@ fn parse_timestamp_effect_args<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Duration, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 1)
+        .filter(|args| args.items().as_deref().len() == 1)
         .ok_or_else(|| {
             format!(
                 "Invalid timestamp signal: Expected 1 argument, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|item| item.as_deref());
-    let interval = parse_duration_millis_arg(args.next().unwrap(), factory);
+    let args = args.items();
+    let mut args = args.as_deref().iter();
+    let interval = args.next().unwrap();
+    let interval = parse_duration_millis_arg(&interval, factory);
     match interval {
         Some(interval) if interval.as_millis() >= 1 => Ok(interval),
         _ => Err(format!("Invalid timestamp signal arguments: {}", payload)),

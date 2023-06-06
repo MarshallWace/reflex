@@ -41,7 +41,7 @@ impl<T: Expression> Applicable<T> for Car {
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         match match_cons_cell(&target, factory) {
-            Some((head, _tail)) => Ok(head.clone()),
+            Some((head, _tail)) => Ok(head),
             _ => Err(format!("Expected list, received {}", target)),
         }
     }

@@ -705,12 +705,13 @@ where
                     let effect_transaction_id = query_transaction_id
                         .map(|transaction_id| transaction_id.generate_child())
                         .unwrap_or_else(|| Traceparent::generate());
+                    let query_result =
+                        parse_evaluate_effect_query(&effect, &self.factory).map(|_| None);
                     entry.insert(TelemetryMiddlewareEffectState {
-                        effect: effect.clone(),
+                        effect,
                         transaction_id: Some(effect_transaction_id),
                         parent_transactions: query_transaction_id.into_iter().collect(),
-                        query_result: parse_evaluate_effect_query(effect, &self.factory)
-                            .map(|_| None),
+                        query_result,
                         subscription_count: 0,
                         latest_value: None,
                     });
@@ -927,18 +928,16 @@ where
 fn get_query_result_effects<'a, T: Expression>(
     result: &'a T,
     factory: &impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a T::Signal> + 'a {
-    factory
-        .match_signal_term(result)
-        .map(|term| {
-            term.signals()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
-        })
-        .into_iter()
-        .flatten()
+) -> Vec<T::Signal> {
+    match factory.match_signal_term(result) {
+        None => Vec::new(),
+        Some(term) => term
+            .signals()
+            .as_deref()
+            .iter()
+            .filter(|signal| matches!(signal.signal_type(), SignalType::Custom(_)))
+            .collect::<Vec<_>>(),
+    }
 }
 
 struct Diff<T1, T2> {
@@ -1017,8 +1016,10 @@ fn format_effect_attributes<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Vec<(String, String)> {
-    let payload = effect.payload().as_deref();
-    let token = effect.token().as_deref();
+    let payload = effect.payload();
+    let token = effect.token();
+    let payload = payload.as_deref();
+    let token = token.as_deref();
     vec![
         (String::from("effect.id"), format!("{}", effect.id())),
         (String::from("effect.type"), format_effect_label(effect)),

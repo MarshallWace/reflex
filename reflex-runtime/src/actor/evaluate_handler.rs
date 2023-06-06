@@ -162,20 +162,21 @@ pub fn parse_evaluate_effect_query<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Option<(String, T, QueryEvaluationMode, QueryInvalidationStrategy)> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 4)?;
-    let mut args = args.iter().map(|value| value.as_deref());
+        .filter(|args| args.items().as_deref().len() == 4)?;
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let label = args.next().unwrap();
     let query = args.next().unwrap();
     let evaluation_mode = args.next().unwrap();
     let invalidation_strategy = args.next().unwrap();
     match (
-        factory.match_string_term(label),
-        QueryEvaluationMode::deserialize(evaluation_mode, factory),
-        QueryInvalidationStrategy::deserialize(invalidation_strategy, factory),
+        factory.match_string_term(&label),
+        QueryEvaluationMode::deserialize(&evaluation_mode, factory),
+        QueryInvalidationStrategy::deserialize(&invalidation_strategy, factory),
     ) {
         (Some(label), Some(evaluation_mode), Some(invalidation_strategy)) => Some((
             String::from(label.value().as_deref().as_str().deref()),
@@ -212,20 +213,14 @@ pub fn parse_evaluate_effect_result<T: Expression>(
     factory: &impl ExpressionFactory<T>,
 ) -> Option<EvaluationResult<T>> {
     let evalution_result = factory.match_list_term(value)?;
-    let value = evalution_result.items().as_deref().get(0)?;
-    let dependencies = factory
-        .match_list_term(
-            evalution_result
-                .items()
-                .as_deref()
-                .get(1)
-                .map(|item| item.as_deref())?,
-        )?
-        .items()
+    let items = evalution_result.items();
+    let value = items.as_deref().get(0)?;
+    let dependencies = items.as_deref().get(1)?;
+    let dependencies = factory.match_list_term(dependencies.as_deref())?.items();
+    let dependencies = dependencies
         .as_deref()
         .iter()
-        .map(|item| item.as_deref())
-        .filter_map(|dependency| factory.match_symbol_term(dependency).map(|term| term.id()));
+        .filter_map(|dependency| factory.match_symbol_term(&dependency).map(|term| term.id()));
     Some(EvaluationResult::new(
         value.as_deref().clone(),
         DependencyList::from_iter(dependencies),
@@ -460,7 +455,6 @@ impl<T: Expression> WorkerState<T> {
                         .signals()
                         .as_deref()
                         .iter()
-                        .map(|item| item.as_deref())
                         .any(|signal| matches!(&signal.signal_type(), SignalType::Error))
                     {
                         WorkerResultStatus::Error
@@ -468,7 +462,6 @@ impl<T: Expression> WorkerState<T> {
                         .signals()
                         .as_deref()
                         .iter()
-                        .map(|item| item.as_deref())
                         .any(|signal| matches!(&signal.signal_type(), SignalType::Pending))
                     {
                         WorkerResultStatus::Pending
@@ -981,10 +974,11 @@ where
             .map(|effect| effect.id())
             .collect::<HashSet<_>>();
         let worker = state.workers.get_mut(cache_key)?;
-        let added_effects = parse_expression_effects(result.result(), &self.factory)
-            .filter(|effect| !existing_effect_ids.contains(&effect.id()))
-            .cloned()
-            .collect::<Vec<_>>();
+        let added_effects = parse_newly_added_expression_effects(
+            result.result(),
+            &existing_effect_ids,
+            &self.factory,
+        );
         for effect in added_effects.iter() {
             state.effects.insert(effect.id(), effect.clone());
         }
@@ -1346,8 +1340,7 @@ fn is_unresolved_result<T: Expression>(
             term.signals()
                 .as_deref()
                 .iter()
-                .map(|item| item.as_deref())
-                .any(is_unresolved_effect)
+                .any(|effect| is_unresolved_effect(&effect))
         })
         .unwrap_or(false)
 }
@@ -1359,19 +1352,21 @@ fn is_unresolved_effect<T: Expression<Signal = V>, V: ConditionType<T>>(effect: 
     }
 }
 
-fn parse_expression_effects<'a, T: Expression>(
-    value: &'a T,
-    factory: &'a impl ExpressionFactory<T>,
-) -> impl Iterator<Item = &'a T::Signal> + 'a {
-    factory
-        .match_signal_term(value)
-        .map(|term| {
-            term.signals()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .filter(|effect| matches!(effect.signal_type(), SignalType::Custom(_)))
-        })
-        .into_iter()
-        .flatten()
+fn parse_newly_added_expression_effects<T: Expression>(
+    value: &T,
+    existing_effect_ids: &HashSet<StateToken>,
+    factory: &impl ExpressionFactory<T>,
+) -> Vec<T::Signal> {
+    match factory.match_signal_term(value) {
+        None => Vec::new(),
+        Some(term) => term
+            .signals()
+            .as_deref()
+            .iter()
+            .filter(|effect| {
+                matches!(effect.signal_type(), SignalType::Custom(_))
+                    && !existing_effect_ids.contains(&effect.id())
+            })
+            .collect(),
+    }
 }

@@ -42,8 +42,7 @@ impl<T: Expression> Applicable<T> for Get {
         let key = args.next().unwrap();
         if let Some(term) = factory.match_record_term(&target) {
             term.get(&key)
-                .map(|item| item.as_deref())
-                .cloned()
+                .map(|item| item.as_deref().clone())
                 .ok_or_else(|| format!("Invalid field access: {} on struct {}", key, target))
         } else if let Some(term) = factory.match_list_term(&target) {
             let index = match factory.match_int_term(&key) {
@@ -65,15 +64,13 @@ impl<T: Expression> Applicable<T> for Get {
                     .items()
                     .as_deref()
                     .get(index)
-                    .map(|item| item.as_deref())
-                    .cloned()
+                    .map(|item| item.as_deref().clone())
                     .unwrap_or_else(|| factory.create_nil_term())),
             }
         } else if let Some(term) = factory.match_hashmap_term(&target) {
             Ok(term
                 .get(&key)
-                .map(|item| item.as_deref())
-                .cloned()
+                .map(|item| item.as_deref().clone())
                 .unwrap_or_else(|| factory.create_nil_term()))
         } else {
             Err(format!("Unable to access field {} on {}", key, target,))

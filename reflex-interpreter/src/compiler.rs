@@ -565,8 +565,8 @@ pub fn create_main_function(instructions: impl IntoIterator<Item = Instruction>)
     Program::new(instructions)
 }
 
-pub(crate) fn compile_expressions<'a, T: Expression + Compile<T> + 'a>(
-    values: impl IntoIterator<Item = &'a T>,
+pub(crate) fn compile_expressions<T: Expression + Compile<T>>(
+    values: impl IntoIterator<Item = T>,
     eager: Eagerness,
     stack_offset: StackOffset,
     factory: &impl ExpressionFactory<T>,
@@ -578,7 +578,7 @@ pub(crate) fn compile_expressions<'a, T: Expression + Compile<T> + 'a>(
         .enumerate()
         .fold(Ok(Program::new(empty())), |result, (index, value)| {
             let mut program = result?;
-            match compiler.compile_term(value, eager, stack_offset + index, factory, allocator) {
+            match compiler.compile_term(&value, eager, stack_offset + index, factory, allocator) {
                 Err(error) => Err(error),
                 Ok(compiled_expression) => {
                     program.extend(compiled_expression);

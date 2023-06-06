@@ -13,7 +13,7 @@ use reflex::{
         build_hashset_lookup_table, transform_expression_list, CompoundNode, DependencyList,
         DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory,
         ExpressionListIter, ExpressionListType, GraphNode, HashsetTermType, HeapAllocator,
-        Internable, RefType, Rewritable, SerializeJson, StackOffset, Substitutions,
+        Internable, Rewritable, SerializeJson, StackOffset, Substitutions,
     },
     hash::HashId,
 };
@@ -25,7 +25,7 @@ pub struct HashSetTerm<T: Expression> {
 }
 impl<T: Expression> HashSetTerm<T> {
     pub fn new(values: T::ExpressionList) -> Self {
-        let lookup = build_hashset_lookup_table(values.iter().map(|item| item.as_deref()));
+        let lookup = build_hashset_lookup_table(values.iter());
         Self { values, lookup }
     }
 }
@@ -109,9 +109,7 @@ impl<T: Expression + Rewritable<T>> Rewritable<T> for HashSetTerm<T> {
         transform_expression_list(&self.values, allocator, |value| {
             value.substitute_static(substitutions, factory, allocator, cache)
         })
-        .map(|values| {
-            factory.create_hashset_term(values.iter().map(|item| item.as_deref()).cloned())
-        })
+        .map(|values| factory.create_hashset_term(values.iter()))
     }
     fn substitute_dynamic(
         &self,
@@ -170,14 +168,12 @@ impl<T: Expression> std::fmt::Display for HashSetTerm<T> {
             if num_values <= max_displayed_values {
                 values
                     .iter()
-                    .map(|item| item.as_deref())
                     .map(|value| format!("{}", value))
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
                 values
                     .iter()
-                    .map(|item| item.as_deref())
                     .take(max_displayed_values - 1)
                     .map(|value| format!("{}", value))
                     .chain(once(format!(

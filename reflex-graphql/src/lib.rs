@@ -465,7 +465,6 @@ pub fn serialize_json_signal_errors<TTerm: SignalTermType<T>, T: Expression>(
         .signals()
         .as_deref()
         .iter()
-        .map(|item| item.as_deref())
         .filter(|signal| match signal.signal_type() {
             SignalType::Error => true,
             _ => false,

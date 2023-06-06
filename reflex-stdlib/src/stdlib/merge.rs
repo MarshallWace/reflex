@@ -51,10 +51,12 @@ impl<T: Expression> Applicable<T> for Merge {
                     .items()
                     .as_deref()
                     .iter()
-                    .map(|item| item.as_deref())
-                    .filter_map(|arg| match factory.match_record_term(arg) {
-                        Some(term) => Some(Ok((term.prototype(), term.values().as_deref()))),
-                        None => match factory.match_nil_term(arg) {
+                    .filter_map(|arg| match factory.match_record_term(&arg) {
+                        Some(term) => Some(Ok((
+                            term.prototype().as_deref().clone(),
+                            term.values().as_deref().clone(),
+                        ))),
+                        None => match factory.match_nil_term(&arg) {
                             Some(_) => None,
                             _ => Some(Err(format!("Expected <struct>, received {}", arg))),
                         },
@@ -77,16 +79,7 @@ impl<T: Expression> Applicable<T> for Merge {
                                 Vec::new(),
                                 |mut combined_properties, (prototype, values)| {
                                     combined_properties.extend(
-                                        prototype
-                                            .as_deref()
-                                            .keys()
-                                            .as_deref()
-                                            .iter()
-                                            .map(|item| item.as_deref())
-                                            .cloned()
-                                            .zip(
-                                                values.iter().map(|item| item.as_deref()).cloned(),
-                                            ),
+                                        prototype.keys().as_deref().iter().zip(values.iter()),
                                     );
                                     combined_properties
                                 },
@@ -112,27 +105,21 @@ impl<T: Expression> Applicable<T> for Merge {
                             },
                         );
                         let (prototype, values) = if deduplicated_keys.len()
-                            == base_prototype.as_deref().keys().as_deref().len()
+                            == base_prototype.keys().as_deref().len()
                         {
                             let values = if keys.len() == deduplicated_keys.len() {
                                 allocator.create_list(values)
                             } else {
-                                allocator.create_list(
-                                    base_prototype
-                                        .as_deref()
-                                        .keys()
-                                        .as_deref()
-                                        .iter()
-                                        .map(|item| item.as_deref())
-                                        .map(|key| {
-                                            deduplicated_keys
-                                                .remove(&key.id())
-                                                .map(|index| values.get(index).cloned().unwrap())
-                                                .unwrap()
-                                        }),
-                                )
+                                allocator.create_list(base_prototype.keys().as_deref().iter().map(
+                                    |key| {
+                                        deduplicated_keys
+                                            .remove(&key.id())
+                                            .map(|index| values.get(index).cloned().unwrap())
+                                            .unwrap()
+                                    },
+                                ))
                             };
-                            (allocator.clone_struct_prototype(base_prototype), values)
+                            (base_prototype, values)
                         } else if deduplicated_keys.len() == keys.len() {
                             (
                                 allocator.create_struct_prototype(allocator.create_list(keys)),

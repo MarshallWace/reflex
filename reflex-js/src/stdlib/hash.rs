@@ -45,12 +45,7 @@ impl<T: Expression> Applicable<T> for Hash {
         match factory.match_list_term(&parsed_args) {
             Some(parsed_args) => {
                 let mut hasher = DefaultHasher::new();
-                for arg in parsed_args
-                    .items()
-                    .as_deref()
-                    .iter()
-                    .map(|item| item.as_deref())
-                {
+                for arg in parsed_args.items().as_deref().iter() {
                     std::hash::Hash::hash(&arg.id(), &mut hasher);
                 }
                 let hash = hasher.finish();

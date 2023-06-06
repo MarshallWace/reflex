@@ -44,8 +44,8 @@ impl<T: Expression> Applicable<T> for IfError {
             let (error_signals, other_signals) = signal.signals().as_deref().iter().fold(
                 (Vec::new(), Vec::new()),
                 |(mut error_signals, mut other_signals), signal| {
-                    if signal.as_deref().signal_type() == SignalType::Error {
-                        error_signals.push(signal.as_deref());
+                    if signal.signal_type() == SignalType::Error {
+                        error_signals.push(signal);
                     } else {
                         other_signals.push(signal);
                     }
@@ -55,13 +55,7 @@ impl<T: Expression> Applicable<T> for IfError {
             if error_signals.is_empty() {
                 Ok(target.clone())
             } else if !other_signals.is_empty() {
-                Ok(factory.create_signal_term(
-                    allocator.create_signal_list(
-                        other_signals
-                            .into_iter()
-                            .map(|signal| allocator.clone_signal(signal)),
-                    ),
-                ))
+                Ok(factory.create_signal_term(allocator.create_signal_list(other_signals)))
             } else {
                 Ok(factory.create_application_term(
                     handler,
@@ -70,9 +64,7 @@ impl<T: Expression> Applicable<T> for IfError {
                             allocator.create_list(
                                 error_signals
                                     .into_iter()
-                                    .map(|signal| signal.payload())
-                                    .map(|item| item.as_deref())
-                                    .cloned(),
+                                    .map(|signal| signal.payload().as_deref().clone()),
                             ),
                         ),
                     ),

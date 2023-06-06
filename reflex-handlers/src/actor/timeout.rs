@@ -333,19 +333,21 @@ fn parse_timeout_effect_args<T: Expression>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<Option<Duration>, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 1)
+        .filter(|args| args.items().as_deref().len() == 1)
         .ok_or_else(|| {
             format!(
                 "Invalid timeout signal: Expected 1 argument, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|item| item.as_deref());
-    let duration = parse_duration_millis_arg(args.next().unwrap(), factory);
+    let args = args.items();
+    let mut args = args.as_deref().iter();
+    let duration = args.next().unwrap();
+    let duration = parse_duration_millis_arg(&duration, factory);
     match duration {
         Some(duration) if duration.as_millis() == 0 => Ok(None),
         Some(duration) => Ok(Some(duration.max(Duration::from_millis(1)))),

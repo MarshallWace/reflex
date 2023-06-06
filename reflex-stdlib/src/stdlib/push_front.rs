@@ -51,9 +51,7 @@ impl<T: Expression> Applicable<T> for PushFront {
                         collection
                             .items()
                             .as_deref()
-                            .iter()
-                            .map(|item| item.as_deref())
-                            .cloned(),
+                            .iter(),
                     ),
                 ),
             ))
@@ -64,8 +62,6 @@ impl<T: Expression> Applicable<T> for PushFront {
                 let values = collection.values();
                 factory.create_hashset_term(
                     values
-                        .map(|item| item.as_deref())
-                        .cloned()
                         .chain(once(value))
                         .collect::<Vec<_>>(),
                 )

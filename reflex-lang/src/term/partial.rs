@@ -11,7 +11,7 @@ use serde_json::Value as JsonValue;
 use reflex::core::{
     transform_expression_list, Applicable, ArgType, Arity, CompoundNode, DependencyList,
     DynamicState, Eagerness, EvaluationCache, Expression, ExpressionFactory, ExpressionListIter,
-    ExpressionListType, GraphNode, HeapAllocator, Internable, PartialApplicationTermType, RefType,
+    ExpressionListType, GraphNode, HeapAllocator, Internable, PartialApplicationTermType,
     Rewritable, SerializeJson, StackOffset, Substitutions,
 };
 
@@ -80,7 +80,6 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
             let eager_args = self.target.arity().map(|arity| {
                 self.args
                     .iter()
-                    .map(|arg| arg.as_deref())
                     .zip(arity.iter())
                     .filter_map(|(arg, arg_type)| match arg_type {
                         ArgType::Strict | ArgType::Eager => Some(arg),
@@ -101,14 +100,12 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
                 self.args.has_dynamic_dependencies(deep)
             } else {
                 let eager_args = self.target.arity().map(|arity| {
-                    self.args
-                        .iter()
-                        .map(|item| item.as_deref())
-                        .zip(arity.iter())
-                        .filter_map(|(arg, arg_type)| match arg_type {
+                    self.args.iter().zip(arity.iter()).filter_map(
+                        |(arg, arg_type)| match arg_type {
                             ArgType::Strict | ArgType::Eager => Some(arg),
                             _ => None,
-                        })
+                        },
+                    )
                 });
                 match eager_args {
                     None => false,
@@ -127,7 +124,7 @@ impl<T: Expression + Applicable<T>> GraphNode for PartialApplicationTerm<T> {
     }
 }
 impl<T: Expression> CompoundNode<T> for PartialApplicationTerm<T> {
-    type Children<'a> = std::iter::Chain<std::iter::Once<T::ExpressionRef<'a>>, ExpressionListIter<'a, T>>
+    type Children<'a> = std::iter::Chain<std::iter::Once<T>, ExpressionListIter<'a, T>>
         where
             T: 'a,
             Self: 'a;
@@ -135,7 +132,7 @@ impl<T: Expression> CompoundNode<T> for PartialApplicationTerm<T> {
     where
         T: 'a,
     {
-        once((&self.target).into()).chain(self.args.iter())
+        once(self.target.clone()).chain(self.args.iter())
     }
 }
 impl<T: Expression + Rewritable<T>> Rewritable<T> for PartialApplicationTerm<T> {
@@ -238,8 +235,6 @@ impl<T: Expression + Applicable<T>> Applicable<T> for PartialApplicationTerm<T> 
         self.target.apply(
             self.args
                 .iter()
-                .map(|item| item.as_deref())
-                .cloned()
                 .chain(args.into_iter())
                 .collect::<Vec<_>>() // Required to prevent infinite type recursion
                 .into_iter(),

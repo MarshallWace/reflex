@@ -209,28 +209,17 @@ impl<T: Expression> LoaderHandlerState<T> {
             effect: combined_effect.clone(),
             subscriptions: keys
                 .iter()
-                .map(|item| item.as_deref())
                 .enumerate()
-                .filter_map(|(index, key)| {
-                    effects
-                        .get(index)
-                        .map(|effect| (key.clone(), effect.clone()))
-                })
+                .filter_map(|(index, key)| effects.get(index).map(|effect| (key, effect.clone())))
                 .map(|(key, effect)| LoaderEntitySubscription { key, effect })
                 .collect(),
-            active_keys: keys
-                .iter()
-                .map(|item| item.as_deref())
-                .map(LoaderKeyHash::new)
-                .collect(),
+            active_keys: keys.iter().map(|item| LoaderKeyHash::new(&item)).collect(),
             latest_result: None,
         };
         let num_previous_keys = loader_state.active_keys.len();
-        loader_state.active_keys.extend(
-            keys.iter()
-                .map(|item| item.as_deref())
-                .map(LoaderKeyHash::new),
-        );
+        loader_state
+            .active_keys
+            .extend(keys.iter().map(|item| LoaderKeyHash::new(&item)));
         let num_added_keys = loader_state.active_keys.len() - num_previous_keys;
         let metric_labels = [("loader_name", name)];
         increment_gauge!(
@@ -636,7 +625,8 @@ where
                 let (value, _) = parse_evaluate_effect_result(update, &self.factory)?.into_parts();
                 batch.latest_result.replace(value.clone());
                 let mut results = if let Some(value) = self.factory.match_list_term(&value) {
-                    let items = value.items().as_deref();
+                    let items = value.items();
+                    let items = items.as_deref();
                     if items.len() != batch.subscriptions.len() {
                         Err(create_error_expression(
                             format!(
@@ -656,8 +646,7 @@ where
                             .filter_map(|(index, subscription)| {
                                 items
                                     .get(index)
-                                    .map(|value| value.as_deref())
-                                    .cloned()
+                                    .map(|value| value.as_deref().clone())
                                     .map(|value| (LoaderKeyHash::new(&subscription.key), value))
                             })
                             .collect::<HashMap<_, _>>())
@@ -669,8 +658,7 @@ where
                         .filter_map(|subscription| {
                             value
                                 .get(&subscription.key)
-                                .map(|item| item.as_deref())
-                                .cloned()
+                                .map(|item| item.as_deref().clone())
                                 .map(|value| (LoaderKeyHash::new(&subscription.key), value))
                         })
                         .collect::<HashMap<_, _>>();
@@ -767,8 +755,7 @@ fn has_error_message_effects<T: Expression>(
     term.signals()
         .as_deref()
         .iter()
-        .map(|item| item.as_deref())
-        .any(|effect| as_error_message_effect(effect, factory).is_some())
+        .any(|effect| as_error_message_effect(&effect, factory).is_some())
 }
 
 fn prefix_error_message_effects<T: Expression>(
@@ -778,42 +765,36 @@ fn prefix_error_message_effects<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T {
     factory.create_signal_term(
-        allocator.create_signal_list(
-            term.signals()
-                .as_deref()
-                .iter()
-                .map(|item| item.as_deref())
-                .map(|signal| {
-                    if let Some(message) = as_error_message_effect(signal, factory) {
-                        allocator.create_signal(
-                            signal.signal_type().clone(),
-                            factory.create_string_term(allocator.create_string(format!(
-                                "{}{}",
-                                prefix,
-                                message.as_str().deref(),
-                            ))),
-                            signal.token().as_deref().clone(),
-                        )
-                    } else {
-                        signal.clone()
-                    }
-                }),
-        ),
+        allocator.create_signal_list(term.signals().as_deref().iter().map(|signal| {
+            if let Some(message) = as_error_message_effect(&signal, factory) {
+                allocator.create_signal(
+                    signal.signal_type().clone(),
+                    factory.create_string_term(allocator.create_string(format!(
+                        "{}{}",
+                        prefix,
+                        message.as_str().deref(),
+                    ))),
+                    signal.token().as_deref().clone(),
+                )
+            } else {
+                signal
+            }
+        })),
     )
 }
 
 fn as_error_message_effect<'a, T: Expression + 'a>(
     effect: &'a T::Signal,
     factory: &impl ExpressionFactory<T>,
-) -> Option<&'a T::String> {
+) -> Option<T::String> {
     if !matches!(effect.signal_type(), SignalType::Error) {
         return None;
     }
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     factory
         .match_string_term(payload)
-        .map(|value| value.as_deref())
-        .map(|term| term.value().as_deref())
+        .map(|term| term.value().as_deref().clone())
 }
 
 struct LoaderEffectArgs<T: Expression> {
@@ -826,31 +807,30 @@ fn parse_loader_effect_args<T: Expression + Applicable<T>>(
     effect: &T::Signal,
     factory: &impl ExpressionFactory<T>,
 ) -> Result<LoaderEffectArgs<T>, String> {
-    let payload = effect.payload().as_deref();
+    let payload = effect.payload();
+    let payload = payload.as_deref();
     let args = factory
         .match_list_term(payload)
-        .map(|term| term.items().as_deref())
-        .filter(|args| args.len() == 3)
+        .filter(|args| args.items().as_deref().len() == 3)
         .ok_or_else(|| {
             format!(
                 "Invalid loader signal: Expected 3 arguments, received {}",
                 payload
             )
         })?;
-    let mut args = args.iter().map(|iter| iter.as_deref());
+    let args = args.items();
+    let mut args = args.as_deref().iter();
     let name = args.next().unwrap();
     let loader = args.next().unwrap();
     let key = args.next().unwrap();
     let name = factory
-        .match_string_term(name)
-        .map(|term| term.value().as_deref().as_str())
-        .ok_or(name);
+        .match_string_term(&name)
+        .map(|term| String::from(term.value().as_deref().as_str().deref()))
+        .ok_or_else(|| name);
     match (name, loader.arity()) {
-        (Ok(name), Some(arity)) if is_valid_loader_signature(&arity) => Ok(LoaderEffectArgs {
-            name: String::from(name.deref()),
-            loader: loader.clone(),
-            key: key.clone(),
-        }),
+        (Ok(name), Some(arity)) if is_valid_loader_signature(&arity) => {
+            Ok(LoaderEffectArgs { name, loader, key })
+        }
         _ => Err(format!(
             "Invalid loader factory: Expected <function:1>, received {}",
             loader
