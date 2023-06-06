@@ -179,11 +179,15 @@ pub trait HashmapTermType<T: Expression> {
     where
         T: 'a,
         Self: 'a;
-    fn get<'a>(&'a self, value: &T) -> Option<T::Ref<'a, T>>
+    fn get<'a>(&'a self, key: &T) -> Option<T::Ref<'a, T>>
     where
         T: 'a;
-    fn keys<'a>(&'a self) -> Self::KeysIterator<'a>;
-    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>;
+    fn keys<'a>(&'a self) -> Self::KeysIterator<'a>
+    where
+        T: 'a;
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>
+    where
+        T: 'a;
 }
 pub trait HashsetTermType<T: Expression> {
     type ValuesIterator<'a>: ExactSizeIterator<Item = T::Ref<'a, T>>
@@ -191,7 +195,9 @@ pub trait HashsetTermType<T: Expression> {
         T: 'a,
         Self: 'a;
     fn contains(&self, value: &T) -> bool;
-    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>;
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>
+    where
+        T: 'a;
 }
 pub trait SignalTermType<T: Expression> {
     fn signals<'a>(&'a self) -> T::Ref<'a, T::SignalList<T>>
@@ -226,7 +232,9 @@ pub trait ExpressionListType<T: Expression>:
     fn get<'a>(&'a self, index: usize) -> Option<T::Ref<'a, T>>
     where
         T: 'a;
-    fn iter<'a>(&'a self) -> Self::Iterator<'a>;
+    fn iter<'a>(&'a self) -> Self::Iterator<'a>
+    where
+        T: 'a;
 }
 
 pub trait ConditionListType<T: Expression>:
@@ -239,7 +247,10 @@ pub trait ConditionListType<T: Expression>:
         Self: 'a;
     fn id(&self) -> HashId;
     fn len(&self) -> usize;
-    fn iter<'a>(&'a self) -> Self::Iterator<'a>;
+    fn iter<'a>(&'a self) -> Self::Iterator<'a>
+    where
+        T::Signal<T>: 'a,
+        T: 'a;
 }
 pub trait StructPrototypeType<T: Expression>:
     PartialEq + Eq + Clone + std::fmt::Display + std::fmt::Debug
@@ -338,6 +349,46 @@ impl<'iter, T: 'iter, TRef, TIter> ExactSizeIterator for IntoRefTypeIterator<T, 
 where
     TIter: Iterator<Item = &'iter T> + ExactSizeIterator,
     TRef: RefType<'iter, T> + From<&'iter T>,
+{
+    fn len(&self) -> usize {
+        let Self { inner, .. } = self;
+        inner.len()
+    }
+}
+
+pub struct FromRefTypeIterator<'iter, T, TRef, TIter> {
+    inner: TIter,
+    _ref: PhantomData<TRef>,
+    _type: PhantomData<&'iter T>,
+}
+impl<'iter, T: 'iter, TRef, TIter> FromRefTypeIterator<'iter, T, TRef, TIter>
+where
+    TIter: Iterator<Item = TRef>,
+    TRef: RefType<'iter, T>,
+{
+    pub fn new(inner: TIter) -> Self {
+        Self {
+            inner,
+            _ref: Default::default(),
+            _type: Default::default(),
+        }
+    }
+}
+impl<'iter, T: 'iter, TRef, TIter> Iterator for FromRefTypeIterator<'iter, T, TRef, TIter>
+where
+    TIter: Iterator<Item = TRef>,
+    TRef: RefType<'iter, T>,
+{
+    type Item = &'iter T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let Self { inner, .. } = self;
+        inner.next().map(|item| item.as_deref())
+    }
+}
+impl<'iter, T: 'iter, TRef, TIter> ExactSizeIterator for FromRefTypeIterator<'iter, T, TRef, TIter>
+where
+    TIter: Iterator<Item = TRef> + ExactSizeIterator,
+    TRef: RefType<'iter, T>,
 {
     fn len(&self) -> usize {
         let Self { inner, .. } = self;

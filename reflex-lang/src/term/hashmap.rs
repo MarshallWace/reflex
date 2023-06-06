@@ -129,10 +129,16 @@ impl<T: Expression> HashmapTermType<T> for HashMapTerm<T> {
         where
             T: 'a,
             Self: 'a;
-    fn keys<'a>(&'a self) -> Self::KeysIterator<'a> {
+    fn keys<'a>(&'a self) -> Self::KeysIterator<'a>
+    where
+        T: 'a,
+    {
         self.keys.iter()
     }
-    fn values<'a>(&'a self) -> Self::ValuesIterator<'a> {
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>
+    where
+        T: 'a,
+    {
         self.values.iter()
     }
     fn get<'a>(&'a self, key: &T) -> Option<T::Ref<'a, T>>

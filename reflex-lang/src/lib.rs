@@ -73,7 +73,10 @@ impl<T: Expression> ExpressionListType<T> for ExpressionList<T> {
     {
         self.items.get(index).map(|item| item.into())
     }
-    fn iter<'a>(&'a self) -> Self::Iterator<'a> {
+    fn iter<'a>(&'a self) -> Self::Iterator<'a>
+    where
+        T: 'a,
+    {
         IntoRefTypeIterator::new(self.items.iter())
     }
 }
@@ -198,15 +201,20 @@ impl<T: Expression> ConditionListType<T> for SignalList<T> {
     type Iterator<'a> = IntoRefTypeIterator<T::Signal<T>, T::Ref<'a, T::Signal<T>>, std::collections::btree_set::Iter<'a, T::Signal<T>>>
         where
             T::Signal<T>: 'a,
+            T: 'a,
             Self: 'a;
+    fn id(&self) -> u64 {
+        self.id
+    }
     fn len(&self) -> usize {
         self.signals.len()
     }
-    fn iter<'a>(&'a self) -> Self::Iterator<'a> {
+    fn iter<'a>(&'a self) -> Self::Iterator<'a>
+    where
+        T::Signal<T>: 'a,
+        T: 'a,
+    {
         IntoRefTypeIterator::new(self.signals.iter())
-    }
-    fn id(&self) -> u64 {
-        self.id
     }
 }
 impl<T: Expression> std::fmt::Display for SignalList<T> {

@@ -42,7 +42,10 @@ impl<T: Expression> HashsetTermType<T> for HashSetTerm<T> {
     fn contains(&self, value: &T) -> bool {
         self.lookup.contains(&value.id())
     }
-    fn values<'a>(&'a self) -> Self::ValuesIterator<'a> {
+    fn values<'a>(&'a self) -> Self::ValuesIterator<'a>
+    where
+        T: 'a,
+    {
         self.values.iter()
     }
 }
