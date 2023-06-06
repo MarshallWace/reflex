@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{ExpressionList, Signal, SignalList, StructPrototype};
-use reflex::core::{Expression, HeapAllocator, RefType, SignalType, StringValue};
+use reflex::core::{Expression, HeapAllocator, RefType, SignalType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
@@ -105,8 +105,7 @@ impl<
         value.into()
     }
     fn create_static_string(&self, value: &'static str) -> T::String {
-        T::String::from_static(Option::<T::String>::None, value)
-            .unwrap_or_else(|| self.create_string(value))
+        self.create_string(value)
     }
     fn clone_string<'a>(&self, value: T::StringRef<'a>) -> T::String {
         value.as_deref().clone()

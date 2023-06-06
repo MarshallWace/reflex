@@ -926,7 +926,6 @@ where
         Self: 'a;
     fn id(&self) -> HashId;
     fn as_str<'a>(&'a self) -> Self::StringRef<'a>;
-    fn from_static(_self: Option<Self>, value: &'static str) -> Option<Self>;
 }
 impl StringValue for String {
     type StringRef<'a> = &'a str
@@ -937,9 +936,6 @@ impl StringValue for String {
     }
     fn as_str<'a>(&'a self) -> Self::StringRef<'a> {
         self.as_str()
-    }
-    fn from_static(_self: Option<Self>, value: &'static str) -> Option<Self> {
-        Some(Self::from(value))
     }
 }
 
