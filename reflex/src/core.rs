@@ -313,13 +313,25 @@ where
 }
 impl<'iter, T: 'iter, TRef, TIter> Iterator for IntoRefTypeIterator<T, TRef, TIter>
 where
-    TIter: Iterator<Item = &'iter T>,
+    TIter: Iterator<Item = &'iter T> + ExactSizeIterator,
     TRef: RefType<'iter, T> + From<&'iter T>,
 {
     type Item = TRef;
     fn next(&mut self) -> Option<Self::Item> {
         let Self { inner, .. } = self;
         inner.next().map(|item| item.into())
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let Self { inner, .. } = self;
+        let len = inner.len();
+        (len, Some(len))
+    }
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        let Self { inner, .. } = self;
+        inner.len()
     }
 }
 impl<'iter, T: 'iter, TRef, TIter> ExactSizeIterator for IntoRefTypeIterator<T, TRef, TIter>
