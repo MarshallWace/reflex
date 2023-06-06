@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
+use std::iter::empty;
+
 use reflex::core::{
     deduplicate_hashset_entries, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression,
     ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType,
@@ -46,7 +48,7 @@ where
         let mut args = args.into_iter();
         let values = args.next().unwrap();
         if is_nil_term(&values, factory) {
-            Ok(factory.create_hashset_term(allocator.create_empty_list()))
+            Ok(factory.create_hashset_term(empty()))
         } else if let Some(values) = factory.match_list_term(&values) {
             let values = values
                 .items()
@@ -66,7 +68,7 @@ where
                     Some(values) => values,
                     _ => values,
                 };
-                Ok(factory.create_hashset_term(allocator.create_list(values)))
+                Ok(factory.create_hashset_term(values))
             }
         } else {
             Err(format!(
@@ -83,6 +85,8 @@ fn is_nil_term<T: Expression>(expression: &T, factory: &impl ExpressionFactory<T
 
 #[cfg(test)]
 mod tests {
+    use std::iter::empty;
+
     use crate::{builtins::JsBuiltins, globals::builtin_globals, parse, Env};
     use reflex::{
         cache::SubstitutionCache,
@@ -105,7 +109,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_hashset_term(allocator.create_empty_list()),
+                factory.create_hashset_term(empty()),
                 DependencyList::empty(),
             )
         );
@@ -114,7 +118,7 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_hashset_term(allocator.create_empty_list()),
+                factory.create_hashset_term(empty()),
                 DependencyList::empty(),
             )
         );
@@ -129,11 +133,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_hashset_term(allocator.create_list(vec![
+                factory.create_hashset_term([
                     factory.create_string_term(allocator.create_static_string("one")),
                     factory.create_string_term(allocator.create_static_string("two")),
                     factory.create_string_term(allocator.create_static_string("three")),
-                ])),
+                ]),
                 DependencyList::empty(),
             )
         );
@@ -148,11 +152,11 @@ mod tests {
         assert_eq!(
             result,
             EvaluationResult::new(
-                factory.create_hashset_term(allocator.create_list(vec![
+                factory.create_hashset_term([
                     factory.create_string_term(allocator.create_static_string("one")),
                     factory.create_string_term(allocator.create_static_string("two")),
                     factory.create_string_term(allocator.create_static_string("three")),
-                ])),
+                ]),
                 DependencyList::empty(),
             )
         );
