@@ -1,5 +1,35 @@
 # Reflex developer guide
 
+## Loading data via effect handlers
+
+Reflex provides various data-loading mechanisms for interfacing with [HTTP](./reflex-http), [gRPC](./reflex-grpc) and [GraphQL](./reflex-graphql) data sources, as well as a [batch-loading helper](./reflex-batch) and a set of helpers for dealing with [stateful computations](./reflex-state).
+
+Stateful computations and data-loading are achieved via various add-on packages (these are already included with the bundled [server implementation](./reflex-server)):
+
+- [`reflex-http`](./reflex-handlers): HTTP fetch support
+- [`reflex-grpc`](./reflex-grpc): Client library for interfacing with gRPC servers
+- [`reflex-graphql`](./reflex-graphql): Client library for interfacing with GraphQL servers
+- [`reflex-batch`](./reflex-batch): Batch data loader (compatible with all other effect handlers)
+- [`reflex-state`](./reflex-handlers): Stateful computation helpers
+
+## Extending out-of-the-box Reflex configurations
+
+For the more adventurous, custom data sources can be implemented natively in Rust by implementing the [effect-handler](./reflex-runtime/docs/effect-handler.md) interface, along with an extensible [standard library](./reflex-stdlib) and a set of [base primitives](./reflex) that allow you to implement your own reactive programming languages.
+
+The bundled set of data loaders can be extended by implementing custom support for arbitrary data sources:
+
+- [`reflex-runtime`](./reflex-runtime): Base primitives used to implement custom side-effect handlers
+
+The Reflex standard library is fully extensible, with a common base set of methods that can be enhanced by the specific language implementations:
+
+- [`reflex-stdlib`](./reflex-stdlib): Common standard library methods useful for general-purpose languages
+
+If you want to use Reflex to develop your own languages, you may find the following packages useful:
+
+- [`reflex`](./reflex): Core primitives used to implement custom languages
+- [`reflex-lisp`](./reflex-lisp): Simple proof-of-concept that demonstrates how to implement a basic S-expression language with a default set of standard library methods
+- [`reflex-js`](./reflex-js): Advanced implementation of a general-purpose JavaScript subset, including various additional standard library methods
+
 ## Codebase structure
 
 The codebase is largely split between two 'worlds', which roughly speaking deal with 'sync' vs 'async' concerns:
