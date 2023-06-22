@@ -23,7 +23,7 @@ use reflex_js::{
     JsParserBuiltin,
 };
 
-use crate::{compile_graph_root, SyntaxParser};
+use crate::{compile_graph_root, syntax::json::json_loader, SyntaxParser};
 
 pub fn default_js_loaders<'a, T: Expression + 'static>(
     imports: impl IntoIterator<
@@ -43,7 +43,10 @@ where
                 .chain(builtin_imports(factory, allocator))
                 .chain(handler_imports(factory, allocator)),
         ),
-        graphql_loader(factory, allocator),
+        compose_module_loaders(
+            json_loader(factory, allocator),
+            graphql_loader(factory, allocator),
+        ),
     )
 }
 
