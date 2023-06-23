@@ -122,9 +122,9 @@ blanket_trait!(
     pub trait GrpcHandlerTask<T, TFactory, TAllocator, TTranscoder>:
         From<GrpcHandlerConnectionTaskFactory>
     where
-        T: AsyncExpression,
-        TFactory: AsyncExpressionFactory<T>,
-        TAllocator: AsyncHeapAllocator<T>,
+        T: Expression,
+        TFactory: ExpressionFactory<T>,
+        TAllocator: HeapAllocator<T>,
         TTranscoder: ProtoTranscoder + Send + 'static,
     {
     }
@@ -1256,7 +1256,7 @@ fn parse_grpc_endpoint(
 ) -> Result<tonic::transport::Endpoint, String> {
     match tonic::transport::Endpoint::from_str(url.as_str()) {
         Err(err) => Err(format!("Invalid gRPC endpoint URL: {}", err)),
-        Ok(endpoint) => Ok(config.configure(endpoint)),
+        Ok(endpoint) => config.configure(endpoint).map_err(|err| format!("{}", err)),
     }
 }
 

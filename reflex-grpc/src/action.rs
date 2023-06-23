@@ -109,7 +109,7 @@ impl From<GrpcMetadata> for MetadataMap {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum GrpcHandlerActions {
     ConnectSuccess(GrpcHandlerConnectSuccessAction),
     ConnectError(GrpcHandlerConnectErrorAction),
@@ -389,7 +389,7 @@ impl SerializableAction for GrpcHandlerConnectErrorAction {
     }
 }
 
-#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerRequestStartAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -431,7 +431,7 @@ impl SerializableAction for GrpcHandlerRequestStartAction {
     }
 }
 
-#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerRequestStopAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -492,7 +492,7 @@ impl SerializableAction for GrpcHandlerSuccessResponseAction {
     }
 }
 
-#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerErrorResponseAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -531,7 +531,7 @@ impl SerializableAction for GrpcHandlerErrorResponseAction {
     }
 }
 
-#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerTransportErrorAction {
     pub connection_id: Uuid,
     pub url: String,
@@ -570,7 +570,7 @@ impl SerializableAction for GrpcHandlerTransportErrorAction {
     }
 }
 
-#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerAbortRequestAction {
     pub connection_id: Uuid,
     pub operation_id: Uuid,
@@ -591,7 +591,7 @@ impl SerializableAction for GrpcHandlerAbortRequestAction {
     }
 }
 
-#[derive(Named, PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Named, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct GrpcHandlerConnectionTerminateAction {
     pub connection_id: Uuid,
     pub url: String,
