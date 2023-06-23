@@ -12,6 +12,7 @@ use reflex::{
     },
     env::inject_env_vars,
 };
+use reflex_grpc::loader::{create_grpc_loader, GrpcLoaderBuiltin};
 use reflex_handlers::{
     imports::{handler_imports, HandlerImportsBuiltin},
     loader::graphql_loader,
@@ -34,7 +35,11 @@ pub fn default_js_loaders<'a, T: Expression + 'static>(
     allocator: &(impl HeapAllocator<T> + Clone + 'static),
 ) -> impl Fn(&str, &Path) -> Option<Result<T, String>> + 'static
 where
-    T::Builtin: JsParserBuiltin + JsGlobalsBuiltin + JsImportsBuiltin + HandlerImportsBuiltin,
+    T::Builtin: JsParserBuiltin
+        + JsGlobalsBuiltin
+        + JsImportsBuiltin
+        + HandlerImportsBuiltin
+        + GrpcLoaderBuiltin,
 {
     compose_module_loaders(
         static_module_loader(
@@ -45,7 +50,10 @@ where
         ),
         compose_module_loaders(
             json_loader(factory, allocator),
-            graphql_loader(factory, allocator),
+            compose_module_loaders(
+                graphql_loader(factory, allocator),
+                create_grpc_loader(factory, allocator),
+            ),
         ),
     )
 }
