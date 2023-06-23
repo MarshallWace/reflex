@@ -26,7 +26,6 @@ reflex-utils = { path = "../reflex-utils" }
 reflex-server = { path = "../reflex-server" }
 http = "0.2.6"
 hyper = { version = "0.14", features = ["full"] }
-hyper-tls = "0.5.0"
 rand = "0.8.5"
 serde_json = "1"
 tokio = { version = "1", features = ["full", "tracing"] }

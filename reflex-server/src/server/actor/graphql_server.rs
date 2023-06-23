@@ -2097,7 +2097,7 @@ mod tests {
     use reflex_graphql::{
         parse_graphql_operation, parse_graphql_query, GraphQlVariables, NoopGraphQlQueryTransform,
     };
-    use reflex_handlers::utils::tls::hyper_tls;
+    use reflex_handlers::utils::tls::hyper_rustls;
     use reflex_json::{JsonMap, JsonValue};
     use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
     use reflex_utils::reconnect::NoopReconnectTimeout;
@@ -2168,7 +2168,7 @@ mod tests {
         type T = CachedSharedTerm<ServerBuiltins>;
         type TFactory = SharedTermFactory<ServerBuiltins>;
         type TAllocator = DefaultAllocator<T>;
-        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
@@ -2225,7 +2225,7 @@ mod tests {
         type T = CachedSharedTerm<ServerBuiltins>;
         type TFactory = SharedTermFactory<ServerBuiltins>;
         type TAllocator = DefaultAllocator<T>;
-        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
@@ -2542,7 +2542,7 @@ mod tests {
         type T = CachedSharedTerm<ServerBuiltins>;
         type TFactory = SharedTermFactory<ServerBuiltins>;
         type TAllocator = DefaultAllocator<T>;
-        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
@@ -2596,7 +2596,7 @@ mod tests {
         type T = CachedSharedTerm<ServerBuiltins>;
         type TFactory = SharedTermFactory<ServerBuiltins>;
         type TAllocator = DefaultAllocator<T>;
-        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
@@ -2663,7 +2663,7 @@ mod tests {
         type T = CachedSharedTerm<ServerBuiltins>;
         type TFactory = SharedTermFactory<ServerBuiltins>;
         type TAllocator = DefaultAllocator<T>;
-        type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+        type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;

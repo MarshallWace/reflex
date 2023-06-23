@@ -9,7 +9,7 @@ use std::{
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex_dispatcher::HandlerContext;
-use reflex_handlers::actor::HandlerActor;
+use reflex_handlers::{actor::HandlerActor, utils::tls::create_https_client};
 use reflex_scheduler::threadpool::TokioRuntimeThreadPoolFactory;
 use reflex_server::{
     cli::{
@@ -27,7 +27,10 @@ use tokio::sync::oneshot;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use reflex_cli::syntax::js::{compile_js_entry_point, default_js_loaders};
 use reflex_graphql::NoopGraphQlQueryTransform;
-use reflex_handlers::actor::graphql::{GraphQlHandler, GraphQlHandlerMetricNames};
+use reflex_handlers::{
+    actor::graphql::{GraphQlHandler, GraphQlHandlerMetricNames},
+    utils::tls::hyper_rustls,
+};
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_server::{
@@ -62,7 +65,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
     let allocator = DefaultAllocator::default();
     let factory = SharedTermFactory::<ServerBuiltins>::default();
 
-    let https_client = hyper::Client::builder().build(hyper_tls::HttpsConnector::new());
+    let https_client = create_https_client(None).unwrap();
     let compiler_options = CompilerOptions::default();
     let interpreter_options = InterpreterOptions::default();
     let module_loader = Some(default_js_loaders(
@@ -86,7 +89,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
     type T = CachedSharedTerm<TBuiltin>;
     type TFactory = SharedTermFactory<TBuiltin>;
     type TAllocator = DefaultAllocator<T>;
-    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = NoopReconnectTimeout;
     type TTracer = NoopTracer;
     type TAction = ServerCliAction<T>;

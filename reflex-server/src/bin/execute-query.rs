@@ -17,7 +17,7 @@ use reflex_dispatcher::HandlerContext;
 use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     default_handler_actors,
-    utils::tls::{create_https_client, hyper_tls, tokio_native_tls::native_tls::Certificate},
+    utils::tls::{create_https_client, hyper_rustls},
     DefaultHandlerMetricNames,
 };
 use reflex_interpreter::compiler::CompilerOptions;
@@ -67,9 +67,6 @@ pub struct Args {
     /// JSON-formatted GraphQL query variables
     #[clap(long)]
     variables: Option<String>,
-    /// Path to custom TLS certificate
-    #[clap(long)]
-    tls_cert: Option<PathBuf>,
     /// Throttle stateful effect updates
     #[clap(long)]
     effect_throttle_ms: Option<u64>,
@@ -120,7 +117,7 @@ async fn main() -> Result<()> {
     type T = CachedSharedTerm<TBuiltin>;
     type TFactory = SharedTermFactory<TBuiltin>;
     type TAllocator = DefaultAllocator<T>;
-    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = NoopReconnectTimeout;
     type TTransformHttp = NoopGraphQlQueryTransform;
     type TTransformWs = NoopWebSocketGraphQlServerQueryTransform;
@@ -149,12 +146,7 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-    let tls_cert = args
-        .tls_cert
-        .as_ref()
-        .map(|path| load_tls_cert(path.as_path()))
-        .transpose()?;
-    let https_client: hyper::Client<TConnect> = create_https_client(tls_cert)?;
+    let https_client: hyper::Client<TConnect> = create_https_client(None)?;
     let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
     let allocator: TAllocator = DefaultAllocator::default();
     let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
@@ -238,15 +230,4 @@ fn load_graphql_schema(path: &Path) -> Result<GraphQlSchema> {
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))?;
     parse_graphql_schema(&source)
         .with_context(|| format!("Failed to load GraphQL schema: {}", path.to_string_lossy()))
-}
-
-fn load_tls_cert(path: &Path) -> Result<Certificate> {
-    let source = fs::read_to_string(path)
-        .with_context(|| format!("Failed to load TLS certificate: {}", path.to_string_lossy()))?;
-    Certificate::from_pem(source.as_bytes()).with_context(|| {
-        format!(
-            "Failed to parse TLS certificate: {}",
-            path.to_string_lossy()
-        )
-    })
 }

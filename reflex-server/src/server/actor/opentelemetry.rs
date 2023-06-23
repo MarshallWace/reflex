@@ -24,7 +24,7 @@ use reflex_dispatcher::{
 use reflex_handlers::utils::tls::{
     create_https_client,
     hyper::{body::HttpBody, client::connect::Connect},
-    tokio_native_tls::native_tls,
+    rustls,
 };
 use reflex_macros::{dispatcher, Named};
 use tonic::{self, transport::ClientTlsConfig};
@@ -39,7 +39,7 @@ use crate::{
 
 #[derive(Debug)]
 pub enum OpenTelemetryClientError {
-    Certificate(native_tls::Error),
+    Certificate(rustls::Error),
     Tracer(opentelemetry::trace::TraceError),
 }
 impl std::fmt::Display for OpenTelemetryClientError {
@@ -64,21 +64,23 @@ pub fn create_grpc_otlp_tracer(
     tls_cert: Option<tonic::transport::Certificate>,
     resource_attributes: Option<Resource>,
 ) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
+    let tls_config = ClientTlsConfig::new();
+    let tls_config = if let Some(tls_cert) = tls_cert {
+        tls_config.ca_certificate(tls_cert)
+    } else {
+        tls_config
+    };
     let exporter = opentelemetry_otlp::new_exporter()
         .tonic()
+        .with_tls_config(tls_config)
         .with_endpoint(endpoint);
-    let exporter = if let Some(tls_cert) = tls_cert {
-        exporter.with_tls_config(ClientTlsConfig::new().ca_certificate(tls_cert))
-    } else {
-        exporter
-    };
     create_otlp_tracer(exporter, resource_attributes)
 }
 
 pub fn create_http_otlp_tracer(
     endpoint: impl Into<String>,
     http_headers: impl IntoIterator<Item = (HeaderName, HeaderValue)>,
-    tls_cert: Option<native_tls::Certificate>,
+    tls_cert: Option<Vec<rustls::Certificate>>,
     resource_attributes: Option<Resource>,
 ) -> Result<opentelemetry::sdk::trace::Tracer, OpenTelemetryClientError> {
     let client =

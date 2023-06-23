@@ -54,7 +54,7 @@ use reflex_handlers::{
         timestamp::TimestampHandlerTaskFactory,
         DefaultHandlersTaskAction, DefaultHandlersTaskFactory,
     },
-    utils::tls::{create_https_client, hyper_tls, tokio_native_tls::native_tls::Certificate},
+    utils::tls::{create_https_client, hyper_rustls},
     DefaultHandlerMetricNames,
 };
 use reflex_interpreter::{
@@ -131,7 +131,7 @@ pub async fn main() -> Result<()> {
     type T = CachedSharedTerm<TBuiltin>;
     type TFactory = SharedTermFactory<TBuiltin>;
     type TAllocator = DefaultAllocator<T>;
-    type TConnect = hyper_tls::HttpsConnector<hyper::client::HttpConnector>;
+    type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = NoopReconnectTimeout;
     type TAction = CliActions<T>;
     type TMetricLabels = CliMetricLabels;
@@ -148,12 +148,7 @@ pub async fn main() -> Result<()> {
     let allocator: TAllocator = DefaultAllocator::default();
     let input_path = args.entry_point;
     let syntax = args.syntax;
-    let tls_cert = args
-        .tls_cert
-        .as_ref()
-        .map(|path| load_tls_cert(path.as_path()))
-        .transpose()?;
-    let https_client: hyper::Client<TConnect> = create_https_client(tls_cert)?;
+    let https_client: hyper::Client<TConnect> = create_https_client(None)?;
     match input_path {
         None => {
             let state = StateCache::default();
@@ -443,17 +438,6 @@ where
         self.log(action);
     }
     fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
-}
-
-fn load_tls_cert(path: &Path) -> Result<Certificate> {
-    let source = fs::read_to_string(path)
-        .with_context(|| format!("Failed to load TLS certificate: {}", path.to_string_lossy()))?;
-    Certificate::from_pem(source.as_bytes()).with_context(|| {
-        format!(
-            "Failed to parse TLS certificate: {}",
-            path.to_string_lossy()
-        )
-    })
 }
 
 fn read_file(path: &Path) -> Result<String> {

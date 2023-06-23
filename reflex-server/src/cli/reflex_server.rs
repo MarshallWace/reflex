@@ -38,7 +38,7 @@ use nom::{
 };
 use reflex::core::{Applicable, Expression, InstructionPointer, Reducible, Rewritable};
 use reflex_graphql::{GraphQlOperation, GraphQlParserBuiltin, GraphQlSchema};
-use reflex_handlers::utils::tls::tokio_native_tls::native_tls;
+use reflex_handlers::utils::tls::{parse_ca_certs, rustls};
 use reflex_interpreter::{
     compiler::{Compile, CompiledProgram, CompilerOptions},
     InterpreterOptions,
@@ -126,8 +126,7 @@ impl OpenTelemetryConfig {
                     OpenTelemetryProtocol::Grpc => {
                         let tls_cert = tls_cert
                             .as_ref()
-                            .map(|tls_cert| parse_tonic_tls_cert(tls_cert))
-                            .transpose()?;
+                            .map(|tls_cert| tonic::transport::Certificate::from_pem(tls_cert));
                         Ok(Some(Self::Grpc(OpenTelemetryGrpcConfig {
                             endpoint: String::from(endpoint),
                             tls_cert,
@@ -137,7 +136,9 @@ impl OpenTelemetryConfig {
                     OpenTelemetryProtocol::Http => {
                         let tls_cert = tls_cert
                             .as_ref()
-                            .map(|tls_cert| parse_hyper_tls_cert(tls_cert))
+                            .map(|tls_cert| {
+                                parse_ca_certs(tls_cert).context("Failed to parse TLS certificate")
+                            })
                             .transpose()?;
                         Ok(Some(Self::Http(OpenTelemetryHttpConfig {
                             endpoint: String::from(endpoint),
@@ -211,7 +212,7 @@ pub struct OpenTelemetryHttpConfig {
     pub endpoint: String,
     pub http_headers: Vec<(HeaderName, HeaderValue)>,
     pub resource_attributes: Resource,
-    pub tls_cert: Option<native_tls::Certificate>,
+    pub tls_cert: Option<Vec<rustls::Certificate>>,
 }
 impl std::fmt::Debug for OpenTelemetryHttpConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -244,7 +245,7 @@ struct SerializedOpenTelemetryHttpConfig {
     endpoint: String,
     http_headers: Vec<(String, String)>,
     resource_attributes: Vec<(String, String)>,
-    tls_cert: Option<Vec<u8>>,
+    tls_cert: Option<Vec<Vec<u8>>>,
 }
 impl<'a> From<&'a OpenTelemetryHttpConfig> for SerializedOpenTelemetryHttpConfig {
     fn from(value: &'a OpenTelemetryHttpConfig) -> Self {
@@ -269,7 +270,12 @@ impl<'a> From<&'a OpenTelemetryHttpConfig> for SerializedOpenTelemetryHttpConfig
                 .iter()
                 .map(|(key, value)| (String::from(key.as_str()), String::from(value.as_str())))
                 .collect(),
-            tls_cert: tls_cert.as_ref().and_then(|value| value.to_der().ok()),
+            tls_cert: tls_cert.as_ref().map(|tls_certs| {
+                tls_certs
+                    .iter()
+                    .map(|tls_cert| Vec::from(tls_cert.as_ref()))
+                    .collect()
+            }),
         }
     }
 }
@@ -297,7 +303,12 @@ impl From<SerializedOpenTelemetryHttpConfig> for OpenTelemetryHttpConfig {
                     .into_iter()
                     .map(|(key, value)| KeyValue::new(key, value)),
             ),
-            tls_cert: tls_cert.and_then(|value| native_tls::Certificate::from_der(&value).ok()),
+            tls_cert: tls_cert.map(|tls_certs| {
+                tls_certs
+                    .into_iter()
+                    .map(|tls_cert| rustls::Certificate(tls_cert))
+                    .collect()
+            }),
         }
     }
 }
@@ -678,14 +689,6 @@ fn load_otlp_certificate(path: impl AsRef<Path>) -> Result<Vec<u8>> {
             path.as_ref().to_string_lossy()
         )
     })
-}
-
-fn parse_hyper_tls_cert(pem: &[u8]) -> Result<native_tls::Certificate> {
-    native_tls::Certificate::from_pem(pem).context("Failed to parse TLS certificate")
-}
-
-fn parse_tonic_tls_cert(pem: &[u8]) -> Result<tonic::transport::Certificate> {
-    Ok(tonic::transport::Certificate::from_pem(pem))
 }
 
 pub fn flatten_json_fields(
