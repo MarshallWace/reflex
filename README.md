@@ -12,8 +12,8 @@ In practical terms, Reflex provides the [ReflexJS](./reflex-js) reactive languag
 
 There are currently two out-of-the-box runtime environments for getting started with Reflex:
 
-- [`reflex-cli`](./reflex-cli): Reflex REPL environment and standalone script runner ([examples](./reflex-cli/examples))
-- [`reflex-server`](./reflex-server): Subscription-based GraphQL Reflex server implementation ([examples](./reflex-server/examples))
+- [`reflex-server`](./reflex-server): Subscription-based GraphQL Reflex server implementation ([tutorial](./reflex-server/examples))
+- [`reflex-cli`](./reflex-cli): Reflex REPL environment and standalone script runner ([tutorial](./reflex-cli/examples))
 
 Both runtimes support the following syntax:
 

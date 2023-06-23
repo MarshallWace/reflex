@@ -14,7 +14,7 @@ Note how in ReflexJS, the file extension must be present on the import path, as 
 ## Running the example
 
 ```shell
-$ reflex-cli ./index.js
+$ LOCALE=es reflex-cli ./index.js
 ```
 
 ## Example output

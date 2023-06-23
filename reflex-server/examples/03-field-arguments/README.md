@@ -2,8 +2,9 @@
 
 This example demonstrates how to handle GraphQL field arguments within Reflex Server.
 
-The name to use in the response message is provided in the GraphQL query via the `name` field variable. This is exposed within the graph definition as an `name` field on the field resolver function's arguments object.
+In additional to static fields, all fields within Reflex graph definitions can be parameterized by field arguments.
 
+As seen in this example, Reflex Server allows defining a parameterized field as one whose value is a function that takes an 'arguments' object containing the named field argument values provided by the query. In this case, the field resolver expects a single argument named `name`.
 
 ## Source files
 

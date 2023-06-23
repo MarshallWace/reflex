@@ -4,7 +4,7 @@ This example demonstrates how reactive updates are automatically propagated with
 
 In this example, the timestamp value re-emits every 1000ms, and the output label is automatically recomputed every time a new timestamp is emitted.
 
-Note that the `now` variable is declared using a standard `const` declaration, but its value will automatically track the live result of the `timestamp()` call.
+Note that the `timestamp` variable is declared using a standard `const` declaration, but its value will automatically track the live result of the `now()` call.
 
 Also note that updates are propagated via push-based 'signals', not via pull-based polling. In other words, as soon as a new value is emitted from the timestamp signal, a new overall result will be immediately recalculated.
 
@@ -22,6 +22,6 @@ $ reflex-cli ./index.js
 
 ```
 "Current UNIX time: 1695078000"
-"Current UNIX time: 1695079000"
-"Current UNIX time: 1695080000"
+"Current UNIX time: 1695078001"
+"Current UNIX time: 1695078002"
 ```
