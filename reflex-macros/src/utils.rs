@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use proc_macro2::Span;
-use quote::__private::Ident;
+use proc_macro2::{Ident, Span};
 use syn::spanned::Spanned;
 use syn::{
     Error, GenericArgument, GenericParam, Item, ItemEnum, ItemImpl, Path, PathSegment, Stmt, Type,
