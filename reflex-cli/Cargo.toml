@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 reflex = { path = "../reflex" }
 reflex-dispatcher = { path = "../reflex-dispatcher" }
+reflex-grpc = { path = "../reflex-grpc" }
 reflex-interpreter = { path = "../reflex-interpreter" }
 reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
@@ -17,6 +18,7 @@ reflex-lang = { path = "../reflex-lang" }
 reflex-lisp = { path = "../reflex-lisp" }
 reflex-handlers = { path = "../reflex-handlers" }
 reflex-macros = { path = "../reflex-macros" }
+reflex-protobuf = { path = "../reflex-protobuf" }
 reflex-runtime = { path = "../reflex-runtime" }
 reflex-scheduler = { path = "../reflex-scheduler" }
 reflex-stdlib = { path = "../reflex-stdlib" }

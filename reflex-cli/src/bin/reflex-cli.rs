@@ -34,6 +34,13 @@ use reflex_dispatcher::{
     Named, ProcessId, Redispatcher, SchedulerMode, SchedulerTransition, SerializableAction,
     SerializedAction, TaskFactory, TaskInbox, Worker,
 };
+use reflex_grpc::{
+    action::*,
+    actor::{GrpcHandler, GrpcHandlerAction, GrpcHandlerMetricNames, GrpcHandlerTask},
+    load_grpc_services,
+    task::{GrpcHandlerConnectionTaskAction, GrpcHandlerConnectionTaskFactory},
+    DefaultGrpcConfig, GrpcConfig,
+};
 use reflex_handlers::{
     action::{
         fetch::{
@@ -66,6 +73,7 @@ use reflex_interpreter::{
 use reflex_json::{JsonMap, JsonValue};
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_macros::{blanket_trait, task_factory_enum, Matcher, Named};
+use reflex_protobuf::types::WellKnownTypesTranscoder;
 use reflex_runtime::{
     action::{bytecode_interpreter::*, effect::*, evaluate::*, query::*, RuntimeActions},
     actor::{
@@ -105,6 +113,9 @@ struct Args {
     /// Path to custom TLS certificate
     #[clap(long)]
     tls_cert: Option<PathBuf>,
+    /// Paths of compiled gRPC service definition protobufs
+    #[clap(long)]
+    grpc_service: Vec<PathBuf>,
     /// Throttle stateful effect updates
     #[clap(long)]
     effect_throttle_ms: Option<u64>,
@@ -133,9 +144,11 @@ pub async fn main() -> Result<()> {
     type TAllocator = DefaultAllocator<T>;
     type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = NoopReconnectTimeout;
+    type TGrpcConfig = DefaultGrpcConfig;
     type TAction = CliActions<T>;
     type TMetricLabels = CliMetricLabels;
-    type TTask = CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>;
+    type TTask =
+        CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>;
     type TInstrumentation = NoopTokioSchedulerInstrumentation<TAction, TTask>;
     let args = Args::parse();
     let unoptimized = args.unoptimized;
@@ -149,6 +162,16 @@ pub async fn main() -> Result<()> {
     let input_path = args.entry_point;
     let syntax = args.syntax;
     let https_client: hyper::Client<TConnect> = create_https_client(None)?;
+    let grpc_services = load_grpc_services(args.grpc_service.iter())
+        .with_context(|| "Failed to load gRPC service descriptor")?;
+    let grpc_config = DefaultGrpcConfig::default();
+    let grpc_max_operations_per_connection =
+        match std::env::var("GRPC_MAX_OPERATIONS_PER_CONNECTION") {
+            Ok(value) => str::parse::<usize>(&value)
+                .with_context(|| "Invalid value for GRPC_MAX_OPERATIONS_PER_CONNECTION")
+                .map(Some),
+            _ => Ok(None),
+        }?;
     match input_path {
         None => {
             let state = StateCache::default();
@@ -284,6 +307,17 @@ pub async fn main() -> Result<()> {
                         .into_iter()
                         .map(|actor| CliActor::Handler(actor)),
                     )
+                    .chain(once(CliActor::Grpc(GrpcHandler::new(
+                        grpc_services,
+                        WellKnownTypesTranscoder,
+                        factory.clone(),
+                        allocator.clone(),
+                        NoopReconnectTimeout,
+                        grpc_max_operations_per_connection,
+                        grpc_config,
+                        GrpcHandlerMetricNames::default(),
+                        main_pid,
+                    ))))
                     .map(|actor| (builder.generate_pid(), actor))
                     .collect::<Vec<_>>();
                     let actor_pids = actors.iter().map(|(pid, _)| *pid);
@@ -456,6 +490,7 @@ enum CliActions<T: Expression> {
     GraphQlHandler(GraphQlHandlerActions),
     TimeoutHandler(TimeoutHandlerActions),
     TimestampHandler(TimestampHandlerActions),
+    GrpcHandler(GrpcHandlerActions),
 }
 impl<T: Expression> Named for CliActions<T> {
     fn name(&self) -> &'static str {
@@ -466,6 +501,7 @@ impl<T: Expression> Named for CliActions<T> {
             Self::GraphQlHandler(action) => action.name(),
             Self::TimeoutHandler(action) => action.name(),
             Self::TimestampHandler(action) => action.name(),
+            Self::GrpcHandler(action) => action.name(),
         }
     }
 }
@@ -479,6 +515,7 @@ impl<T: Expression> SerializableAction for CliActions<T> {
             Self::GraphQlHandler(action) => action.to_json(),
             Self::TimeoutHandler(action) => action.to_json(),
             Self::TimestampHandler(action) => action.to_json(),
+            Self::GrpcHandler(action) => action.to_json(),
         }
     }
 }
@@ -488,6 +525,7 @@ blanket_trait!(
         SerializableAction
         + RuntimeAction<T>
         + HandlerAction<T>
+        + GrpcHandlerAction<T>
         + BytecodeInterpreterAction<T>
         + CliTaskAction<T>
     {
@@ -496,7 +534,9 @@ blanket_trait!(
 
 blanket_trait!(
     trait CliTask<T, TFactory, TAllocator, TConnect>:
-        RuntimeTask<T, TFactory, TAllocator> + HandlerTask<TConnect>
+        RuntimeTask<T, TFactory, TAllocator>
+        + HandlerTask<TConnect>
+        + GrpcHandlerTask<T, TFactory, TAllocator, WellKnownTypesTranscoder>
     where
         T: Expression,
         TFactory: ExpressionFactory<T>,
@@ -506,8 +546,17 @@ blanket_trait!(
     }
 );
 
-enum CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
-where
+enum CliActor<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TGrpcConfig,
+    TMetricLabels,
+    TAction,
+    TTask,
+> where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -519,18 +568,31 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliTaskAction<T> + Send + 'static,
     TTask: TaskFactory<TAction, TTask>,
 {
     Runtime(RuntimeActor<T, TFactory, TAllocator>),
     Handler(HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect>),
+    Grpc(GrpcHandler<T, TFactory, TAllocator, WellKnownTypesTranscoder, TGrpcConfig, TReconnect>),
     BytecodeInterpreter(BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels>),
     Main(Redispatcher),
     Task(CliTaskActor<T, TFactory, TAllocator, TConnect, TAction, TTask>),
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask> Named
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels, TAction, TTask>
+    Named
+    for CliActor<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -543,6 +605,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliTaskAction<T> + Send + 'static,
     TTask: TaskFactory<TAction, TTask>,
@@ -551,6 +614,7 @@ where
         match self {
             Self::Runtime(inner) => inner.name(),
             Self::Handler(inner) => inner.name(),
+            Self::Grpc(inner) => inner.name(),
             Self::BytecodeInterpreter(inner) => inner.name(),
             Self::Main(inner) => inner.name(),
             Self::Task(inner) => inner.name(),
@@ -558,9 +622,19 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels, TAction, TTask>
     Actor<TAction, TTask>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+    for CliActor<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -573,6 +647,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -584,13 +659,23 @@ where
         TAllocator,
         TConnect,
         TReconnect,
+        TGrpcConfig,
         TMetricLabels,
         TInbox,
         TAction,
         TTask,
     >;
-    type Dispose =
-        CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>;
+    type Dispose = CliDispose<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >;
     fn init(&self) -> Self::State {
         match self {
             Self::Runtime(actor) => {
@@ -606,6 +691,16 @@ where
                         TTask,
                     >>::init(actor),
                 )
+            }
+            Self::Grpc(actor) => {
+                CliActorState::Grpc(<GrpcHandler<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    WellKnownTypesTranscoder,
+                    TGrpcConfig,
+                    TReconnect,
+                > as Actor<TAction, TTask>>::init(actor))
             }
             Self::BytecodeInterpreter(actor) => {
                 CliActorState::BytecodeInterpreter(<BytecodeInterpreter<
@@ -653,6 +748,15 @@ where
                     (CliEvents::Handler(events), dispose.map(CliDispose::Handler))
                 })
             }
+            Self::Grpc(actor) => <GrpcHandler<
+                T,
+                TFactory,
+                TAllocator,
+                WellKnownTypesTranscoder,
+                TGrpcConfig,
+                TReconnect,
+            > as Actor<TAction, TTask>>::events(actor, inbox)
+            .map(|(events, dispose)| (CliEvents::Grpc(events), dispose.map(CliDispose::Grpc))),
             Self::BytecodeInterpreter(actor) => {
                 <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Actor<
                     TAction,
@@ -678,9 +782,19 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels, TAction, TTask>
     Worker<TAction, SchedulerTransition<TAction, TTask>>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+    for CliActor<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -693,6 +807,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -710,6 +825,16 @@ where
                     SchedulerTransition<TAction, TTask>,
                 >>::accept(actor, message)
             }
+            Self::Grpc(actor) => <GrpcHandler<
+                T,
+                TFactory,
+                TAllocator,
+                WellKnownTypesTranscoder,
+                TGrpcConfig,
+                TReconnect,
+            > as Worker<TAction, SchedulerTransition<TAction, TTask>>>::accept(
+                actor, message
+            ),
             Self::BytecodeInterpreter(actor) => {
                 <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Worker<
                     TAction,
@@ -742,6 +867,18 @@ where
                     SchedulerTransition<TAction, TTask>,
                 >>::schedule(actor, message, state)
             }
+            (Self::Grpc(actor), CliActorState::Grpc(state)) => {
+                <GrpcHandler<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    WellKnownTypesTranscoder,
+                    TGrpcConfig,
+                    TReconnect,
+                > as Worker<TAction, SchedulerTransition<TAction, TTask>>>::schedule(
+                    actor, message, state,
+                )
+            }
             (Self::BytecodeInterpreter(actor), CliActorState::BytecodeInterpreter(state)) => {
                 <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Worker<
                     TAction,
@@ -764,9 +901,19 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels, TAction, TTask>
     Handler<TAction, SchedulerTransition<TAction, TTask>>
-    for CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+    for CliActor<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -779,13 +926,23 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
         TaskFactory<TAction, TTask> + CliTask<T, TFactory, TAllocator, TConnect> + Send + 'static,
 {
-    type State =
-        CliActorState<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>;
+    type State = CliActorState<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >;
     fn handle(
         &self,
         state: &mut Self::State,
@@ -805,6 +962,18 @@ where
                     TAction,
                     SchedulerTransition<TAction, TTask>,
                 >>::handle(actor, state, action, metadata, context)
+            }
+            (Self::Grpc(actor), CliActorState::Grpc(state)) => {
+                <GrpcHandler<
+                    T,
+                    TFactory,
+                    TAllocator,
+                    WellKnownTypesTranscoder,
+                    TGrpcConfig,
+                    TReconnect,
+                > as Handler<TAction, SchedulerTransition<TAction, TTask>>>::handle(
+                    actor, state, action, metadata, context,
+                )
             }
             (Self::BytecodeInterpreter(actor), CliActorState::BytecodeInterpreter(state)) => {
                 <BytecodeInterpreter<T, TFactory, TAllocator, TMetricLabels> as Handler<
@@ -828,8 +997,17 @@ where
     }
 }
 
-enum CliActorState<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
-where
+enum CliActorState<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TGrpcConfig,
+    TMetricLabels,
+    TAction,
+    TTask,
+> where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -841,6 +1019,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -854,6 +1033,12 @@ where
     ),
     Handler(
         <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Handler<
+            TAction,
+            SchedulerTransition<TAction, TTask>,
+        >>::State,
+    ),
+    Grpc(
+        <GrpcHandler<T, TFactory, TAllocator, WellKnownTypesTranscoder, TGrpcConfig, TReconnect> as Handler<
             TAction,
             SchedulerTransition<TAction, TTask>,
         >>::State,
@@ -874,8 +1059,18 @@ where
 }
 
 #[pin_project(project = CliEventsVariant)]
-enum CliEvents<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TInbox, TAction, TTask>
-where
+enum CliEvents<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TGrpcConfig,
+    TMetricLabels,
+    TInbox,
+    TAction,
+    TTask,
+> where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -887,6 +1082,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TInbox: TaskInbox<TAction>,
     TAction: Action + CliAction<T> + Send + 'static,
@@ -899,6 +1095,13 @@ where
     Handler(
         #[pin]
         <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                TAction,
+                TTask,
+            >>::Events<TInbox>,
+    ),
+    Grpc(
+        #[pin]
+        <GrpcHandler<T, TFactory, TAllocator, WellKnownTypesTranscoder, TGrpcConfig, TReconnect> as Actor<
                 TAction,
                 TTask,
             >>::Events<TInbox>,
@@ -919,13 +1122,25 @@ where
         >>::Events<TInbox>,
     ),
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TInbox, TAction, TTask> Stream
+impl<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TInbox,
+        TAction,
+        TTask,
+    > Stream
     for CliEvents<
         T,
         TFactory,
         TAllocator,
         TConnect,
         TReconnect,
+        TGrpcConfig,
         TMetricLabels,
         TInbox,
         TAction,
@@ -943,6 +1158,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TInbox: TaskInbox<TAction>,
     TAction: Action + CliAction<T> + Send + 'static,
@@ -957,6 +1173,7 @@ where
         match self.project() {
             CliEventsVariant::Runtime(inner) => inner.poll_next(cx),
             CliEventsVariant::Handler(inner) => inner.poll_next(cx),
+            CliEventsVariant::Grpc(inner) => inner.poll_next(cx),
             CliEventsVariant::BytecodeInterpreter(inner) => inner.poll_next(cx),
             CliEventsVariant::Main(inner) => inner.poll_next(cx),
             CliEventsVariant::Task(inner) => inner.poll_next(cx),
@@ -966,6 +1183,7 @@ where
         match self {
             Self::Runtime(inner) => inner.size_hint(),
             Self::Handler(inner) => inner.size_hint(),
+            Self::Grpc(inner) => inner.size_hint(),
             Self::BytecodeInterpreter(inner) => inner.size_hint(),
             Self::Main(inner) => inner.size_hint(),
             Self::Task(inner) => inner.size_hint(),
@@ -974,8 +1192,17 @@ where
 }
 
 #[pin_project(project = CliDisposeVariant)]
-enum CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
-where
+enum CliDispose<
+    T,
+    TFactory,
+    TAllocator,
+    TConnect,
+    TReconnect,
+    TGrpcConfig,
+    TMetricLabels,
+    TAction,
+    TTask,
+> where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
     T::Builtin: Send,
@@ -987,6 +1214,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -996,6 +1224,13 @@ where
     Handler(
         #[pin]
         <HandlerActor<T, TFactory, TAllocator, TConnect, TReconnect> as Actor<
+                TAction,
+                TTask,
+            >>::Dispose,
+    ),
+    Grpc(
+        #[pin]
+        <GrpcHandler<T, TFactory, TAllocator, WellKnownTypesTranscoder, TGrpcConfig, TReconnect> as Actor<
                 TAction,
                 TTask,
             >>::Dispose,
@@ -1016,8 +1251,19 @@ where
         >>::Dispose,
     ),
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask> Future
-    for CliDispose<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, TTask>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels, TAction, TTask>
+    Future
+    for CliDispose<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        TTask,
+    >
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1030,6 +1276,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
     TTask:
@@ -1043,6 +1290,7 @@ where
         match self.project() {
             CliDisposeVariant::Runtime(inner) => inner.poll(cx),
             CliDisposeVariant::Handler(inner) => inner.poll(cx),
+            CliDisposeVariant::Grpc(inner) => inner.poll(cx),
             CliDisposeVariant::BytecodeInterpreter(inner) => inner.poll(cx),
             CliDisposeVariant::Main(inner) => inner.poll(cx),
             CliDisposeVariant::Task(inner) => inner.poll(cx),
@@ -1050,11 +1298,12 @@ where
     }
 }
 
-trait CliTaskAction<T: Expression>: Action + RuntimeTaskAction<T> + DefaultHandlersTaskAction {}
-impl<_Self, T: Expression> CliTaskAction<T> for _Self where
-    Self: Action + RuntimeTaskAction<T> + DefaultHandlersTaskAction
-{
-}
+blanket_trait!(
+    trait CliTaskAction<T: Expression>:
+        Action + RuntimeTaskAction<T> + DefaultHandlersTaskAction + GrpcHandlerConnectionTaskAction
+    {
+    }
+);
 
 task_factory_enum!({
     #[derive(Matcher, Clone)]
@@ -1067,6 +1316,7 @@ task_factory_enum!({
     {
         Runtime(RuntimeTaskFactory<T, TFactory, TAllocator>),
         DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
+        GrpcHandler(GrpcHandlerConnectionTaskFactory),
     }
 
     impl<T, TFactory, TAllocator, TConnect, TAction, TTask> TaskFactory<TAction, TTask>
@@ -1083,7 +1333,7 @@ task_factory_enum!({
 });
 
 #[derive(Named, Clone)]
-struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+struct CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1096,15 +1346,17 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     inner: CliTaskFactory<T, TFactory, TAllocator, TConnect>,
     _reconnect: PhantomData<TReconnect>,
+    _grpc_config: PhantomData<TGrpcConfig>,
     _metric_labels: PhantomData<TMetricLabels>,
 }
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
     From<CliTaskFactory<T, TFactory, TAllocator, TConnect>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1117,20 +1369,22 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: CliTaskFactory<T, TFactory, TAllocator, TConnect>) -> Self {
         Self {
             inner: value,
             _reconnect: PhantomData,
+            _grpc_config: PhantomData,
             _metric_labels: PhantomData,
         }
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels, TAction>
     TaskFactory<TAction, Self>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1143,18 +1397,29 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
     TAction: Action + CliAction<T> + Send + 'static,
 {
-    type Actor =
-        CliActor<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels, TAction, Self>;
+    type Actor = CliActor<
+        T,
+        TFactory,
+        TAllocator,
+        TConnect,
+        TReconnect,
+        TGrpcConfig,
+        TMetricLabels,
+        TAction,
+        Self,
+    >;
     fn create(self) -> Self::Actor {
         CliActor::Task(<CliTaskFactory<T, TFactory, TAllocator, TConnect> as TaskFactory<TAction, Self>>::create(self.inner))
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> From<EffectThrottleTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
+    From<EffectThrottleTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1167,6 +1432,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: EffectThrottleTaskFactory) -> Self {
@@ -1174,9 +1440,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
     From<BytecodeWorkerTaskFactory<T, TFactory, TAllocator>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1189,6 +1455,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: BytecodeWorkerTaskFactory<T, TFactory, TAllocator>) -> Self {
@@ -1196,9 +1463,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
     From<FetchHandlerTaskFactory<TConnect>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1211,6 +1478,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: FetchHandlerTaskFactory<TConnect>) -> Self {
@@ -1220,9 +1488,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
     From<GraphQlHandlerHttpFetchTaskFactory<TConnect>>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1235,6 +1503,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: GraphQlHandlerHttpFetchTaskFactory<TConnect>) -> Self {
@@ -1244,9 +1513,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
     From<GraphQlHandlerWebSocketConnectionTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1259,6 +1528,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: GraphQlHandlerWebSocketConnectionTaskFactory) -> Self {
@@ -1268,8 +1538,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> From<TimeoutHandlerTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
+    From<TimeoutHandlerTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1282,6 +1553,7 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: TimeoutHandlerTaskFactory) -> Self {
@@ -1291,8 +1563,9 @@ where
     }
 }
 
-impl<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels> From<TimestampHandlerTaskFactory>
-    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TMetricLabels>
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
+    From<TimestampHandlerTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
 where
     T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
     T::String: Send,
@@ -1305,12 +1578,36 @@ where
     TAllocator: AsyncHeapAllocator<T> + Default,
     TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
     TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
     TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
 {
     fn from(value: TimestampHandlerTaskFactory) -> Self {
         Self::from(CliTaskFactory::DefaultHandlers(
             DefaultHandlersTaskFactory::from(value),
         ))
+    }
+}
+
+impl<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
+    From<GrpcHandlerConnectionTaskFactory>
+    for CliActorFactory<T, TFactory, TAllocator, TConnect, TReconnect, TGrpcConfig, TMetricLabels>
+where
+    T: AsyncExpression + Rewritable<T> + Reducible<T> + Applicable<T> + Compile<T>,
+    T::String: Send,
+    T::Builtin: Send,
+    T::Signal: Send,
+    T::SignalList: Send,
+    T::StructPrototype: Send,
+    T::ExpressionList: Send,
+    TFactory: AsyncExpressionFactory<T> + Default,
+    TAllocator: AsyncHeapAllocator<T> + Default,
+    TConnect: hyper::client::connect::Connect + Clone + Send + Sync + 'static,
+    TReconnect: ReconnectTimeout + Send + Clone + 'static,
+    TGrpcConfig: GrpcConfig + Send + Clone + 'static,
+    TMetricLabels: BytecodeInterpreterMetricLabels + Send + 'static,
+{
+    fn from(value: GrpcHandlerConnectionTaskFactory) -> Self {
+        Self::from(CliTaskFactory::GrpcHandler(value))
     }
 }
 
@@ -1441,6 +1738,28 @@ impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a TimestampHandlerA
     fn from(value: &'a CliActions<T>) -> Self {
         match value {
             CliActions::TimestampHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerActions> for CliActions<T> {
+    fn from(value: GrpcHandlerActions) -> Self {
+        Self::GrpcHandler(value)
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerActions> {
+    fn from(value: CliActions<T>) -> Self {
+        match value {
+            CliActions::GrpcHandler(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerActions> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        match value {
+            CliActions::GrpcHandler(value) => Some(value),
             _ => None,
         }
     }
@@ -1943,5 +2262,151 @@ impl<T: Expression> From<CliActions<T>> for Option<TimestampHandlerUpdateAction>
 impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a TimestampHandlerUpdateAction> {
     fn from(value: &'a CliActions<T>) -> Self {
         Option::<&'a TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerConnectSuccessAction> for CliActions<T> {
+    fn from(value: GrpcHandlerConnectSuccessAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerConnectSuccessAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerConnectSuccessAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerConnectErrorAction> for CliActions<T> {
+    fn from(value: GrpcHandlerConnectErrorAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerConnectErrorAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerConnectErrorAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerRequestStartAction> for CliActions<T> {
+    fn from(value: GrpcHandlerRequestStartAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerRequestStartAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerRequestStartAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerRequestStopAction> for CliActions<T> {
+    fn from(value: GrpcHandlerRequestStopAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerRequestStopAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerRequestStopAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerSuccessResponseAction> for CliActions<T> {
+    fn from(value: GrpcHandlerSuccessResponseAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerSuccessResponseAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerSuccessResponseAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerErrorResponseAction> for CliActions<T> {
+    fn from(value: GrpcHandlerErrorResponseAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerErrorResponseAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerErrorResponseAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerTransportErrorAction> for CliActions<T> {
+    fn from(value: GrpcHandlerTransportErrorAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerTransportErrorAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerTransportErrorAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerAbortRequestAction> for CliActions<T> {
+    fn from(value: GrpcHandlerAbortRequestAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerAbortRequestAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>> for Option<&'a GrpcHandlerAbortRequestAction> {
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<GrpcHandlerConnectionTerminateAction> for CliActions<T> {
+    fn from(value: GrpcHandlerConnectionTerminateAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<CliActions<T>> for Option<GrpcHandlerConnectionTerminateAction> {
+    fn from(value: CliActions<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a CliActions<T>>
+    for Option<&'a GrpcHandlerConnectionTerminateAction>
+{
+    fn from(value: &'a CliActions<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
