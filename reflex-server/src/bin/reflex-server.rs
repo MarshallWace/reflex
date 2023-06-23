@@ -81,7 +81,7 @@ struct Args {
     effect_throttle_ms: Option<u64>,
     /// Log runtime actions
     #[clap(long)]
-    log: Option<LogFormat>,
+    log: Option<Option<LogFormat>>,
     /// Prevent static compiler optimizations
     #[clap(long)]
     unoptimized: bool,
@@ -145,14 +145,14 @@ pub async fn main() -> Result<()> {
     let args = Args::parse();
     let factory: TFactory = SharedTermFactory::<TBuiltin>::default();
     let allocator: TAllocator = DefaultAllocator::default();
-    let mut logger = match args.log {
+    let mut logger = args.log.map(|format| match format {
         Some(LogFormat::Json) => {
             EitherLogger::Left(JsonActionLogger::<_, TAction, TTask>::stderr())
         }
         _ => EitherLogger::Right(FormattedActionLogger::<_, _, TAction, TTask>::stderr(
             PrefixedLogFormatter::new("server", DefaultActionFormatter::new(factory.clone())),
         )),
-    };
+    });
     if let Some(port) = args.metrics_port {
         let address = SocketAddr::from(([0, 0, 0, 0], port));
         log_server_action(
@@ -177,10 +177,10 @@ pub async fn main() -> Result<()> {
     };
     let effect_throttle = args.effect_throttle_ms.map(Duration::from_millis);
     let mut logger = {
+        let stdout_logger = logger;
         let prometheus_logger = args
             .metrics_port
             .map(|_| PrometheusLogger::<TAction, TTask>::new(Default::default()));
-        let stdout_logger = args.log.map(|_| logger.clone());
         ChainLogger::new(stdout_logger, prometheus_logger)
     };
     let tracer = match OpenTelemetryConfig::parse_env(std::env::vars())? {
