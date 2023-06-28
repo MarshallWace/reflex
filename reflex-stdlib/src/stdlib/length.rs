@@ -4,7 +4,7 @@
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator, IntValue,
-    ListTermType, RefType, Uid, Uuid,
+    ListTermType, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct Length;
@@ -45,6 +45,8 @@ impl<T: Expression> Applicable<T> for Length {
             Some(factory.create_int_term(target.keys().len() as IntValue))
         } else if let Some(target) = factory.match_hashset_term(&target) {
             Some(factory.create_int_term(target.values().len() as IntValue))
+        } else if let Some(target) = factory.match_string_term(&target) {
+            Some(factory.create_int_term(target.value().as_deref().as_str().len() as IntValue))
         } else {
             None
         };
