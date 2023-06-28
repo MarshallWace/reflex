@@ -4,7 +4,7 @@
 use reflex::core::{
     as_integer, uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FloatTermType, FunctionArity, HeapAllocator, IntTermType, IntValue,
-    ListTermType, RefType, Uid, Uuid,
+    ListTermType, RefType, StringTermType, StringValue, Uid, Uuid,
 };
 
 pub struct Slice;
@@ -53,8 +53,10 @@ impl<T: Expression> Applicable<T> for Slice {
                 _ => None,
             }
         };
-        match (factory.match_list_term(&target), bounds) {
-            (Some(target), Some((start_index, end_index))) => Ok(factory.create_list_term(
+        if let (Some(target), Some((start_index, end_index))) =
+            (factory.match_list_term(&target), bounds)
+        {
+            Ok(factory.create_list_term(
                 allocator.create_list(
                     target
                         .items()
@@ -64,11 +66,19 @@ impl<T: Expression> Applicable<T> for Slice {
                         .skip(start_index)
                         .take(end_index - start_index),
                 ),
-            )),
-            _ => Err(format!(
-                "Expected (List, Int, Int), received ({}, {}, {})",
+            ))
+        } else if let (Some(target), Some((start_index, end_index))) =
+            (factory.match_string_term(&target), bounds)
+        {
+            Ok(factory.create_string_term(
+                allocator
+                    .create_string(&target.value().as_deref().as_str()[start_index..end_index]),
+            ))
+        } else {
+            Err(format!(
+                "Expected (List, Int, Int) or (String, Int, Int), received ({}, {}, {})",
                 target, start_index, end_index,
-            )),
+            ))
         }
     }
 }
