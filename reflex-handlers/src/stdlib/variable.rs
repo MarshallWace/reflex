@@ -153,7 +153,7 @@ pub struct SetVariable;
 impl SetVariable {
     pub const UUID: Uuid = uuid!("c7a1b8e5-1045-4ce7-bd1a-4125bdb8d647");
     const ARITY: FunctionArity<3, 0> = FunctionArity {
-        required: [ArgType::Strict, ArgType::Lazy, ArgType::Strict],
+        required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
         optional: [],
         variadic: None,
     };
