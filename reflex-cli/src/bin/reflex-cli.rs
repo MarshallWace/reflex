@@ -457,18 +457,23 @@ where
     type Task = TTask;
     fn log_scheduler_command(
         &mut self,
-        _command: &TokioCommand<Self::Action, Self::Task>,
+        command: &TokioCommand<Self::Action, Self::Task>,
         _enqueue_time: Instant,
     ) {
+        match command {
+            TokioCommand::Send { pid: _, message } if message.redispatched_from().is_none() => {
+                let action = message.deref();
+                self.log(action);
+            }
+            _ => {}
+        }
     }
     fn log_worker_message(
         &mut self,
-        message: &AsyncMessage<Self::Action>,
+        _message: &AsyncMessage<Self::Action>,
         _actor: &<Self::Task as TaskFactory<Self::Action, Self::Task>>::Actor,
         _pid: ProcessId,
     ) {
-        let action = message.deref();
-        self.log(action);
     }
     fn log_task_message(&mut self, _message: &AsyncMessage<Self::Action>, _pid: ProcessId) {}
 }
