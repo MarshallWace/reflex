@@ -65,9 +65,7 @@ use reflex_handlers::{
     DefaultHandlerMetricNames,
 };
 use reflex_interpreter::{
-    compiler::{
-        hash_compiled_program, Compile, CompiledProgram, Compiler, CompilerMode, CompilerOptions,
-    },
+    compiler::{hash_compiled_program, Compile, Compiler, CompilerMode, CompilerOptions},
     execute, DefaultInterpreterCache, InterpreterOptions,
 };
 use reflex_json::{JsonMap, JsonValue};
@@ -244,6 +242,7 @@ pub async fn main() -> Result<()> {
             if dependencies.is_empty() {
                 println!("{}", output);
             } else {
+                let graph_root = (program, entry_point);
                 let (evaluate_effect, subscribe_action) =
                     create_query(expression, &factory, &allocator);
                 let logger = if debug_actions {
@@ -277,7 +276,7 @@ pub async fn main() -> Result<()> {
                     }
                     .chain(once(CliActor::BytecodeInterpreter(
                         BytecodeInterpreter::new(
-                            (CompiledProgram::default(), InstructionPointer::default()),
+                            graph_root,
                             compiler_options,
                             interpreter_options,
                             factory.clone(),
