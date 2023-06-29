@@ -316,6 +316,11 @@ impl From<reflex_stdlib::stdlib::Gte> for ServerBuiltins {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
+impl From<reflex_stdlib::stdlib::Hash> for ServerBuiltins {
+    fn from(value: reflex_stdlib::stdlib::Hash) -> Self {
+        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
+    }
+}
 impl From<reflex_stdlib::stdlib::If> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::If) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
@@ -535,11 +540,6 @@ impl From<reflex_js::stdlib::FormatErrorMessage> for ServerBuiltins {
 }
 impl From<reflex_js::stdlib::FromEntries> for ServerBuiltins {
     fn from(value: reflex_js::stdlib::FromEntries) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::Hash> for ServerBuiltins {
-    fn from(value: reflex_js::stdlib::Hash) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }

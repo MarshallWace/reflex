@@ -6,7 +6,7 @@ use std::iter::once;
 use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator, SignalType};
 use types::import_types;
 
-use crate::stdlib::{Hash, Log, StructTypeFactory};
+use crate::stdlib::{Log, StructTypeFactory};
 
 mod types;
 
@@ -15,7 +15,7 @@ pub fn import_utils<T: Expression>(
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Hash> + From<Log> + From<StructTypeFactory>,
+    T::Builtin: From<Log> + From<StructTypeFactory>,
 {
     create_record(
         vec![
@@ -25,10 +25,6 @@ where
                     1,
                     factory.create_recursive_term(factory.create_variable_term(0)),
                 ),
-            ),
-            (
-                factory.create_string_term(allocator.create_static_string("hash")),
-                factory.create_builtin_term(Hash),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("log")),

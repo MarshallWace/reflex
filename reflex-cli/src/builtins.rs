@@ -270,6 +270,11 @@ impl From<stdlib::Gte> for CliBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::Hash> for CliBuiltins {
+    fn from(value: stdlib::Hash) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::If> for CliBuiltins {
     fn from(value: stdlib::If) -> Self {
         Self::from(stdlib::Stdlib::from(value))
@@ -489,11 +494,6 @@ impl From<reflex_js::stdlib::FormatErrorMessage> for CliBuiltins {
 }
 impl From<reflex_js::stdlib::FromEntries> for CliBuiltins {
     fn from(value: reflex_js::stdlib::FromEntries) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::Hash> for CliBuiltins {
-    fn from(value: reflex_js::stdlib::Hash) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }

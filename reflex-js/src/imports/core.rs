@@ -41,6 +41,7 @@ where
         + From<Get>
         + From<Gt>
         + From<Gte>
+        + From<Hash>
         + From<If>
         + From<IfError>
         + From<IfPending>
@@ -203,6 +204,10 @@ where
             (
                 factory.create_string_term(allocator.create_static_string("gte")),
                 factory.create_builtin_term(Gte),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("hash")),
+                factory.create_builtin_term(Hash),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("if")),

@@ -22,7 +22,6 @@ pub use dispatch::*;
 pub use encode_uri_component::*;
 pub use format_error_message::*;
 pub use from_entries::*;
-pub use hash::*;
 pub use is_finite::*;
 pub use log::*;
 pub use map_constructor::*;
@@ -39,7 +38,6 @@ mod dispatch;
 mod encode_uri_component;
 mod format_error_message;
 mod from_entries;
-mod hash;
 mod is_finite;
 mod log;
 mod map_constructor;
@@ -58,7 +56,6 @@ pub enum Stdlib {
     EncodeUriComponent,
     FormatErrorMessage,
     FromEntries,
-    Hash,
     IsFinite,
     Log,
     LogArgs,
@@ -84,7 +81,6 @@ impl Uid for Stdlib {
             Self::EncodeUriComponent => Uid::uid(&EncodeUriComponent {}),
             Self::FormatErrorMessage => Uid::uid(&FormatErrorMessage {}),
             Self::FromEntries => Uid::uid(&FromEntries {}),
-            Self::Hash => Uid::uid(&Hash {}),
             Self::IsFinite => Uid::uid(&IsFinite {}),
             Self::Log => Uid::uid(&Log {}),
             Self::LogArgs => Uid::uid(&LogArgs {}),
@@ -108,7 +104,6 @@ impl TryFrom<Uuid> for Stdlib {
             EncodeUriComponent::UUID => Ok(Self::EncodeUriComponent),
             FormatErrorMessage::UUID => Ok(Self::FormatErrorMessage),
             FromEntries::UUID => Ok(Self::FromEntries),
-            Hash::UUID => Ok(Self::Hash),
             IsFinite::UUID => Ok(Self::IsFinite),
             Log::UUID => Ok(Self::Log),
             LogArgs::UUID => Ok(Self::LogArgs),
@@ -132,7 +127,6 @@ impl Stdlib {
             Self::EncodeUriComponent => EncodeUriComponent::arity(),
             Self::FormatErrorMessage => FormatErrorMessage::arity(),
             Self::FromEntries => FromEntries::arity(),
-            Self::Hash => Hash::arity(),
             Self::IsFinite => IsFinite::arity(),
             Self::Log => Log::arity(),
             Self::LogArgs => LogArgs::arity(),
@@ -183,7 +177,6 @@ impl Stdlib {
                 Applicable::<T>::should_parallelize(&FormatErrorMessage, args)
             }
             Self::FromEntries => Applicable::<T>::should_parallelize(&FromEntries, args),
-            Self::Hash => Applicable::<T>::should_parallelize(&Hash, args),
             Self::IsFinite => Applicable::<T>::should_parallelize(&IsFinite, args),
             Self::Log => Applicable::<T>::should_parallelize(&Log, args),
             Self::LogArgs => Applicable::<T>::should_parallelize(&LogArgs, args),
@@ -246,7 +239,6 @@ impl Stdlib {
             Self::FromEntries => {
                 Applicable::<T>::apply(&FromEntries, args, factory, allocator, cache)
             }
-            Self::Hash => Applicable::<T>::apply(&Hash, args, factory, allocator, cache),
             Self::IsFinite => Applicable::<T>::apply(&IsFinite, args, factory, allocator, cache),
             Self::Log => Applicable::<T>::apply(&Log, args, factory, allocator, cache),
             Self::LogArgs => Applicable::<T>::apply(&LogArgs, args, factory, allocator, cache),
@@ -302,11 +294,6 @@ impl From<FormatErrorMessage> for Stdlib {
 impl From<FromEntries> for Stdlib {
     fn from(_value: FromEntries) -> Self {
         Self::FromEntries
-    }
-}
-impl From<Hash> for Stdlib {
-    fn from(_value: Hash) -> Self {
-        Self::Hash
     }
 }
 impl From<IsFinite> for Stdlib {

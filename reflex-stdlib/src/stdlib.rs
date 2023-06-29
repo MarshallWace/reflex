@@ -37,6 +37,7 @@ pub use floor::*;
 pub use get::*;
 pub use gt::*;
 pub use gte::*;
+pub use hash::*;
 pub use if_error::*;
 pub use if_pending::*;
 pub use insert::*;
@@ -96,6 +97,7 @@ mod floor;
 mod get;
 mod gt;
 mod gte;
+mod hash;
 mod r#if;
 mod if_error;
 mod if_pending;
@@ -195,6 +197,7 @@ pub enum Stdlib {
     Get,
     Gt,
     Gte,
+    Hash,
     If,
     IfError,
     IfPending,
@@ -274,6 +277,7 @@ impl TryFrom<Uuid> for Stdlib {
             Get::UUID => Ok(Self::Get),
             Gt::UUID => Ok(Self::Gt),
             Gte::UUID => Ok(Self::Gte),
+            Hash::UUID => Ok(Self::Hash),
             If::UUID => Ok(Self::If),
             IfError::UUID => Ok(Self::IfError),
             IfPending::UUID => Ok(Self::IfPending),
@@ -350,6 +354,7 @@ impl Uid for Stdlib {
             Self::Get => Uid::uid(&Get {}),
             Self::Gt => Uid::uid(&Gt {}),
             Self::Gte => Uid::uid(&Gte {}),
+            Self::Hash => Uid::uid(&Hash {}),
             Self::If => Uid::uid(&If {}),
             Self::IfError => Uid::uid(&IfError {}),
             Self::IfPending => Uid::uid(&IfPending {}),
@@ -425,6 +430,7 @@ impl Stdlib {
             Self::Get => Get::arity(),
             Self::Gt => Gt::arity(),
             Self::Gte => Gte::arity(),
+            Self::Hash => Hash::arity(),
             Self::If => If::arity(),
             Self::IfError => IfError::arity(),
             Self::IfPending => IfPending::arity(),
@@ -525,6 +531,7 @@ impl Stdlib {
             Self::Get => Applicable::<T>::apply(&Get, args, factory, allocator, cache),
             Self::Gt => Applicable::<T>::apply(&Gt, args, factory, allocator, cache),
             Self::Gte => Applicable::<T>::apply(&Gte, args, factory, allocator, cache),
+            Self::Hash => Applicable::<T>::apply(&Hash, args, factory, allocator, cache),
             Self::If => Applicable::<T>::apply(&If, args, factory, allocator, cache),
             Self::IfError => Applicable::<T>::apply(&IfError, args, factory, allocator, cache),
             Self::IfPending => Applicable::<T>::apply(&IfPending, args, factory, allocator, cache),
@@ -619,6 +626,7 @@ impl Stdlib {
             Self::Get => Applicable::<T>::should_parallelize(&Get, args),
             Self::Gt => Applicable::<T>::should_parallelize(&Gt, args),
             Self::Gte => Applicable::<T>::should_parallelize(&Gte, args),
+            Self::Hash => Applicable::<T>::should_parallelize(&Hash, args),
             Self::If => Applicable::<T>::should_parallelize(&If, args),
             Self::IfError => Applicable::<T>::should_parallelize(&IfError, args),
             Self::IfPending => Applicable::<T>::should_parallelize(&IfPending, args),
@@ -844,6 +852,11 @@ impl From<Gt> for Stdlib {
 impl From<Gte> for Stdlib {
     fn from(_value: Gte) -> Self {
         Self::Gte
+    }
+}
+impl From<Hash> for Stdlib {
+    fn from(_value: Hash) -> Self {
+        Self::Hash
     }
 }
 impl From<If> for Stdlib {

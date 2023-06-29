@@ -267,6 +267,11 @@ impl From<stdlib::Gte> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::Hash> for JsBuiltins {
+    fn from(value: stdlib::Hash) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::If> for JsBuiltins {
     fn from(value: stdlib::If) -> Self {
         Self::from(stdlib::Stdlib::from(value))
@@ -486,11 +491,6 @@ impl From<reflex_js::stdlib::FormatErrorMessage> for JsBuiltins {
 }
 impl From<reflex_js::stdlib::FromEntries> for JsBuiltins {
     fn from(value: reflex_js::stdlib::FromEntries) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::Hash> for JsBuiltins {
-    fn from(value: reflex_js::stdlib::Hash) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
