@@ -6,16 +6,16 @@ use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
-    ExpressionListType, FunctionArity, HeapAllocator, ListTermType, RefType, SymbolId, Uid, Uuid,
+    FunctionArity, HeapAllocator, SymbolId, Uid, Uuid,
 };
 
 pub struct Hash;
 impl Hash {
     pub const UUID: Uuid = uuid!("8312114e-8e8d-4ab0-a4d6-7a58f4e51f1d");
-    const ARITY: FunctionArity<1, 0> = FunctionArity {
-        required: [ArgType::Strict],
+    const ARITY: FunctionArity<0, 0> = FunctionArity {
+        required: [],
         optional: [],
-        variadic: None,
+        variadic: Some(ArgType::Strict),
     };
     pub fn arity() -> Arity {
         Arity::from(&Self::ARITY)
@@ -40,20 +40,13 @@ impl<T: Expression> Applicable<T> for Hash {
         _allocator: &impl HeapAllocator<T>,
         _cache: &mut impl EvaluationCache<T>,
     ) -> Result<T, String> {
-        let mut args = args.into_iter();
-        let parsed_args = args.next().unwrap();
-        match factory.match_list_term(&parsed_args) {
-            Some(parsed_args) => {
-                let mut hasher = DefaultHasher::new();
-                for arg in parsed_args.items().as_deref().iter() {
-                    std::hash::Hash::hash(&arg.as_deref().id(), &mut hasher);
-                }
-                let hash = hasher.finish();
-                // TODO: Confirm conversion of 64-bit hash to 32-bit symbol ID
-                let hash_symbol = (hash & 0x00000000FFFFFFFF) as SymbolId;
-                Ok(factory.create_symbol_term(hash_symbol))
-            }
-            _ => Err(format!("Expected list, received {}", parsed_args)),
+        let mut hasher = DefaultHasher::new();
+        for arg in args {
+            std::hash::Hash::hash(&arg.id(), &mut hasher);
         }
+        let hash = hasher.finish();
+        // TODO: Confirm conversion of 64-bit hash to 32-bit symbol ID
+        let hash_symbol = (hash & 0x00000000FFFFFFFF) as SymbolId;
+        Ok(factory.create_symbol_term(hash_symbol))
     }
 }
