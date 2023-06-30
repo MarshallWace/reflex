@@ -43,7 +43,7 @@ where
                 ),
             ),
             (
-                factory.create_string_term(allocator.create_static_string("timestamp")),
+                factory.create_string_term(allocator.create_static_string("now")),
                 factory.create_lambda_term(
                     1,
                     factory.create_application_term(
