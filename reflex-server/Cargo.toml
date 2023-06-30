@@ -20,6 +20,7 @@ reflex-js = { path = "../reflex-js" }
 reflex-json = { path = "../reflex-json" }
 reflex-lang = { path = "../reflex-lang" }
 reflex-macros = { path = "../reflex-macros" }
+reflex-protobuf = { path = "../reflex-protobuf" }
 reflex-recorder = { path = "../reflex-recorder" }
 reflex-runtime = { path = "../reflex-runtime" }
 reflex-scheduler = { path = "../reflex-scheduler" }

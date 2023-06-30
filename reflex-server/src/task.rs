@@ -4,6 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{Applicable, Expression, Reducible, Rewritable};
 use reflex_dispatcher::{Action, TaskFactory};
+use reflex_grpc::actor::GrpcHandlerAction;
+use reflex_grpc::task::GrpcHandlerConnectionTaskFactory;
 use reflex_handlers::task::fetch::FetchHandlerTaskFactory;
 use reflex_handlers::task::graphql::{
     GraphQlHandlerHttpFetchTaskFactory, GraphQlHandlerWebSocketConnectionTaskFactory,
@@ -28,7 +30,10 @@ use crate::server::task::websocket_graphql_server::{
 
 blanket_trait!(
     pub trait ServerTaskAction<T: Expression>:
-        RuntimeTaskAction<T> + DefaultHandlersTaskAction + WebSocketGraphQlServerTaskAction
+        RuntimeTaskAction<T>
+        + DefaultHandlersTaskAction
+        + GrpcHandlerAction<T>
+        + WebSocketGraphQlServerTaskAction
     {
     }
 );
@@ -58,6 +63,7 @@ task_factory_enum!({
     {
         Runtime(RuntimeTaskFactory<T, TFactory, TAllocator>),
         DefaultHandlers(DefaultHandlersTaskFactory<TConnect>),
+        GrpcHandler(GrpcHandlerConnectionTaskFactory),
         WebSocketGraphQlServer(WebSocketGraphQlServerTaskFactory),
     }
 

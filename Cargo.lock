@@ -2240,6 +2240,7 @@ dependencies = [
  "reflex-lang",
  "reflex-lisp",
  "reflex-macros",
+ "reflex-protobuf",
  "reflex-recorder",
  "reflex-runtime",
  "reflex-scheduler",

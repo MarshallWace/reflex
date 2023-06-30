@@ -9,6 +9,7 @@ use std::{
 
 use hyper::{server::conn::AddrStream, service::make_service_fn, Server};
 use reflex_dispatcher::HandlerContext;
+use reflex_grpc::DefaultGrpcConfig;
 use reflex_handlers::{actor::HandlerActor, utils::tls::create_https_client};
 use reflex_scheduler::threadpool::TokioRuntimeThreadPoolFactory;
 use reflex_server::{
@@ -91,6 +92,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
     type TAllocator = DefaultAllocator<T>;
     type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = NoopReconnectTimeout;
+    type TGrpcConfig = DefaultGrpcConfig;
     type TTracer = NoopTracer;
     type TAction = ServerCliAction<T>;
     type TTask = ServerCliTaskFactory<
@@ -99,6 +101,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
         TAllocator,
         TConnect,
         TReconnect,
+        TGrpcConfig,
         NoopGraphQlQueryTransform,
         NoopGraphQlQueryTransform,
         GraphQlWebServerMetricLabels,

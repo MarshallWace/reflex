@@ -2097,6 +2097,7 @@ mod tests {
     use reflex_graphql::{
         parse_graphql_operation, parse_graphql_query, GraphQlVariables, NoopGraphQlQueryTransform,
     };
+    use reflex_grpc::DefaultGrpcConfig;
     use reflex_handlers::utils::tls::hyper_rustls;
     use reflex_json::{JsonMap, JsonValue};
     use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
@@ -2170,6 +2171,7 @@ mod tests {
         type TAllocator = DefaultAllocator<T>;
         type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
+        type TGrpcConfig = DefaultGrpcConfig;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
         type TTask = ServerCliTaskFactory<
@@ -2178,6 +2180,7 @@ mod tests {
             TAllocator,
             TConnect,
             TReconnect,
+            TGrpcConfig,
             NoopGraphQlQueryTransform,
             NoopGraphQlQueryTransform,
             GraphQlWebServerMetricLabels,
@@ -2227,6 +2230,7 @@ mod tests {
         type TAllocator = DefaultAllocator<T>;
         type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
+        type TGrpcConfig = DefaultGrpcConfig;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
         type TTask = ServerCliTaskFactory<
@@ -2235,6 +2239,7 @@ mod tests {
             TAllocator,
             TConnect,
             TReconnect,
+            TGrpcConfig,
             NoopGraphQlQueryTransform,
             NoopGraphQlQueryTransform,
             GraphQlWebServerMetricLabels,
@@ -2544,6 +2549,7 @@ mod tests {
         type TAllocator = DefaultAllocator<T>;
         type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
+        type TGrpcConfig = DefaultGrpcConfig;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
         type TTask = ServerCliTaskFactory<
@@ -2552,6 +2558,7 @@ mod tests {
             TAllocator,
             TConnect,
             TReconnect,
+            TGrpcConfig,
             NoopGraphQlQueryTransform,
             NoopGraphQlQueryTransform,
             GraphQlWebServerMetricLabels,
@@ -2598,6 +2605,7 @@ mod tests {
         type TAllocator = DefaultAllocator<T>;
         type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
+        type TGrpcConfig = DefaultGrpcConfig;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
         type TTask = ServerCliTaskFactory<
@@ -2606,6 +2614,7 @@ mod tests {
             TAllocator,
             TConnect,
             TReconnect,
+            TGrpcConfig,
             NoopGraphQlQueryTransform,
             NoopGraphQlQueryTransform,
             GraphQlWebServerMetricLabels,
@@ -2665,6 +2674,7 @@ mod tests {
         type TAllocator = DefaultAllocator<T>;
         type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
         type TReconnect = NoopReconnectTimeout;
+        type TGrpcConfig = DefaultGrpcConfig;
         type TTracer = NoopTracer;
         type TAction = ServerCliAction<T>;
         type TTask = ServerCliTaskFactory<
@@ -2673,6 +2683,7 @@ mod tests {
             TAllocator,
             TConnect,
             TReconnect,
+            TGrpcConfig,
             NoopGraphQlQueryTransform,
             NoopGraphQlQueryTransform,
             GraphQlWebServerMetricLabels,

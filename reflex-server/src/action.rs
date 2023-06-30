@@ -1052,6 +1052,38 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
+impl<T: Expression> From<TimeoutHandlerTimeoutAction> for ServerCliAction<T> {
+    fn from(value: TimeoutHandlerTimeoutAction) -> Self {
+        TimeoutHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<TimeoutHandlerTimeoutAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<TimeoutHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimeoutHandlerTimeoutAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a TimeoutHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
+impl<T: Expression> From<TimestampHandlerUpdateAction> for ServerCliAction<T> {
+    fn from(value: TimestampHandlerUpdateAction) -> Self {
+        TimestampHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<TimestampHandlerUpdateAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimestampHandlerUpdateAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a TimestampHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
 impl<T: Expression> From<GraphQlHandlerHttpFetchCompleteAction> for ServerCliAction<T> {
     fn from(value: GraphQlHandlerHttpFetchCompleteAction) -> Self {
         GraphQlHandlerActions::from(value).into()
@@ -1308,6 +1340,22 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
     }
 }
 
+impl<T: Expression> From<GrpcHandlerAbortRequestAction> for ServerCliAction<T> {
+    fn from(value: GrpcHandlerAbortRequestAction) -> Self {
+        GrpcHandlerActions::from(value).into()
+    }
+}
+impl<T: Expression> From<ServerCliAction<T>> for Option<GrpcHandlerAbortRequestAction> {
+    fn from(value: ServerCliAction<T>) -> Self {
+        Option::<GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a GrpcHandlerAbortRequestAction> {
+    fn from(value: &'a ServerCliAction<T>) -> Self {
+        Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
+    }
+}
+
 impl<T: Expression> From<GrpcHandlerConnectionTerminateAction> for ServerCliAction<T> {
     fn from(value: GrpcHandlerConnectionTerminateAction) -> Self {
         GrpcHandlerActions::from(value).into()
@@ -1323,38 +1371,6 @@ impl<'a, T: Expression> From<&'a ServerCliAction<T>>
 {
     fn from(value: &'a ServerCliAction<T>) -> Self {
         Option::<&'a GrpcHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<TimeoutHandlerTimeoutAction> for ServerCliAction<T> {
-    fn from(value: TimeoutHandlerTimeoutAction) -> Self {
-        TimeoutHandlerActions::from(value).into()
-    }
-}
-impl<T: Expression> From<ServerCliAction<T>> for Option<TimeoutHandlerTimeoutAction> {
-    fn from(value: ServerCliAction<T>) -> Self {
-        Option::<TimeoutHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimeoutHandlerTimeoutAction> {
-    fn from(value: &'a ServerCliAction<T>) -> Self {
-        Option::<&'a TimeoutHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-
-impl<T: Expression> From<TimestampHandlerUpdateAction> for ServerCliAction<T> {
-    fn from(value: TimestampHandlerUpdateAction) -> Self {
-        TimestampHandlerActions::from(value).into()
-    }
-}
-impl<T: Expression> From<ServerCliAction<T>> for Option<TimestampHandlerUpdateAction> {
-    fn from(value: ServerCliAction<T>) -> Self {
-        Option::<TimestampHandlerActions>::from(value).and_then(|value| value.into())
-    }
-}
-impl<'a, T: Expression> From<&'a ServerCliAction<T>> for Option<&'a TimestampHandlerUpdateAction> {
-    fn from(value: &'a ServerCliAction<T>) -> Self {
-        Option::<&'a TimestampHandlerActions>::from(value).and_then(|value| value.into())
     }
 }
 

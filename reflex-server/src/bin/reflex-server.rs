@@ -5,6 +5,7 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::{
     fs,
+    iter::once,
     net::SocketAddr,
     path::{Path, PathBuf},
     str::FromStr,
@@ -20,6 +21,10 @@ use reflex_dispatcher::{Action, HandlerContext};
 use reflex_graphql::{
     imports::graphql_imports, parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform,
 };
+use reflex_grpc::{
+    actor::{GrpcHandler, GrpcHandlerMetricNames},
+    load_grpc_services, DefaultGrpcConfig,
+};
 use reflex_handlers::{
     default_handler_actors,
     utils::tls::{create_https_client, hyper_rustls},
@@ -27,6 +32,7 @@ use reflex_handlers::{
 };
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
+use reflex_protobuf::types::WellKnownTypesTranscoder;
 use reflex_scheduler::threadpool::TokioRuntimeThreadPoolFactory;
 use reflex_server::{
     action::ServerCliAction,
@@ -74,6 +80,9 @@ struct Args {
     /// Port on which to expose Prometheus HTTP metrics
     #[clap(long)]
     metrics_port: Option<u16>,
+    /// Paths of compiled gRPC service definition protobufs
+    #[clap(long)]
+    grpc_service: Vec<PathBuf>,
     /// Throttle stateful effect updates
     #[clap(long)]
     effect_throttle_ms: Option<u64>,
@@ -123,6 +132,7 @@ pub async fn main() -> Result<()> {
     type TAllocator = DefaultAllocator<T>;
     type TConnect = hyper_rustls::HttpsConnector<hyper::client::HttpConnector>;
     type TReconnect = FibonacciReconnectTimeout;
+    type TGrpcConfig = DefaultGrpcConfig;
     type TAction = ServerCliAction<T>;
     type TTask = ServerCliTaskFactory<
         T,
@@ -130,6 +140,7 @@ pub async fn main() -> Result<()> {
         TAllocator,
         TConnect,
         TReconnect,
+        TGrpcConfig,
         NoopGraphQlQueryTransform,
         NoopGraphQlQueryTransform,
         GraphQlWebServerMetricLabels,
@@ -163,6 +174,16 @@ pub async fn main() -> Result<()> {
             .with_context(|| anyhow!("Failed to initialize Prometheus metrics endpoint"))?;
     }
     let https_client: hyper::Client<TConnect> = create_https_client(None)?;
+    let grpc_services = load_grpc_services(args.grpc_service.iter())
+        .with_context(|| "Failed to load gRPC service descriptor")?;
+    let grpc_config = DefaultGrpcConfig::default();
+    let grpc_max_operations_per_connection =
+        match std::env::var("GRPC_MAX_OPERATIONS_PER_CONNECTION") {
+            Ok(value) => str::parse::<usize>(&value)
+                .with_context(|| "Invalid value for GRPC_MAX_OPERATIONS_PER_CONNECTION")
+                .map(Some),
+            _ => Ok(None),
+        }?;
     let schema = if let Some(schema_path) = &args.schema {
         Some(load_graphql_schema(schema_path.as_path())?)
     } else {
@@ -239,6 +260,10 @@ pub async fn main() -> Result<()> {
             graph_root,
             schema,
             GraphQlWebServerActorFactory::new(|context| {
+                let reconnect_timeout = FibonacciReconnectTimeout {
+                    units: Duration::from_secs(1),
+                    max_timeout: Duration::from_secs(30),
+                };
                 default_handler_actors::<
                     TAction,
                     TTask,
@@ -251,15 +276,24 @@ pub async fn main() -> Result<()> {
                     https_client,
                     &factory,
                     &allocator,
-                    FibonacciReconnectTimeout {
-                        units: Duration::from_secs(1),
-                        max_timeout: Duration::from_secs(30),
-                    },
+                    reconnect_timeout,
                     DefaultHandlerMetricNames::default(),
                     context.pid(),
                 )
                 .into_iter()
-                .map(|actor| (context.generate_pid(), ServerCliTaskActor::from(actor)))
+                .map(ServerCliTaskActor::Handler)
+                .chain(once(ServerCliTaskActor::Grpc(GrpcHandler::new(
+                    grpc_services,
+                    WellKnownTypesTranscoder,
+                    factory.clone(),
+                    allocator.clone(),
+                    reconnect_timeout,
+                    grpc_max_operations_per_connection,
+                    grpc_config,
+                    GrpcHandlerMetricNames::default(),
+                    context.pid(),
+                ))))
+                .map(|actor| (context.generate_pid(), actor))
                 .collect::<Vec<_>>()
             }),
             &factory,
