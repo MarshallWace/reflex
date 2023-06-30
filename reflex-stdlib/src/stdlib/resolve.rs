@@ -232,7 +232,8 @@ where
                             factory.create_builtin_term(CollectList),
                             allocator.create_list(value.keys().map(|item| item.as_deref().clone())),
                         ),
-                        factory.create_list_term(
+                        factory.create_application_term(
+                            factory.create_builtin_term(CollectList),
                             allocator
                                 .create_list(value.values().map(|item| item.as_deref().clone())),
                         ),
