@@ -10,15 +10,14 @@ use reflex::core::{
     HeapAllocator, IntTermType, IntValue, RefType, StringTermType, StringValue,
 };
 use reflex_stdlib::{
-    Add, And, Append, Apply, CollectList, Concat, Contains, Divide, Entries, Eq, Filter, Flatten,
-    Get, Gt, Gte, If, IfError, Insert, Keys, Lt, Lte, Map, Merge, Multiply, Not, Or, Pow, Push,
-    PushFront, Reduce, Remainder, Replace, ResolveDeep, ResolveList, ResolveShallow, Sequence,
-    Slice, Split, Subtract, Values,
+    Add, And, Apply, Chain, CollectList, Concat, Contains, Divide, Eq, Flatten, Get, Gt, Gte, If,
+    IfError, Lt, Lte, Merge, Multiply, Not, Or, Pow, Push, PushFront, Remainder, ResolveDeep,
+    ResolveList, Subtract,
 };
 use swc_common::{source_map::Pos, sync::Lrc, FileName, SourceMap, Span, Spanned};
 use swc_ecma_ast::{
     ArrayLit, ArrowExpr, BinExpr, BinaryOp, BindingIdent, BlockStmt, BlockStmtOrExpr, Bool,
-    CallExpr, Callee, CondExpr, Decl, EsVersion, Expr, ExprOrSpread, ExprStmt, Ident, ImportDecl,
+    CallExpr, Callee, CondExpr, Decl, EsVersion, Expr, ExprStmt, Ident, ImportDecl,
     ImportSpecifier, Lit, MemberExpr, MemberProp, Module, ModuleDecl, ModuleExportName, ModuleItem,
     NewExpr, Null, Number, ObjectLit, ObjectPatProp, Pat, Prop, PropName, PropOrSpread, Stmt, Str,
     TaggedTpl, Tpl, TplElement, UnaryExpr, UnaryOp, VarDeclKind, VarDeclarator,
@@ -27,7 +26,7 @@ use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
 use crate::{
     globals::global_aggregate_error,
-    stdlib::{get_builtin_field, Construct, Dispatch, FormatErrorMessage, Throw, ToString},
+    stdlib::{Accessor, Construct, FormatErrorMessage, Throw, ToString},
     Env,
 };
 
@@ -36,108 +35,76 @@ pub type ParserError = String;
 
 pub trait JsParserBuiltin:
     Builtin
+    + From<Accessor>
     + From<Add>
     + From<And>
-    + From<Append>
     + From<Apply>
+    + From<Chain>
     + From<CollectList>
     + From<Concat>
     + From<Construct>
     + From<Contains>
-    + From<Contains>
-    + From<Dispatch>
     + From<Divide>
-    + From<Entries>
     + From<Eq>
-    + From<Filter>
     + From<Flatten>
     + From<FormatErrorMessage>
-    + From<Get>
     + From<Get>
     + From<Gt>
     + From<Gte>
     + From<If>
     + From<IfError>
-    + From<Insert>
-    + From<Keys>
     + From<Lt>
     + From<Lte>
-    + From<Map>
     + From<Merge>
     + From<Multiply>
     + From<Not>
     + From<Or>
     + From<Pow>
     + From<Push>
-    + From<Push>
     + From<PushFront>
-    + From<PushFront>
-    + From<Reduce>
     + From<Remainder>
-    + From<Replace>
     + From<ResolveDeep>
     + From<ResolveList>
-    + From<ResolveShallow>
-    + From<Sequence>
-    + From<Slice>
-    + From<Split>
     + From<Subtract>
     + From<Throw>
     + From<ToString>
-    + From<Values>
 {
 }
 impl<T> JsParserBuiltin for T where
     T: Builtin
+        + From<Accessor>
         + From<Add>
         + From<And>
-        + From<Append>
         + From<Apply>
+        + From<Chain>
         + From<CollectList>
         + From<Concat>
         + From<Construct>
         + From<Contains>
-        + From<Contains>
-        + From<Dispatch>
         + From<Divide>
-        + From<Entries>
         + From<Eq>
-        + From<Filter>
         + From<Flatten>
         + From<FormatErrorMessage>
-        + From<Get>
         + From<Get>
         + From<Gt>
         + From<Gte>
         + From<If>
         + From<IfError>
-        + From<Insert>
-        + From<Keys>
         + From<Lt>
         + From<Lte>
-        + From<Map>
         + From<Merge>
         + From<Multiply>
         + From<Not>
         + From<Or>
         + From<Pow>
         + From<Push>
-        + From<Push>
         + From<PushFront>
-        + From<PushFront>
-        + From<Reduce>
         + From<Remainder>
-        + From<Replace>
         + From<ResolveDeep>
         + From<ResolveList>
-        + From<ResolveShallow>
-        + From<Sequence>
-        + From<Slice>
-        + From<Split>
         + From<Subtract>
         + From<Throw>
         + From<ToString>
-        + From<Values>
 {
 }
 
@@ -1251,47 +1218,73 @@ where
                     }
                 }
             })?;
-    if elements.len() == 2 {
-        let left = elements.first().unwrap();
-        let right = elements.last().unwrap();
-        match (left, right) {
+    match {
+        let mut elements = elements.into_iter();
+        (elements.next(), elements.next(), elements)
+    } {
+        (None, _, _) => Ok(factory.create_list_term(allocator.create_empty_list())),
+        (Some(element), None, _) => match element {
+            ArrayLiteralFields::Items(items) => {
+                Ok(factory.create_list_term(allocator.create_list(items)))
+            }
+            ArrayLiteralFields::Spread(target) => Ok(target),
+        },
+        (Some(left), Some(right), remaining) if remaining.len() == 0 => match (left, right) {
             (ArrayLiteralFields::Spread(target), ArrayLiteralFields::Items(items))
                 if items.len() == 1 =>
             {
-                return Ok(factory.create_application_term(
+                Ok(factory.create_application_term(
                     factory.create_builtin_term(Push),
-                    allocator
-                        .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
+                    allocator.create_pair(target, items.into_iter().next().unwrap()),
                 ))
             }
             (ArrayLiteralFields::Items(items), ArrayLiteralFields::Spread(target))
                 if items.len() == 1 =>
             {
-                return Ok(factory.create_application_term(
+                Ok(factory.create_application_term(
                     factory.create_builtin_term(PushFront),
-                    allocator
-                        .create_pair(target.clone(), items.into_iter().next().cloned().unwrap()),
+                    allocator.create_pair(target, items.into_iter().next().unwrap()),
                 ))
             }
-            _ => {}
-        }
+            (left, right) => Ok(factory.create_application_term(
+                factory.create_builtin_term(Chain),
+                allocator.create_pair(
+                    match left {
+                        ArrayLiteralFields::Items(items) => {
+                            factory.create_list_term(allocator.create_list(items))
+                        }
+                        ArrayLiteralFields::Spread(target) => target,
+                    },
+                    match right {
+                        ArrayLiteralFields::Items(items) => {
+                            factory.create_list_term(allocator.create_list(items))
+                        }
+                        ArrayLiteralFields::Spread(target) => target,
+                    },
+                ),
+            )),
+        },
+        (Some(left), Some(right), remaining) => Ok(factory.create_application_term(
+            factory.create_builtin_term(Flatten),
+            allocator.create_unit_list(
+                factory.create_application_term(
+                    factory.create_builtin_term(CollectList),
+                    allocator.create_sized_list(
+                        2 + remaining.len(),
+                        [left, right]
+                            .into_iter()
+                            .chain(remaining)
+                            .map(|element| match element {
+                                ArrayLiteralFields::Items(items) => {
+                                    factory.create_list_term(allocator.create_list(items))
+                                }
+                                ArrayLiteralFields::Spread(target) => target,
+                            }),
+                    ),
+                ),
+            ),
+        )),
     }
-
-    let item_sets = elements.into_iter().map(|properties| match properties {
-        ArrayLiteralFields::Spread(value) => value,
-        ArrayLiteralFields::Items(items) => factory.create_list_term(allocator.create_list(items)),
-    });
-    Ok(if item_sets.len() >= 2 {
-        factory.create_application_term(
-            factory.create_builtin_term(Append),
-            allocator.create_list(item_sets),
-        )
-    } else {
-        match item_sets.into_iter().next() {
-            Some(value) => value,
-            None => factory.create_list_term(allocator.create_empty_list()),
-        }
-    })
 }
 
 fn parse_unary_expression<T: Expression>(
@@ -1885,36 +1878,14 @@ where
     T::Builtin: JsParserBuiltin,
 {
     let target = parse_expression(&node.obj, scope, env, factory, allocator)?;
-    let field_name = parse_static_member_field_name(node)?;
-    match field_name {
-        Some(field_name) => Ok(get_static_field(target, &field_name, factory, allocator)),
-        None => {
-            let field = match &node.prop {
-                MemberProp::Ident(name) => Ok(factory.create_string_term(
-                    allocator.create_string(String::from(parse_identifier(&name))),
-                )),
-                MemberProp::Computed(key) => {
-                    parse_expression(&key.expr, scope, env, factory, allocator)
-                }
-                MemberProp::PrivateName(_) => Err(err_unimplemented(node)),
-            }?;
-            Ok(get_dynamic_field(target, field, factory, allocator))
+    let field = match &node.prop {
+        MemberProp::Ident(name) => {
+            Ok(factory.create_string_term(allocator.create_string(parse_identifier(&name))))
         }
-    }
-}
-
-fn parse_static_member_field_name(node: &MemberExpr) -> ParserResult<Option<String>> {
-    Ok(match &node.prop {
-        MemberProp::Ident(name) => Some(String::from(parse_identifier(&name))),
-        MemberProp::Computed(key) => match &*key.expr {
-            Expr::Lit(name) => match name {
-                Lit::Str(name) => Some(parse_string(&name)),
-                _ => None,
-            },
-            _ => None,
-        },
-        _ => None,
-    })
+        MemberProp::Computed(key) => parse_expression(&key.expr, scope, env, factory, allocator),
+        MemberProp::PrivateName(_) => Err(err_unimplemented(&node.prop)),
+    }?;
+    Ok(get_dynamic_field(target, field, factory, allocator))
 }
 
 fn get_static_field<T: Expression>(
@@ -1940,7 +1911,7 @@ where
     T::Builtin: JsParserBuiltin,
 {
     factory.create_application_term(
-        factory.create_builtin_term(Get),
+        factory.create_builtin_term(Accessor),
         allocator.create_pair(target, field),
     )
 }
@@ -1972,106 +1943,11 @@ fn parse_call_expression<T: Expression>(
 where
     T::Builtin: JsParserBuiltin,
 {
-    let static_dispatch = match &node.callee {
-        Callee::Expr(callee) => match &**callee {
-            Expr::Member(callee) => {
-                let method_name = parse_static_member_field_name(&callee)?;
-                match method_name {
-                    Some(method_name) => Some(parse_static_method_call_expression(
-                        &callee.obj,
-                        &method_name,
-                        &node.args,
-                        scope,
-                        env,
-                        factory,
-                        allocator,
-                    )?),
-                    None => None,
-                }
-            }
-            _ => None,
-        },
-        _ => None,
-    };
-    match static_dispatch {
-        Some(expression) => Ok(expression),
-        None => match &node.callee {
-            Callee::Expr(callee) => {
-                let callee = parse_expression(&callee, scope, env, factory, allocator)?;
-                parse_function_application_expression(
-                    callee, &node.args, scope, env, factory, allocator,
-                )
-            }
-            _ => Err(err_unimplemented(&node.callee)),
-        },
-    }
-}
-
-fn parse_static_method_call_expression<T: Expression>(
-    target: &Expr,
-    method_name: &str,
-    args: &[ExprOrSpread],
-    scope: &LexicalScope,
-    env: &Env<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T>
-where
-    T::Builtin: JsParserBuiltin,
-{
-    let target = parse_expression(target, scope, env, factory, allocator)?;
-    let is_potential_builtin_method =
-        get_builtin_field(None, method_name, factory, allocator).is_some();
-    if is_potential_builtin_method {
-        let method = factory.create_string_term(allocator.create_string(method_name));
-        let num_args = args.len();
-        let method_args = parse_expressions(
-            args.iter().map(|arg| &*arg.expr),
-            scope,
-            env,
-            factory,
-            allocator,
-        )?;
-        let dynamic_fallback = parse_function_application_expression(
-            get_static_field(target.clone(), method_name, factory, allocator),
-            args,
-            scope,
-            env,
-            factory,
-            allocator,
-        )?;
-        let mut combined_args = Vec::with_capacity(3 + num_args);
-        combined_args.push(target);
-        combined_args.push(method);
-        combined_args.push(dynamic_fallback);
-        combined_args.extend(method_args);
-        Ok(factory.create_application_term(
-            factory.create_builtin_term(Dispatch),
-            allocator.create_list(combined_args),
-        ))
-    } else {
-        parse_function_application_expression(
-            get_static_field(target.clone(), method_name, factory, allocator),
-            args,
-            scope,
-            env,
-            factory,
-            allocator,
-        )
-    }
-}
-
-fn parse_function_application_expression<T: Expression>(
-    target: T,
-    args: &[ExprOrSpread],
-    scope: &LexicalScope,
-    env: &Env<T>,
-    factory: &impl ExpressionFactory<T>,
-    allocator: &impl HeapAllocator<T>,
-) -> ParserResult<T>
-where
-    T::Builtin: JsParserBuiltin,
-{
+    let target = match &node.callee {
+        Callee::Expr(callee) => parse_expression(callee, scope, env, factory, allocator),
+        _ => Err(err_unimplemented(&node.callee)),
+    }?;
+    let args = &node.args;
     let num_args = args.len();
     let (args, spread) = args.into_iter().fold(
         (Vec::with_capacity(num_args), None),
@@ -2114,19 +1990,23 @@ fn parse_constructor_expression<T: Expression>(
 where
     T::Builtin: JsParserBuiltin,
 {
-    let target = parse_expression(&node.callee, scope, env, factory, allocator);
-    let args = (&node.args).iter().flat_map(|args| {
-        args.iter().map(|arg| {
-            if arg.spread.is_some() {
-                Err(err_unimplemented(arg))
-            } else {
-                parse_expression(&arg.expr, scope, env, factory, allocator)
-            }
+    let target = parse_expression(&node.callee, scope, env, factory, allocator)?;
+    let args = node
+        .args
+        .iter()
+        .flat_map(|args| {
+            args.iter().map(|arg| {
+                if arg.spread.is_some() {
+                    Err(err_unimplemented(arg))
+                } else {
+                    parse_expression(&arg.expr, scope, env, factory, allocator)
+                }
+            })
         })
-    });
+        .collect::<ParserResult<Vec<_>>>()?;
     Ok(factory.create_application_term(
         factory.create_builtin_term(Construct),
-        allocator.create_list(once(target).chain(args).collect::<ParserResult<Vec<_>>>()?),
+        allocator.create_sized_list(1 + args.len(), once(target).chain(args)),
     ))
 }
 
@@ -2154,7 +2034,7 @@ mod tests {
         execute, DefaultInterpreterCache, InterpreterOptions,
     };
     use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
-    use reflex_stdlib::{Collect, CollectList};
+    use reflex_stdlib::CollectList;
 
     use super::*;
 
@@ -2712,35 +2592,35 @@ mod tests {
             factory.create_builtin_term(CollectList),
             allocator.create_list([
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("first")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("second")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("third")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("fourth")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("fifth")),
@@ -2779,21 +2659,21 @@ mod tests {
             factory.create_builtin_term(CollectList),
             allocator.create_list([
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("first")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("second")),
                     ),
                 ),
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         expression.clone(),
                         factory.create_string_term(allocator.create_static_string("third")),
@@ -2906,7 +2786,40 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Collect),
+            factory.create_builtin_term(ResolveList),
+            allocator.create_unit_list(expression),
+        );
+        let result = evaluate(
+            &query,
+            &StateCache::default(),
+            &factory,
+            &allocator,
+            &mut SubstitutionCache::new(),
+        );
+        assert_eq!(
+            result,
+            EvaluationResult::new(
+                factory.create_list_term(allocator.create_list([
+                    factory.create_float_term(1.0),
+                    factory.create_float_term(2.0),
+                    factory.create_float_term(3.0),
+                    factory.create_float_term(4.0),
+                    factory.create_float_term(5.0),
+                    factory.create_float_term(6.0),
+                    factory.create_float_term(7.0),
+                ])),
+                DependencyList::empty(),
+            ),
+        );
+        let expression = parse(
+            "[...[1, 2, 3], 4, ...[5, 6, 7].slice(0, 3)]",
+            &env,
+            &factory,
+            &allocator,
+        )
+        .unwrap();
+        let query = factory.create_application_term(
+            factory.create_builtin_term(ResolveList),
             allocator.create_unit_list(expression),
         );
         let result = evaluate(
@@ -2939,7 +2852,7 @@ mod tests {
         )
         .unwrap();
         let query = factory.create_application_term(
-            factory.create_builtin_term(Collect),
+            factory.create_builtin_term(ResolveList),
             allocator.create_unit_list(expression),
         );
         let result = evaluate(
@@ -2968,6 +2881,20 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let env = Env::new();
         assert_eq!(
+            parse("[3, 4, 5].length", &env, &factory, &allocator),
+            Ok(factory.create_application_term(
+                factory.create_builtin_term(Accessor),
+                allocator.create_pair(
+                    factory.create_list_term(allocator.create_list([
+                        factory.create_float_term(3.0),
+                        factory.create_float_term(4.0),
+                        factory.create_float_term(5.0),
+                    ])),
+                    factory.create_string_term(allocator.create_static_string("length")),
+                ),
+            )),
+        );
+        assert_eq!(
             parse(
                 "[3, 4, 5].map((value) => value * 2)",
                 &env,
@@ -2975,48 +2902,27 @@ mod tests {
                 &allocator
             ),
             Ok(factory.create_application_term(
-                factory.create_builtin_term(Dispatch),
-                allocator.create_list([
-                    factory.create_list_term(allocator.create_list([
-                        factory.create_float_term(3.0),
-                        factory.create_float_term(4.0),
-                        factory.create_float_term(5.0),
-                    ])),
-                    factory.create_string_term(allocator.create_static_string("map")),
+                factory.create_application_term(
+                    factory.create_builtin_term(Accessor),
+                    allocator.create_pair(
+                        factory.create_list_term(allocator.create_list([
+                            factory.create_float_term(3.0),
+                            factory.create_float_term(4.0),
+                            factory.create_float_term(5.0),
+                        ])),
+                        factory.create_string_term(allocator.create_static_string("map")),
+                    ),
+                ),
+                allocator.create_unit_list(factory.create_lambda_term(
+                    1,
                     factory.create_application_term(
-                        factory.create_application_term(
-                            factory.create_builtin_term(Get),
-                            allocator.create_pair(
-                                factory.create_list_term(allocator.create_list([
-                                    factory.create_float_term(3.0),
-                                    factory.create_float_term(4.0),
-                                    factory.create_float_term(5.0),
-                                ])),
-                                factory.create_string_term(allocator.create_static_string("map")),
-                            ),
-                        ),
-                        allocator.create_unit_list(factory.create_lambda_term(
-                            1,
-                            factory.create_application_term(
-                                factory.create_builtin_term(Multiply),
-                                allocator.create_pair(
-                                    factory.create_variable_term(0),
-                                    factory.create_float_term(2.0),
-                                ),
-                            ),
-                        )),
-                    ),
-                    factory.create_lambda_term(
-                        1,
-                        factory.create_application_term(
-                            factory.create_builtin_term(Multiply),
-                            allocator.create_pair(
-                                factory.create_variable_term(0),
-                                factory.create_float_term(2.0),
-                            ),
+                        factory.create_builtin_term(Multiply),
+                        allocator.create_pair(
+                            factory.create_variable_term(0),
+                            factory.create_float_term(2.0),
                         ),
                     ),
-                ]),
+                ),),
             )),
         );
     }
@@ -3127,7 +3033,7 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         factory.create_record_term(
                             allocator.create_struct_prototype(allocator.create_list([
@@ -3169,7 +3075,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3177,7 +3083,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3210,7 +3116,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3218,7 +3124,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3251,7 +3157,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3259,7 +3165,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3292,7 +3198,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("bar")),
@@ -3300,7 +3206,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -3335,7 +3241,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_string_term(
@@ -3345,7 +3251,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_string_term(
@@ -3385,7 +3291,7 @@ mod tests {
                         factory.create_variable_term(1),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_string_term(
@@ -3395,7 +3301,7 @@ mod tests {
                             ),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(Accessor),
                                     allocator.create_pair(
                                         factory.create_variable_term(1),
                                         factory.create_string_term(
@@ -3448,7 +3354,7 @@ mod tests {
                 ),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_string(
@@ -3458,7 +3364,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_string_term(allocator.create_string(
@@ -3470,7 +3376,7 @@ mod tests {
                             factory.create_variable_term(1),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(Accessor),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(allocator.create_static_string("a")),
@@ -3478,7 +3384,7 @@ mod tests {
                                 ),
                                 factory.create_let_term(
                                     factory.create_application_term(
-                                        factory.create_builtin_term(Get),
+                                        factory.create_builtin_term(Accessor),
                                         allocator.create_pair(
                                             factory.create_variable_term(1),
                                             factory.create_string_term(allocator.create_static_string("b")),
@@ -3488,7 +3394,7 @@ mod tests {
                                         factory.create_variable_term(3),
                                         factory.create_let_term(
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Get),
+                                                factory.create_builtin_term(Accessor),
                                                 allocator.create_pair(
                                                     factory.create_variable_term(0),
                                                     factory.create_string_term(allocator.create_static_string("c")),
@@ -3496,7 +3402,7 @@ mod tests {
                                             ),
                                             factory.create_let_term(
                                                 factory.create_application_term(
-                                                    factory.create_builtin_term(Get),
+                                                    factory.create_builtin_term(Accessor),
                                                     allocator.create_pair(
                                                         factory.create_variable_term(1),
                                                         factory.create_string_term(allocator.create_static_string("d")),
@@ -3522,7 +3428,7 @@ mod tests {
                         factory.create_variable_term(0),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_string_term(allocator.create_static_string("foo")),
@@ -3530,7 +3436,7 @@ mod tests {
                             ),
                             factory.create_let_term(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(Accessor),
                                     allocator.create_pair(
                                         factory.create_variable_term(1),
                                         factory.create_string_term(allocator.create_static_string("bar")),
@@ -3568,7 +3474,7 @@ mod tests {
             parse("const [foo] = [3, 4, 5]; foo;", &env, &factory, &allocator),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         factory.create_list_term(allocator.create_list([
                             factory.create_float_term(3.0),
@@ -3596,7 +3502,7 @@ mod tests {
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(0),
@@ -3604,7 +3510,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_int_term(1),
@@ -3624,7 +3530,7 @@ mod tests {
             ),
             Ok(factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Get),
+                    factory.create_builtin_term(Accessor),
                     allocator.create_pair(
                         factory.create_list_term(allocator.create_list([
                             factory.create_float_term(3.0),
@@ -3652,7 +3558,7 @@ mod tests {
                 ])),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(1),
@@ -3660,7 +3566,7 @@ mod tests {
                     ),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(1),
                                 factory.create_int_term(2),
@@ -3682,7 +3588,7 @@ mod tests {
                 factory.create_boolean_term(true),
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_list_term(allocator.create_list([
                                 factory.create_float_term(3.0),
@@ -3713,7 +3619,7 @@ mod tests {
                     ])),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
@@ -3721,7 +3627,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(1),
@@ -4803,7 +4709,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_string_term(allocator.create_static_string("foo")),
@@ -4821,7 +4727,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -4829,7 +4735,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory
@@ -4861,7 +4767,7 @@ mod tests {
                     factory.create_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_string_term(allocator.create_static_string("foo")),
@@ -4869,7 +4775,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory
@@ -4917,7 +4823,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(0),
@@ -4935,7 +4841,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
@@ -4943,7 +4849,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(1),
@@ -4967,7 +4873,7 @@ mod tests {
                 1,
                 factory.create_let_term(
                     factory.create_application_term(
-                        factory.create_builtin_term(Get),
+                        factory.create_builtin_term(Accessor),
                         allocator.create_pair(
                             factory.create_variable_term(0),
                             factory.create_int_term(2),
@@ -4985,7 +4891,7 @@ mod tests {
                     factory.create_variable_term(0),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(1),
@@ -4993,7 +4899,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(2),
@@ -5018,7 +4924,7 @@ mod tests {
                     factory.create_variable_term(2),
                     factory.create_let_term(
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(Accessor),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
@@ -5026,7 +4932,7 @@ mod tests {
                         ),
                         factory.create_let_term(
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(Accessor),
                                 allocator.create_pair(
                                     factory.create_variable_term(1),
                                     factory.create_int_term(1),

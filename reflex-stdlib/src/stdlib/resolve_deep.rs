@@ -1,16 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
-
 use reflex::core::{
     uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, GraphNode, HashmapTermType, HashsetTermType, HeapAllocator,
     ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
-use crate::{CollectHashSet, CollectList, CollectRecord, ConstructHashMap};
+use crate::{Apply, CollectHashSet, CollectList, ConstructHashMap};
 
 pub struct ResolveDeep;
 impl ResolveDeep {
@@ -32,9 +29,9 @@ impl Uid for ResolveDeep {
 impl<T: Expression> Applicable<T> for ResolveDeep
 where
     T::Builtin: Builtin
+        + From<Apply>
         + From<CollectHashSet>
         + From<CollectList>
-        + From<CollectRecord>
         + From<ConstructHashMap>
         + From<ResolveDeep>,
 {
@@ -60,28 +57,30 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(CollectRecord),
-                    allocator.create_sized_list(
-                        value.values().as_deref().len() + 1,
-                        once(factory.create_constructor_term(
+                    factory.create_builtin_term(Apply),
+                    allocator.create_pair(
+                        factory.create_constructor_term(
                             allocator.clone_struct_prototype(value.prototype()),
-                        ))
-                        .chain(
-                            value
-                                .values()
-                                .as_deref()
-                                .iter()
-                                .map(|item| item.as_deref().clone())
-                                .map(|field| {
-                                    if field.is_atomic() {
-                                        field
-                                    } else {
-                                        factory.create_application_term(
-                                            factory.create_builtin_term(ResolveDeep),
-                                            allocator.create_unit_list(field),
-                                        )
-                                    }
-                                }),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(CollectList),
+                            allocator.create_list(
+                                value
+                                    .values()
+                                    .as_deref()
+                                    .iter()
+                                    .map(|item| item.as_deref().clone())
+                                    .map(|field| {
+                                        if field.is_atomic() {
+                                            field
+                                        } else {
+                                            factory.create_application_term(
+                                                factory.create_builtin_term(ResolveDeep),
+                                                allocator.create_unit_list(field),
+                                            )
+                                        }
+                                    }),
+                            ),
                         ),
                     ),
                 ))

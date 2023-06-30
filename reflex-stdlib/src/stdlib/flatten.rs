@@ -45,26 +45,27 @@ impl<T: Expression> Applicable<T> for Flatten {
                 .iter()
                 .map(|item| item.as_deref().clone())
                 // TODO: avoid unnecessary intermediate allocations
-                .fold(Vec::<T>::new(), |mut results, item| {
+                .fold(Ok(Vec::<T>::new()), |result, item| {
+                    let mut items = result?;
                     if let Some(inner) = factory.match_list_term(&item) {
-                        results.extend(
+                        items.extend(
                             inner
                                 .items()
                                 .as_deref()
                                 .iter()
                                 .map(|item| item.as_deref().clone()),
                         );
+                        Ok(items)
                     } else {
-                        results.push(item)
-                    };
-                    results
+                        Err(format!("Expected List, received {}", item))
+                    }
                 });
-            Some(factory.create_list_term(allocator.create_list(items)))
+            Some(items.map(|items| factory.create_list_term(allocator.create_list(items))))
         } else {
             None
         };
         match result {
-            Some(result) => Ok(result),
+            Some(result) => result,
             None => Err(format!("Expected List, received {}", target)),
         }
     }

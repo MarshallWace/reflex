@@ -3,17 +3,25 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
-use reflex_stdlib::{CollectList, Effect, Map};
+use reflex::core::{create_record, Builtin, Expression, ExpressionFactory, HeapAllocator};
+use reflex_macros::blanket_trait;
+use reflex_stdlib::stdlib;
 
 use crate::actor::loader::EFFECT_TYPE_LOADER;
+
+blanket_trait!(
+    pub trait LoaderImportBuiltin:
+        Builtin + From<stdlib::CollectList> + From<stdlib::Effect> + From<stdlib::Map>
+    {
+    }
+);
 
 pub fn import_loader<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<CollectList> + From<Effect> + From<Map>,
+    T::Builtin: LoaderImportBuiltin,
 {
     create_record(
         once((
@@ -27,13 +35,13 @@ where
                             factory.create_lambda_term(
                                 1,
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Effect),
+                                    factory.create_builtin_term(stdlib::Effect),
                                     allocator.create_triple(
                                         factory.create_string_term(
                                             allocator.create_static_string(EFFECT_TYPE_LOADER),
                                         ),
                                         factory.create_application_term(
-                                            factory.create_builtin_term(CollectList),
+                                            factory.create_builtin_term(stdlib::CollectList),
                                             allocator.create_triple(
                                                 factory.create_variable_term(2),
                                                 factory.create_variable_term(1),
@@ -50,13 +58,13 @@ where
                             factory.create_lambda_term(
                                 1,
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Map),
+                                    factory.create_builtin_term(stdlib::Map),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_lambda_term(
                                             1,
                                             factory.create_application_term(
-                                                factory.create_builtin_term(Effect),
+                                                factory.create_builtin_term(stdlib::Effect),
                                                 allocator.create_triple(
                                                     factory.create_string_term(
                                                         allocator.create_static_string(
@@ -64,7 +72,9 @@ where
                                                         ),
                                                     ),
                                                     factory.create_application_term(
-                                                        factory.create_builtin_term(CollectList),
+                                                        factory.create_builtin_term(
+                                                            stdlib::CollectList,
+                                                        ),
                                                         allocator.create_triple(
                                                             factory.create_variable_term(3),
                                                             factory.create_variable_term(2),

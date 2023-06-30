@@ -4,11 +4,14 @@
 use std::iter::once;
 
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
     FunctionArity, HeapAllocator, Uid, Uuid,
 };
 use reflex_json::stringify;
 use reflex_stdlib::ResolveDeep;
+
+pub trait LogBuiltin: Builtin + From<LogArgs> + From<ResolveDeep> {}
+impl<T> LogBuiltin for T where T: Builtin + From<LogArgs> + From<ResolveDeep> {}
 
 pub struct Log;
 impl Log {
@@ -29,7 +32,7 @@ impl Uid for Log {
 }
 impl<T: Expression> Applicable<T> for Log
 where
-    T::Builtin: From<LogArgs> + From<ResolveDeep>,
+    T::Builtin: LogBuiltin,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())

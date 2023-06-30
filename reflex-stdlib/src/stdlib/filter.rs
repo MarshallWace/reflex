@@ -1,18 +1,12 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
-
 use reflex::core::{
-    get_hashmap_entries, uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, FunctionArity, HashsetTermType, HeapAllocator,
-    ListTermType, RefType, Uid, Uuid,
+    uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
+    FunctionArity, HeapAllocator, Uid, Uuid,
 };
 
-use crate::{CollectHashMap, CollectHashSet, CollectList};
-
-use super::is_truthy;
+use crate::{Apply, CollectHashMap, CollectHashSet, CollectList, Flatten, If, Map, ResolveList};
 
 pub struct Filter;
 impl Filter {
@@ -34,10 +28,14 @@ impl Uid for Filter {
 impl<T: Expression> Applicable<T> for Filter
 where
     T::Builtin: Builtin
+        + From<Apply>
         + From<CollectHashMap>
         + From<CollectHashSet>
-        + From<CollectFilterResults>
-        + From<CollectList>,
+        + From<CollectList>
+        + From<Flatten>
+        + From<If>
+        + From<Map>
+        + From<ResolveList>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -54,31 +52,29 @@ where
     ) -> Result<T, String> {
         let target = args.next().unwrap();
         let predicate = args.next().unwrap();
-        let result = if let Some(target) = factory.match_list_term(&target) {
+        let result = if let Some(_) = factory.match_list_term(&target) {
             Some(collect_filter_results(
-                target
-                    .items()
-                    .as_deref()
-                    .iter()
-                    .map(|item| item.as_deref().clone()),
-                &predicate,
                 CollectList,
+                &target,
+                &predicate,
                 factory,
                 allocator,
             ))
-        } else if let Some(target) = factory.match_hashmap_term(&target) {
+        } else if let Some(_) = factory.match_hashmap_term(&target) {
+            // TODO: Clarify expected behavior of filtering non-list terms
             Some(collect_filter_results(
-                get_hashmap_entries(target, factory, allocator),
-                &predicate,
                 CollectHashMap,
+                &target,
+                &predicate,
                 factory,
                 allocator,
             ))
-        } else if let Some(target) = factory.match_hashset_term(&target) {
+        } else if let Some(_) = factory.match_hashset_term(&target) {
+            // TODO: Clarify expected behavior of filtering non-list terms
             Some(collect_filter_results(
-                target.values().map(|item| item.as_deref().clone()),
-                &predicate,
                 CollectHashSet,
+                &target,
+                &predicate,
                 factory,
                 allocator,
             ))
@@ -96,99 +92,53 @@ where
 }
 
 fn collect_filter_results<T: Expression>(
-    items: impl IntoIterator<Item = T>,
-    predicate: &T,
     collect: impl Into<T::Builtin>,
+    target: &T,
+    predicate: &T,
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<CollectFilterResults> + From<CollectList>,
+    T::Builtin: From<Apply> + From<Flatten> + From<If> + From<Map> + From<ResolveList>,
 {
-    let (items, results): (Vec<_>, Vec<_>) = items
-        .into_iter()
-        .map(|item| {
-            (
-                item.clone(),
-                factory
-                    .create_application_term(predicate.clone(), allocator.create_list(once(item))),
-            )
-        })
-        .unzip();
     factory.create_application_term(
-        factory.create_builtin_term(CollectFilterResults),
-        allocator.create_triple(
-            factory.create_list_term(allocator.create_list(items)),
-            factory.create_application_term(
-                factory.create_builtin_term(CollectList),
-                allocator.create_list(results),
-            ),
+        factory.create_builtin_term(Apply),
+        allocator.create_pair(
             factory.create_builtin_term(collect),
+            factory.create_application_term(
+                factory.create_builtin_term(Flatten),
+                allocator.create_unit_list(factory.create_application_term(
+                    factory.create_builtin_term(ResolveList),
+                    allocator.create_unit_list(
+                        factory.create_application_term(
+                            factory.create_builtin_term(Map),
+                            allocator.create_pair(
+                                target.clone(),
+                                factory.create_lambda_term(
+                                    1,
+                                    factory.create_application_term(
+                                        factory.create_builtin_term(If),
+                                        allocator.create_triple(
+                                            factory.create_application_term(
+                                                predicate.clone(),
+                                                allocator.create_unit_list(
+                                                    factory.create_variable_term(0),
+                                                ),
+                                            ),
+                                            factory.create_list_term(
+                                                allocator.create_unit_list(
+                                                    factory.create_variable_term(0),
+                                                ),
+                                            ),
+                                            factory.create_list_term(allocator.create_empty_list()),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                )),
+            ),
         ),
     )
-}
-
-pub struct CollectFilterResults;
-impl CollectFilterResults {
-    pub const UUID: Uuid = uuid!("36517ace-60b4-4c2f-8768-9717cf262b90");
-    const ARITY: FunctionArity<3, 0> = FunctionArity {
-        required: [ArgType::Strict, ArgType::Strict, ArgType::Strict],
-        optional: [],
-        variadic: None,
-    };
-    pub fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-}
-impl Uid for CollectFilterResults {
-    fn uid(&self) -> Uuid {
-        Self::UUID
-    }
-}
-impl<T: Expression> Applicable<T> for CollectFilterResults {
-    fn arity(&self) -> Option<Arity> {
-        Some(Self::arity())
-    }
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-    fn apply(
-        &self,
-        mut args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        let items = args.next().unwrap();
-        let results = args.next().unwrap();
-        let combine = args.next().unwrap();
-        match (
-            factory.match_list_term(&items),
-            factory.match_list_term(&results),
-        ) {
-            (Some(items), Some(results)) => {
-                Ok(factory.create_application_term(
-                    combine,
-                    allocator.create_unsized_list(
-                    items
-                    .items()
-                    .as_deref()
-                    .iter()
-                    .map(|item| item.as_deref().clone())
-                    .zip(
-                        results.items()
-                        .as_deref()
-                        .iter()
-                        .map(|item| item.as_deref().clone())
-                    ).filter_map(|(item, result)| if is_truthy(&result, factory) {
-                        Some(item)
-                    } else {
-                        None
-                    }))
-                ))
-            },
-            _ => Err(format!("Invalid filter combiner arguments: Expected (<struct>, <struct>, <function>), received ({} {} {})",
-            items, results, combine))
-        }
-    }
 }

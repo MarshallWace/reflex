@@ -3,9 +3,10 @@
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use std::iter::once;
 
-use crate::stdlib::FormatErrorMessage;
 use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator};
 use reflex_stdlib::ResolveList;
+
+use crate::stdlib::FormatErrorMessage;
 
 pub fn global_error<T: Expression>(
     factory: &impl ExpressionFactory<T>,

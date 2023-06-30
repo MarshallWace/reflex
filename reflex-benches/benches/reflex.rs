@@ -20,7 +20,7 @@ use reflex_interpreter::{
 };
 use reflex_lang::{allocator::DefaultAllocator, SharedTermFactory};
 use reflex_lisp::parse;
-use reflex_stdlib::{Add, Collect, Map, Stdlib};
+use reflex_stdlib::{Add, CollectList, Map, Stdlib};
 use test::Bencher;
 
 #[bench]
@@ -249,18 +249,18 @@ fn list_transforms(b: &mut Bencher) {
     let state = StateCache::default();
     let factory = SharedTermFactory::<Stdlib>::default();
     let allocator = DefaultAllocator::default();
-    let collection = factory.create_list_term(allocator.create_list((0..1000).map(|index| {
+    let collection = factory.create_list_term(allocator.create_list((0..1000usize).map(|index| {
         factory.create_application_term(
             factory.create_builtin_term(Add),
             allocator.create_list(vec![
-                factory.create_int_term(index),
+                factory.create_int_term(index as i64),
                 factory.create_int_term(1),
             ]),
         )
     })));
     let transform = parse("(lambda (value) (+ value 2))", &factory, &allocator).unwrap();
     let expression = factory.create_application_term(
-        factory.create_builtin_term(Collect),
+        factory.create_builtin_term(CollectList),
         allocator.create_list(once(factory.create_application_term(
             factory.create_builtin_term(Map),
             allocator.create_list(vec![collection, transform]),

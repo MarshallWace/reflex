@@ -117,11 +117,6 @@ impl From<stdlib::And> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::Append> for JsBuiltins {
-    fn from(value: stdlib::Append) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
 impl From<stdlib::Apply> for JsBuiltins {
     fn from(value: stdlib::Apply) -> Self {
         Self::from(stdlib::Stdlib::from(value))
@@ -142,13 +137,8 @@ impl From<stdlib::Ceil> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::Collect> for JsBuiltins {
-    fn from(value: stdlib::Collect) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::CollectFilterResults> for JsBuiltins {
-    fn from(value: stdlib::CollectFilterResults) -> Self {
+impl From<stdlib::Chain> for JsBuiltins {
+    fn from(value: stdlib::Chain) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -159,11 +149,6 @@ impl From<stdlib::CollectHashMap> for JsBuiltins {
 }
 impl From<stdlib::CollectHashSet> for JsBuiltins {
     fn from(value: stdlib::CollectHashSet) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::CollectRecord> for JsBuiltins {
-    fn from(value: stdlib::CollectRecord) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -219,11 +204,6 @@ impl From<stdlib::Effect> for JsBuiltins {
 }
 impl From<stdlib::EndsWith> for JsBuiltins {
     fn from(value: stdlib::EndsWith) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::Entries> for JsBuiltins {
-    fn from(value: stdlib::Entries) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -317,11 +297,6 @@ impl From<stdlib::Map> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::Match> for JsBuiltins {
-    fn from(value: stdlib::Match) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
 impl From<stdlib::Max> for JsBuiltins {
     fn from(value: stdlib::Max) -> Self {
         Self::from(stdlib::Stdlib::from(value))
@@ -402,8 +377,8 @@ impl From<stdlib::ResolveHashSet> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::ResolveShallow> for JsBuiltins {
-    fn from(value: stdlib::ResolveShallow) -> Self {
+impl From<stdlib::ResolveList> for JsBuiltins {
+    fn from(value: stdlib::ResolveList) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -412,8 +387,8 @@ impl From<stdlib::ResolveRecord> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::ResolveList> for JsBuiltins {
-    fn from(value: stdlib::ResolveList) -> Self {
+impl From<stdlib::ResolveShallow> for JsBuiltins {
+    fn from(value: stdlib::ResolveShallow) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -447,8 +422,18 @@ impl From<stdlib::Subtract> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::Unzip> for JsBuiltins {
+    fn from(value: stdlib::Unzip) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::Values> for JsBuiltins {
     fn from(value: stdlib::Values) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Zip> for JsBuiltins {
+    fn from(value: stdlib::Zip) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -464,6 +449,11 @@ impl From<reflex_json::stdlib::JsonSerialize> for JsBuiltins {
     }
 }
 
+impl From<reflex_js::stdlib::Accessor> for JsBuiltins {
+    fn from(value: reflex_js::stdlib::Accessor) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
 impl From<reflex_js::stdlib::Construct> for JsBuiltins {
     fn from(value: reflex_js::stdlib::Construct) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -474,11 +464,6 @@ impl From<reflex_js::stdlib::DateConstructor> for JsBuiltins {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_js::stdlib::Dispatch> for JsBuiltins {
-    fn from(value: reflex_js::stdlib::Dispatch) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
 impl From<reflex_js::stdlib::EncodeUriComponent> for JsBuiltins {
     fn from(value: reflex_js::stdlib::EncodeUriComponent) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -486,11 +471,6 @@ impl From<reflex_js::stdlib::EncodeUriComponent> for JsBuiltins {
 }
 impl From<reflex_js::stdlib::FormatErrorMessage> for JsBuiltins {
     fn from(value: reflex_js::stdlib::FormatErrorMessage) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::FromEntries> for JsBuiltins {
-    fn from(value: reflex_js::stdlib::FromEntries) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
@@ -509,11 +489,6 @@ impl From<reflex_js::stdlib::LogArgs> for JsBuiltins {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_js::stdlib::MapConstructor> for JsBuiltins {
-    fn from(value: reflex_js::stdlib::MapConstructor) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
 impl From<reflex_js::stdlib::ParseFloat> for JsBuiltins {
     fn from(value: reflex_js::stdlib::ParseFloat) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -521,16 +496,6 @@ impl From<reflex_js::stdlib::ParseFloat> for JsBuiltins {
 }
 impl From<reflex_js::stdlib::ParseInt> for JsBuiltins {
     fn from(value: reflex_js::stdlib::ParseInt) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::SetConstructor> for JsBuiltins {
-    fn from(value: reflex_js::stdlib::SetConstructor) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::StructTypeFactory> for JsBuiltins {
-    fn from(value: reflex_js::stdlib::StructTypeFactory) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }

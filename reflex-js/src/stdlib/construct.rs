@@ -4,7 +4,8 @@
 // SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use reflex::core::{
     parse_record_values, uuid, Applicable, ArgType, Arity, ConstructorTermType, EvaluationCache,
-    Expression, ExpressionFactory, FunctionArity, HeapAllocator, RefType, Uid, Uuid,
+    Expression, ExpressionFactory, ExpressionListType, FunctionArity, HeapAllocator, ListTermType,
+    RecordTermType, RefType, StructPrototypeType, Uid, Uuid,
 };
 
 pub struct Construct;
@@ -40,23 +41,45 @@ impl<T: Expression> Applicable<T> for Construct {
     ) -> Result<T, String> {
         let mut args = args.into_iter();
         let target = args.next().unwrap();
-        let result = if let Some(constructor) = factory.match_constructor_term(&target) {
+        if let Some(constructor) = factory.match_constructor_term(&target) {
             let prototype = constructor.prototype();
             let properties = args.next().unwrap();
-            let reordered_values =
-                parse_record_values(prototype.as_deref(), &properties, factory, allocator)
-                    .ok_or_else(|| {
-                        format!("Invalid constructor call: {} {}", target, properties)
-                    })?;
-            match reordered_values {
-                None => properties,
-                Some(values) => {
-                    factory.create_record_term(allocator.clone_struct_prototype(prototype), values)
+            let result = if let Some(term) = factory.match_record_term(&properties) {
+                let parsed_values =
+                    parse_record_values(prototype.as_deref(), &properties, factory, allocator);
+                match parsed_values {
+                    None => None,
+                    Some(None) => Some(factory.create_record_term(
+                        allocator.clone_struct_prototype(prototype),
+                        allocator.clone_list(term.values()),
+                    )),
+                    Some(Some(reordered_properties)) => Some(factory.create_record_term(
+                        allocator.clone_struct_prototype(prototype),
+                        reordered_properties,
+                    )),
                 }
+            } else if let Some(term) = factory.match_list_term(&properties) {
+                let values = term.items();
+                if values.as_deref().len() == prototype.as_deref().keys().as_deref().len() {
+                    Some(factory.create_record_term(
+                        allocator.clone_struct_prototype(prototype),
+                        allocator.clone_list(values),
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            match result {
+                Some(result) => Ok(result),
+                None => Err(format!(
+                    "Invalid constructor call: {} {}",
+                    target, properties
+                )),
             }
         } else {
-            factory.create_application_term(target, allocator.create_list(args))
-        };
-        Ok(result)
+            Ok(factory.create_application_term(target, allocator.create_list(args)))
+        }
     }
 }

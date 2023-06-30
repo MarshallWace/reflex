@@ -26,7 +26,7 @@ use tokio::sync::oneshot;
 
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use reflex_cli::syntax::js::{compile_js_entry_point, default_js_loaders};
-use reflex_graphql::NoopGraphQlQueryTransform;
+use reflex_graphql::{imports::graphql_imports, NoopGraphQlQueryTransform};
 use reflex_handlers::{
     actor::graphql::{GraphQlHandler, GraphQlHandlerMetricNames},
     utils::tls::hyper_rustls,
@@ -34,8 +34,8 @@ use reflex_handlers::{
 use reflex_interpreter::{compiler::CompilerOptions, InterpreterOptions};
 use reflex_lang::{allocator::DefaultAllocator, CachedSharedTerm, SharedTermFactory};
 use reflex_server::{
-    action::ServerCliAction, builtins::ServerBuiltins, graphql_service, imports::server_imports,
-    logger::NoopLogger, GraphQlWebServer, GraphQlWebServerMetricNames,
+    action::ServerCliAction, builtins::ServerBuiltins, graphql_service, logger::NoopLogger,
+    GraphQlWebServer, GraphQlWebServerMetricNames,
 };
 use reflex_utils::reconnect::NoopReconnectTimeout;
 
@@ -69,7 +69,7 @@ pub fn serve_graphql(input: &str) -> (SocketAddr, oneshot::Sender<()>) {
     let compiler_options = CompilerOptions::default();
     let interpreter_options = InterpreterOptions::default();
     let module_loader = Some(default_js_loaders(
-        server_imports(&factory, &allocator),
+        graphql_imports(&factory, &allocator),
         &factory,
         &allocator,
     ));

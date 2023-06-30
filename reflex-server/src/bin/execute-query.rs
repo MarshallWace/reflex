@@ -14,7 +14,9 @@ use clap::Parser;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::HandlerContext;
-use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
+use reflex_graphql::{
+    imports::graphql_imports, parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform,
+};
 use reflex_handlers::{
     default_handler_actors,
     utils::tls::{create_https_client, hyper_rustls},
@@ -32,7 +34,6 @@ use reflex_server::{
         },
         task::{ServerCliTaskActor, ServerCliTaskFactory},
     },
-    imports::server_imports,
     logger::{
         formatted::FormattedActionLogger, formatter::PrefixedLogFormatter, json::JsonActionLogger,
         messages::DefaultActionFormatter, EitherLogger,
@@ -166,7 +167,7 @@ async fn main() -> Result<()> {
         )),
     });
     let module_loader = Some(default_js_loaders(
-        server_imports(&factory, &allocator),
+        graphql_imports(&factory, &allocator),
         &factory,
         &allocator,
     ));

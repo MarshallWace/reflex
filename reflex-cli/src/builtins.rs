@@ -120,11 +120,6 @@ impl From<stdlib::And> for CliBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::Append> for CliBuiltins {
-    fn from(value: stdlib::Append) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
 impl From<stdlib::Apply> for CliBuiltins {
     fn from(value: stdlib::Apply) -> Self {
         Self::from(stdlib::Stdlib::from(value))
@@ -145,13 +140,8 @@ impl From<stdlib::Ceil> for CliBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
-impl From<stdlib::Collect> for CliBuiltins {
-    fn from(value: stdlib::Collect) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::CollectFilterResults> for CliBuiltins {
-    fn from(value: stdlib::CollectFilterResults) -> Self {
+impl From<stdlib::Chain> for CliBuiltins {
+    fn from(value: stdlib::Chain) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -162,11 +152,6 @@ impl From<stdlib::CollectHashMap> for CliBuiltins {
 }
 impl From<stdlib::CollectHashSet> for CliBuiltins {
     fn from(value: stdlib::CollectHashSet) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::CollectRecord> for CliBuiltins {
-    fn from(value: stdlib::CollectRecord) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -222,11 +207,6 @@ impl From<stdlib::Effect> for CliBuiltins {
 }
 impl From<stdlib::EndsWith> for CliBuiltins {
     fn from(value: stdlib::EndsWith) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::Entries> for CliBuiltins {
-    fn from(value: stdlib::Entries) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -317,11 +297,6 @@ impl From<stdlib::Lte> for CliBuiltins {
 }
 impl From<stdlib::Map> for CliBuiltins {
     fn from(value: stdlib::Map) -> Self {
-        Self::from(stdlib::Stdlib::from(value))
-    }
-}
-impl From<stdlib::Match> for CliBuiltins {
-    fn from(value: stdlib::Match) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -450,8 +425,18 @@ impl From<stdlib::Subtract> for CliBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::Unzip> for CliBuiltins {
+    fn from(value: stdlib::Unzip) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::Values> for CliBuiltins {
     fn from(value: stdlib::Values) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
+impl From<stdlib::Zip> for CliBuiltins {
+    fn from(value: stdlib::Zip) -> Self {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
@@ -467,6 +452,11 @@ impl From<reflex_json::stdlib::JsonSerialize> for CliBuiltins {
     }
 }
 
+impl From<reflex_js::stdlib::Accessor> for CliBuiltins {
+    fn from(value: reflex_js::stdlib::Accessor) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
 impl From<reflex_js::stdlib::Construct> for CliBuiltins {
     fn from(value: reflex_js::stdlib::Construct) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -477,11 +467,6 @@ impl From<reflex_js::stdlib::DateConstructor> for CliBuiltins {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_js::stdlib::Dispatch> for CliBuiltins {
-    fn from(value: reflex_js::stdlib::Dispatch) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
 impl From<reflex_js::stdlib::EncodeUriComponent> for CliBuiltins {
     fn from(value: reflex_js::stdlib::EncodeUriComponent) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -489,11 +474,6 @@ impl From<reflex_js::stdlib::EncodeUriComponent> for CliBuiltins {
 }
 impl From<reflex_js::stdlib::FormatErrorMessage> for CliBuiltins {
     fn from(value: reflex_js::stdlib::FormatErrorMessage) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::FromEntries> for CliBuiltins {
-    fn from(value: reflex_js::stdlib::FromEntries) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
@@ -512,11 +492,6 @@ impl From<reflex_js::stdlib::LogArgs> for CliBuiltins {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_js::stdlib::MapConstructor> for CliBuiltins {
-    fn from(value: reflex_js::stdlib::MapConstructor) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
 impl From<reflex_js::stdlib::ParseFloat> for CliBuiltins {
     fn from(value: reflex_js::stdlib::ParseFloat) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -524,16 +499,6 @@ impl From<reflex_js::stdlib::ParseFloat> for CliBuiltins {
 }
 impl From<reflex_js::stdlib::ParseInt> for CliBuiltins {
     fn from(value: reflex_js::stdlib::ParseInt) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::SetConstructor> for CliBuiltins {
-    fn from(value: reflex_js::stdlib::SetConstructor) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::StructTypeFactory> for CliBuiltins {
-    fn from(value: reflex_js::stdlib::StructTypeFactory) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }

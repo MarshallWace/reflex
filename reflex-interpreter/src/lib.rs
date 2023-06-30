@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 // SPDX-FileContributor: Jordan Hall <j.hall@mwam.com> https://github.com/j-hall-mwam
 use std::convert::TryInto;
 use std::{hash::Hasher, iter::once};
@@ -1691,7 +1690,7 @@ mod tests {
     use reflex::core::{DependencyList, SignalType, StateCache, Uid};
     use reflex_lang::{allocator::DefaultAllocator, term::*, SharedTermFactory};
     use reflex_lisp::parse;
-    use reflex_stdlib::{Add, And, Append, If, Stdlib};
+    use reflex_stdlib::{Add, And, CollectList, If, Stdlib};
 
     use crate::compiler::{hash_compiled_program, Compiler, CompilerMode, CompilerOptions};
 
@@ -2249,23 +2248,11 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Append),
+            factory.create_builtin_term(CollectList),
             allocator.create_triple(
-                factory.create_list_term(allocator.create_list(vec![
-                    factory.create_int_term(1),
-                    factory.create_int_term(2),
-                    factory.create_int_term(3),
-                ])),
-                factory.create_list_term(allocator.create_list(vec![
-                    factory.create_int_term(4),
-                    factory.create_int_term(5),
-                    factory.create_int_term(6),
-                ])),
-                factory.create_list_term(allocator.create_list(vec![
-                    factory.create_int_term(7),
-                    factory.create_int_term(8),
-                    factory.create_int_term(9),
-                ])),
+                factory.create_int_term(1),
+                factory.create_int_term(2),
+                factory.create_int_term(3),
             ),
         );
         let program = Compiler::new(CompilerOptions::unoptimized(), None)
@@ -2294,12 +2281,6 @@ mod tests {
                     factory.create_int_term(1),
                     factory.create_int_term(2),
                     factory.create_int_term(3),
-                    factory.create_int_term(4),
-                    factory.create_int_term(5),
-                    factory.create_int_term(6),
-                    factory.create_int_term(7),
-                    factory.create_int_term(8),
-                    factory.create_int_term(9),
                 ])),
                 DependencyList::empty(),
             ),
@@ -2309,39 +2290,18 @@ mod tests {
         let allocator = DefaultAllocator::default();
         let mut cache = DefaultInterpreterCache::default();
         let expression = factory.create_application_term(
-            factory.create_builtin_term(Append),
+            factory.create_builtin_term(CollectList),
             allocator.create_triple(
                 factory.create_application_term(
-                    factory.create_lambda_term(
-                        0,
-                        factory.create_list_term(allocator.create_list(vec![
-                            factory.create_int_term(1),
-                            factory.create_int_term(2),
-                            factory.create_int_term(3),
-                        ])),
-                    ),
+                    factory.create_lambda_term(0, factory.create_int_term(1)),
                     allocator.create_empty_list(),
                 ),
                 factory.create_application_term(
-                    factory.create_lambda_term(
-                        0,
-                        factory.create_list_term(allocator.create_list(vec![
-                            factory.create_int_term(4),
-                            factory.create_int_term(5),
-                            factory.create_int_term(6),
-                        ])),
-                    ),
+                    factory.create_lambda_term(0, factory.create_int_term(2)),
                     allocator.create_empty_list(),
                 ),
                 factory.create_application_term(
-                    factory.create_lambda_term(
-                        0,
-                        factory.create_list_term(allocator.create_list(vec![
-                            factory.create_int_term(7),
-                            factory.create_int_term(8),
-                            factory.create_int_term(9),
-                        ])),
-                    ),
+                    factory.create_lambda_term(0, factory.create_int_term(3)),
                     allocator.create_empty_list(),
                 ),
             ),
@@ -2372,12 +2332,6 @@ mod tests {
                     factory.create_int_term(1),
                     factory.create_int_term(2),
                     factory.create_int_term(3),
-                    factory.create_int_term(4),
-                    factory.create_int_term(5),
-                    factory.create_int_term(6),
-                    factory.create_int_term(7),
-                    factory.create_int_term(8),
-                    factory.create_int_term(9),
                 ])),
                 DependencyList::empty(),
             ),

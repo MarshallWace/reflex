@@ -13,15 +13,13 @@ where
         + From<Abs>
         + From<Add>
         + From<And>
-        + From<Append>
         + From<Apply>
         + From<Car>
         + From<Cdr>
         + From<Ceil>
-        + From<Collect>
+        + From<Chain>
         + From<CollectHashMap>
         + From<CollectHashSet>
-        + From<CollectRecord>
         + From<CollectList>
         + From<Concat>
         + From<Cons>
@@ -33,10 +31,10 @@ where
         + From<Divide>
         + From<Effect>
         + From<EndsWith>
-        + From<Entries>
         + From<Eq>
         + From<Equal>
         + From<Filter>
+        + From<Flatten>
         + From<Floor>
         + From<Get>
         + From<Gt>
@@ -51,7 +49,6 @@ where
         + From<Lt>
         + From<Lte>
         + From<Map>
-        + From<Match>
         + From<Max>
         + From<Merge>
         + From<Min>
@@ -77,7 +74,9 @@ where
         + From<Split>
         + From<StartsWith>
         + From<Subtract>
-        + From<Values>,
+        + From<Unzip>
+        + From<Values>
+        + From<Zip>,
 {
     create_record(
         [
@@ -92,10 +91,6 @@ where
             (
                 factory.create_string_term(allocator.create_static_string("and")),
                 factory.create_builtin_term(And),
-            ),
-            (
-                factory.create_string_term(allocator.create_static_string("append")),
-                factory.create_builtin_term(Append),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("apply")),
@@ -114,8 +109,8 @@ where
                 factory.create_builtin_term(Ceil),
             ),
             (
-                factory.create_string_term(allocator.create_static_string("collect")),
-                factory.create_builtin_term(Collect),
+                factory.create_string_term(allocator.create_static_string("chain")),
+                factory.create_builtin_term(Chain),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("collectHashMap")),
@@ -124,10 +119,6 @@ where
             (
                 factory.create_string_term(allocator.create_static_string("collectHashSet")),
                 factory.create_builtin_term(CollectHashSet),
-            ),
-            (
-                factory.create_string_term(allocator.create_static_string("collectRecord")),
-                factory.create_builtin_term(CollectRecord),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("collectList")),
@@ -174,10 +165,6 @@ where
                 factory.create_builtin_term(EndsWith),
             ),
             (
-                factory.create_string_term(allocator.create_static_string("entries")),
-                factory.create_builtin_term(Entries),
-            ),
-            (
                 factory.create_string_term(allocator.create_static_string("eq")),
                 factory.create_builtin_term(Eq),
             ),
@@ -188,6 +175,10 @@ where
             (
                 factory.create_string_term(allocator.create_static_string("filter")),
                 factory.create_builtin_term(Filter),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("flatten")),
+                factory.create_builtin_term(Flatten),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("floor")),
@@ -244,10 +235,6 @@ where
             (
                 factory.create_string_term(allocator.create_static_string("map")),
                 factory.create_builtin_term(Map),
-            ),
-            (
-                factory.create_string_term(allocator.create_static_string("match")),
-                factory.create_builtin_term(Match),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("max")),
@@ -350,8 +337,16 @@ where
                 factory.create_builtin_term(Subtract),
             ),
             (
+                factory.create_string_term(allocator.create_static_string("unzip")),
+                factory.create_builtin_term(Unzip),
+            ),
+            (
                 factory.create_string_term(allocator.create_static_string("values")),
                 factory.create_builtin_term(Values),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("zip")),
+                factory.create_builtin_term(Zip),
             ),
         ],
         factory,

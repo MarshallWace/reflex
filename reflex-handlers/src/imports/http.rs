@@ -2,29 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{create_record, Builtin, Expression, ExpressionFactory, HeapAllocator};
-use reflex_json::stdlib::JsonDeserialize;
-use reflex_stdlib::{CollectList, Contains, Effect, Get, If, Lt, ResolveDeep};
+use reflex_macros::blanket_trait;
+use reflex_stdlib::stdlib;
 
-use crate::{
-    actor::fetch::EFFECT_TYPE_FETCH,
-    stdlib::{to_request::request_prototype, ToRequest},
-};
+use crate::{actor::fetch::EFFECT_TYPE_FETCH, stdlib::to_request::request_prototype};
+
+blanket_trait!(
+    pub trait HttpImportBuiltin:
+        Builtin
+        + From<crate::stdlib::ToRequest>
+        + From<reflex_json::stdlib::JsonDeserialize>
+        + From<stdlib::CollectList>
+        + From<stdlib::Contains>
+        + From<stdlib::Effect>
+        + From<stdlib::Get>
+        + From<stdlib::If>
+        + From<stdlib::Lt>
+        + From<stdlib::ResolveDeep>
+    {
+    }
+);
 
 pub fn import_http<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: Builtin
-        + From<CollectList>
-        + From<Contains>
-        + From<Effect>
-        + From<Get>
-        + From<If>
-        + From<JsonDeserialize>
-        + From<Lt>
-        + From<ResolveDeep>
-        + From<ToRequest>,
+    T::Builtin: HttpImportBuiltin,
 {
     create_record(
         vec![
@@ -55,34 +59,34 @@ fn import_http_fetch<T: Expression>(
 ) -> T
 where
     T::Builtin: Builtin
-        + From<CollectList>
-        + From<Contains>
-        + From<Effect>
-        + From<Get>
-        + From<If>
-        + From<JsonDeserialize>
-        + From<Lt>
-        + From<ResolveDeep>
-        + From<ToRequest>,
+        + From<crate::stdlib::ToRequest>
+        + From<reflex_json::stdlib::JsonDeserialize>
+        + From<stdlib::CollectList>
+        + From<stdlib::Contains>
+        + From<stdlib::Effect>
+        + From<stdlib::Get>
+        + From<stdlib::If>
+        + From<stdlib::Lt>
+        + From<stdlib::ResolveDeep>,
 {
     factory.create_lambda_term(
         1,
         factory.create_let_term(
             factory.create_application_term(
-                factory.create_builtin_term(ToRequest),
+                factory.create_builtin_term(crate::stdlib::ToRequest),
                 allocator.create_unit_list(factory.create_variable_term(0)),
             ),
             factory.create_let_term(
                 factory.create_application_term(
-                    factory.create_builtin_term(Effect),
+                    factory.create_builtin_term(stdlib::Effect),
                     allocator.create_triple(
                         factory
                             .create_string_term(allocator.create_static_string(EFFECT_TYPE_FETCH)),
                         factory.create_application_term(
-                            factory.create_builtin_term(CollectList),
+                            factory.create_builtin_term(stdlib::CollectList),
                             allocator.create_list([
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(
@@ -91,7 +95,7 @@ where
                                     ),
                                 ),
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(
@@ -100,9 +104,9 @@ where
                                     ),
                                 ),
                                 factory.create_application_term(
-                                    factory.create_builtin_term(ResolveDeep),
+                                    factory.create_builtin_term(stdlib::ResolveDeep),
                                     allocator.create_unit_list(factory.create_application_term(
-                                        factory.create_builtin_term(Get),
+                                        factory.create_builtin_term(stdlib::Get),
                                         allocator.create_pair(
                                             factory.create_variable_term(0),
                                             factory.create_string_term(
@@ -112,7 +116,7 @@ where
                                     )),
                                 ),
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(
@@ -123,10 +127,10 @@ where
                             ]),
                         ),
                         factory.create_application_term(
-                            factory.create_builtin_term(If),
+                            factory.create_builtin_term(stdlib::If),
                             allocator.create_triple(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Contains),
+                                    factory.create_builtin_term(stdlib::Contains),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(
@@ -135,7 +139,7 @@ where
                                     ),
                                 ),
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_string_term(
@@ -157,17 +161,17 @@ where
                     ])),
                     allocator.create_list(vec![
                         factory.create_application_term(
-                            factory.create_builtin_term(Get),
+                            factory.create_builtin_term(stdlib::Get),
                             allocator.create_pair(
                                 factory.create_variable_term(0),
                                 factory.create_int_term(0),
                             ),
                         ),
                         factory.create_application_term(
-                            factory.create_builtin_term(Lt),
+                            factory.create_builtin_term(stdlib::Lt),
                             allocator.create_pair(
                                 factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_int_term(0),
@@ -179,7 +183,7 @@ where
                         factory.create_lambda_term(
                             0,
                             factory.create_application_term(
-                                factory.create_builtin_term(Get),
+                                factory.create_builtin_term(stdlib::Get),
                                 allocator.create_pair(
                                     factory.create_variable_term(0),
                                     factory.create_int_term(1),
@@ -189,9 +193,9 @@ where
                         factory.create_lambda_term(
                             0,
                             factory.create_application_term(
-                                factory.create_builtin_term(JsonDeserialize),
+                                factory.create_builtin_term(reflex_json::stdlib::JsonDeserialize),
                                 allocator.create_unit_list(factory.create_application_term(
-                                    factory.create_builtin_term(Get),
+                                    factory.create_builtin_term(stdlib::Get),
                                     allocator.create_pair(
                                         factory.create_variable_term(0),
                                         factory.create_int_term(1),

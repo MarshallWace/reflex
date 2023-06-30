@@ -1,145 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
 use std::iter::once;
 
 use reflex::core::{
-    deduplicate_hashmap_entries, deduplicate_hashset_entries, get_hashmap_entries, uuid,
-    Applicable, ArgType, Arity, ConstructorTermType, EvaluationCache, Expression,
-    ExpressionFactory, ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType,
-    HeapAllocator, ListTermType, RefType, SignalType, StructPrototypeType, Uid, Uuid,
+    deduplicate_hashmap_entries, deduplicate_hashset_entries, uuid, Applicable, ArgType, Arity,
+    EvaluationCache, Expression, ExpressionFactory, ExpressionListType, FunctionArity,
+    HeapAllocator, ListTermType, RefType, SignalType, Uid, Uuid,
 };
 
 use crate::Get;
-
-pub struct Collect;
-impl Collect {
-    pub const UUID: Uuid = uuid!("c3365e24-8bbc-461c-ad86-71ca519ec20e");
-    const ARITY: FunctionArity<1, 0> = FunctionArity {
-        required: [ArgType::Strict],
-        optional: [],
-        variadic: None,
-    };
-    pub fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-}
-impl Uid for Collect {
-    fn uid(&self) -> Uuid {
-        Self::UUID
-    }
-}
-impl<T: Expression> Applicable<T> for Collect
-where
-    T::Builtin: From<CollectList> + From<CollectHashMap> + From<CollectHashSet>,
-{
-    fn arity(&self) -> Option<Arity> {
-        Some(Self::arity())
-    }
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-    fn apply(
-        &self,
-        mut args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        let target = args.next().unwrap();
-        if let Some(collection) = factory.match_list_term(&target) {
-            let has_dynamic_values = collection
-                .items()
-                .as_deref()
-                .iter()
-                .any(|item| !item.as_deref().is_static());
-            Ok(if !has_dynamic_values {
-                target.clone()
-            } else {
-                factory.create_application_term(
-                    factory.create_builtin_term(CollectList),
-                    allocator.clone_list(collection.items()),
-                )
-            })
-        } else if let Some(collection) = factory.match_hashset_term(&target) {
-            let has_dynamic_values = collection.values().any(|item| !item.as_deref().is_static());
-            Ok(if !has_dynamic_values {
-                target.clone()
-            } else {
-                factory.create_application_term(
-                    factory.create_builtin_term(CollectHashSet),
-                    allocator.create_list(collection.values().map(|item| item.as_deref().clone())),
-                )
-            })
-        } else if let Some(collection) = factory.match_hashmap_term(&target) {
-            let has_dynamic_keys = collection.keys().any(|item| !item.as_deref().is_static());
-            Ok(if !has_dynamic_keys {
-                target.clone()
-            } else {
-                factory.create_application_term(
-                    factory.create_builtin_term(CollectHashMap),
-                    allocator.create_list(get_hashmap_entries(collection, factory, allocator)),
-                )
-            })
-        } else {
-            Err(format!(
-                "Expected List or HashSet or HashMap, received {}",
-                target,
-            ))
-        }
-    }
-}
-
-pub struct CollectRecord;
-impl CollectRecord {
-    pub const UUID: Uuid = uuid!("03e8d5bb-917d-414b-8041-d07ec403c1a9");
-    const ARITY: FunctionArity<1, 0> = FunctionArity {
-        required: [ArgType::Strict],
-        optional: [],
-        variadic: Some(ArgType::Strict),
-    };
-    pub fn arity() -> Arity {
-        Arity::from(&Self::ARITY)
-    }
-}
-impl Uid for CollectRecord {
-    fn uid(&self) -> Uuid {
-        Self::UUID
-    }
-}
-impl<T: Expression> Applicable<T> for CollectRecord {
-    fn arity(&self) -> Option<Arity> {
-        Some(Self::arity())
-    }
-    fn should_parallelize(&self, _args: &[T]) -> bool {
-        false
-    }
-    fn apply(
-        &self,
-        mut args: impl ExactSizeIterator<Item = T>,
-        factory: &impl ExpressionFactory<T>,
-        allocator: &impl HeapAllocator<T>,
-        _cache: &mut impl EvaluationCache<T>,
-    ) -> Result<T, String> {
-        let prototype = args.next().unwrap();
-        match factory.match_constructor_term(&prototype) {
-            Some(constructor)
-                if constructor.prototype().as_deref().keys().as_deref().len() == args.len() =>
-            {
-                Ok(factory.create_record_term(
-                    allocator.clone_struct_prototype(constructor.prototype()),
-                    allocator.create_list(args),
-                ))
-            }
-            _ => Err(format!(
-                "Expected <constructor:{}>, received {}",
-                args.len(),
-                prototype
-            )),
-        }
-    }
-}
 
 pub struct CollectList;
 impl CollectList {
@@ -296,12 +166,9 @@ where
         }
         .unzip();
         // FIXME: prevent unnecessary vector allocations
-        let entries = {
-            let entries = match deduplicate_hashmap_entries(&keys, &values) {
-                Some(entries) => entries,
-                None => keys.into_iter().zip(values).collect::<Vec<_>>(),
-            };
-            entries
+        let entries = match deduplicate_hashmap_entries(&keys, &values) {
+            Some(entries) => entries,
+            None => keys.into_iter().zip(values).collect::<Vec<_>>(),
         };
         Ok(factory.create_hashmap_term(entries))
     }

@@ -10,9 +10,9 @@ use reflex::core::{
     Applicable, Arity, EvaluationCache, Expression, ExpressionFactory, HeapAllocator, Uid, Uuid,
 };
 
-pub(crate) mod scan;
-pub(crate) mod to_request;
-pub(crate) mod variable;
+pub mod scan;
+pub mod to_request;
+pub mod variable;
 
 pub use scan::*;
 pub use to_request::*;

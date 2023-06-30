@@ -7,8 +7,8 @@ use reflex_stdlib::*;
 
 use crate::stdlib::*;
 
-pub(crate) mod core;
-pub(crate) mod utils;
+pub mod core;
+pub mod utils;
 
 pub use self::core::import_core;
 pub use self::utils::import_utils;
@@ -18,16 +18,14 @@ pub trait JsImportsBuiltin:
     + From<Abs>
     + From<Add>
     + From<And>
-    + From<Append>
     + From<Apply>
     + From<Car>
     + From<Cdr>
     + From<Ceil>
-    + From<Collect>
+    + From<Chain>
     + From<CollectHashMap>
     + From<CollectHashSet>
     + From<CollectList>
-    + From<CollectRecord>
     + From<Concat>
     + From<Cons>
     + From<ConstructHashMap>
@@ -38,10 +36,10 @@ pub trait JsImportsBuiltin:
     + From<Divide>
     + From<Effect>
     + From<EndsWith>
-    + From<Entries>
     + From<Eq>
     + From<Equal>
     + From<Filter>
+    + From<Flatten>
     + From<Floor>
     + From<Get>
     + From<Gt>
@@ -57,7 +55,6 @@ pub trait JsImportsBuiltin:
     + From<Lt>
     + From<Lte>
     + From<Map>
-    + From<Match>
     + From<Max>
     + From<Merge>
     + From<Min>
@@ -82,9 +79,10 @@ pub trait JsImportsBuiltin:
     + From<Slice>
     + From<Split>
     + From<StartsWith>
-    + From<StructTypeFactory>
     + From<Subtract>
+    + From<Unzip>
     + From<Values>
+    + From<Zip>
 {
 }
 impl<T> JsImportsBuiltin for T where
@@ -92,16 +90,14 @@ impl<T> JsImportsBuiltin for T where
         + From<Abs>
         + From<Add>
         + From<And>
-        + From<Append>
         + From<Apply>
         + From<Car>
         + From<Cdr>
         + From<Ceil>
-        + From<Collect>
+        + From<Chain>
         + From<CollectHashMap>
         + From<CollectHashSet>
         + From<CollectList>
-        + From<CollectRecord>
         + From<Concat>
         + From<Cons>
         + From<ConstructHashMap>
@@ -112,10 +108,10 @@ impl<T> JsImportsBuiltin for T where
         + From<Divide>
         + From<Effect>
         + From<EndsWith>
-        + From<Entries>
         + From<Eq>
         + From<Equal>
         + From<Filter>
+        + From<Flatten>
         + From<Floor>
         + From<Get>
         + From<Gt>
@@ -131,7 +127,6 @@ impl<T> JsImportsBuiltin for T where
         + From<Lt>
         + From<Lte>
         + From<Map>
-        + From<Match>
         + From<Max>
         + From<Merge>
         + From<Min>
@@ -156,9 +151,10 @@ impl<T> JsImportsBuiltin for T where
         + From<Slice>
         + From<Split>
         + From<StartsWith>
-        + From<StructTypeFactory>
         + From<Subtract>
+        + From<Unzip>
         + From<Values>
+        + From<Zip>
 {
 }
 

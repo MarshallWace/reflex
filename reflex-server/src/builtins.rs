@@ -13,8 +13,6 @@ use reflex::core::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate as reflex_server;
-
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum ServerBuiltins {
     Stdlib(reflex_stdlib::stdlib::Stdlib),
@@ -22,7 +20,6 @@ pub enum ServerBuiltins {
     Js(reflex_js::stdlib::Stdlib),
     GraphQl(reflex_graphql::stdlib::Stdlib),
     Handlers(reflex_handlers::stdlib::Stdlib),
-    Server(reflex_server::stdlib::Stdlib),
 }
 impl From<reflex_stdlib::stdlib::Stdlib> for ServerBuiltins {
     fn from(target: reflex_stdlib::stdlib::Stdlib) -> Self {
@@ -49,11 +46,6 @@ impl From<reflex_handlers::stdlib::Stdlib> for ServerBuiltins {
         Self::Handlers(target)
     }
 }
-impl From<reflex_server::stdlib::Stdlib> for ServerBuiltins {
-    fn from(target: reflex_server::stdlib::Stdlib) -> Self {
-        Self::Server(target)
-    }
-}
 impl ServerBuiltins {
     pub fn entries() -> impl Iterator<Item = Self> {
         empty()
@@ -62,7 +54,6 @@ impl ServerBuiltins {
             .chain(reflex_js::stdlib::Stdlib::entries().map(Self::Js))
             .chain(reflex_graphql::stdlib::Stdlib::entries().map(Self::GraphQl))
             .chain(reflex_handlers::stdlib::Stdlib::entries().map(Self::Handlers))
-            .chain(reflex_server::stdlib::Stdlib::entries().map(Self::Server))
     }
 }
 impl Uid for ServerBuiltins {
@@ -73,7 +64,6 @@ impl Uid for ServerBuiltins {
             Self::Js(term) => term.uid(),
             Self::GraphQl(term) => term.uid(),
             Self::Handlers(term) => term.uid(),
-            Self::Server(term) => term.uid(),
         }
     }
 }
@@ -92,9 +82,6 @@ impl TryFrom<Uuid> for ServerBuiltins {
             .or_else(|_| {
                 TryInto::<reflex_handlers::stdlib::Stdlib>::try_into(value).map(Self::Handlers)
             })
-            .or_else(|_| {
-                TryInto::<reflex_server::stdlib::Stdlib>::try_into(value).map(Self::Server)
-            })
     }
 }
 impl Builtin for ServerBuiltins {
@@ -105,7 +92,6 @@ impl Builtin for ServerBuiltins {
             Self::Js(term) => term.arity(),
             Self::GraphQl(term) => term.arity(),
             Self::Handlers(term) => term.arity(),
-            Self::Server(term) => term.arity(),
         }
     }
     fn apply<T: Expression<Builtin = Self> + Applicable<T>>(
@@ -121,7 +107,6 @@ impl Builtin for ServerBuiltins {
             Self::Js(term) => term.apply(args, factory, allocator, cache),
             Self::GraphQl(term) => term.apply(args, factory, allocator, cache),
             Self::Handlers(term) => term.apply(args, factory, allocator, cache),
-            Self::Server(term) => term.apply(args, factory, allocator, cache),
         }
     }
     fn should_parallelize<T: Expression<Builtin = Self> + Applicable<T>>(
@@ -134,7 +119,6 @@ impl Builtin for ServerBuiltins {
             Self::Js(term) => term.should_parallelize(args),
             Self::GraphQl(term) => term.should_parallelize(args),
             Self::Handlers(term) => term.should_parallelize(args),
-            Self::Server(term) => term.should_parallelize(args),
         }
     }
 }
@@ -146,7 +130,6 @@ impl std::fmt::Display for ServerBuiltins {
             Self::Js(target) => std::fmt::Display::fmt(target, f),
             Self::GraphQl(target) => std::fmt::Display::fmt(target, f),
             Self::Handlers(target) => std::fmt::Display::fmt(target, f),
-            Self::Server(target) => std::fmt::Display::fmt(target, f),
         }
     }
 }
@@ -163,11 +146,6 @@ impl From<reflex_stdlib::stdlib::Add> for ServerBuiltins {
 }
 impl From<reflex_stdlib::stdlib::And> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::And) -> Self {
-        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_stdlib::stdlib::Append> for ServerBuiltins {
-    fn from(value: reflex_stdlib::stdlib::Append) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
@@ -191,13 +169,8 @@ impl From<reflex_stdlib::stdlib::Ceil> for ServerBuiltins {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_stdlib::stdlib::Collect> for ServerBuiltins {
-    fn from(value: reflex_stdlib::stdlib::Collect) -> Self {
-        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_stdlib::stdlib::CollectFilterResults> for ServerBuiltins {
-    fn from(value: reflex_stdlib::stdlib::CollectFilterResults) -> Self {
+impl From<reflex_stdlib::stdlib::Chain> for ServerBuiltins {
+    fn from(value: reflex_stdlib::stdlib::Chain) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
@@ -208,11 +181,6 @@ impl From<reflex_stdlib::stdlib::CollectHashMap> for ServerBuiltins {
 }
 impl From<reflex_stdlib::stdlib::CollectHashSet> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::CollectHashSet) -> Self {
-        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_stdlib::stdlib::CollectRecord> for ServerBuiltins {
-    fn from(value: reflex_stdlib::stdlib::CollectRecord) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
@@ -268,11 +236,6 @@ impl From<reflex_stdlib::stdlib::Effect> for ServerBuiltins {
 }
 impl From<reflex_stdlib::stdlib::EndsWith> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::EndsWith) -> Self {
-        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_stdlib::stdlib::Entries> for ServerBuiltins {
-    fn from(value: reflex_stdlib::stdlib::Entries) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
@@ -363,11 +326,6 @@ impl From<reflex_stdlib::stdlib::Lte> for ServerBuiltins {
 }
 impl From<reflex_stdlib::stdlib::Map> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::Map) -> Self {
-        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_stdlib::stdlib::Match> for ServerBuiltins {
-    fn from(value: reflex_stdlib::stdlib::Match) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
@@ -496,8 +454,18 @@ impl From<reflex_stdlib::stdlib::Subtract> for ServerBuiltins {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
+impl From<reflex_stdlib::stdlib::Unzip> for ServerBuiltins {
+    fn from(value: reflex_stdlib::stdlib::Unzip) -> Self {
+        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
+    }
+}
 impl From<reflex_stdlib::stdlib::Values> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::Values) -> Self {
+        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_stdlib::stdlib::Zip> for ServerBuiltins {
+    fn from(value: reflex_stdlib::stdlib::Zip) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
@@ -513,6 +481,11 @@ impl From<reflex_json::stdlib::JsonSerialize> for ServerBuiltins {
     }
 }
 
+impl From<reflex_js::stdlib::Accessor> for ServerBuiltins {
+    fn from(value: reflex_js::stdlib::Accessor) -> Self {
+        Self::from(reflex_js::stdlib::Stdlib::from(value))
+    }
+}
 impl From<reflex_js::stdlib::Construct> for ServerBuiltins {
     fn from(value: reflex_js::stdlib::Construct) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -523,11 +496,6 @@ impl From<reflex_js::stdlib::DateConstructor> for ServerBuiltins {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_js::stdlib::Dispatch> for ServerBuiltins {
-    fn from(value: reflex_js::stdlib::Dispatch) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
 impl From<reflex_js::stdlib::EncodeUriComponent> for ServerBuiltins {
     fn from(value: reflex_js::stdlib::EncodeUriComponent) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -535,11 +503,6 @@ impl From<reflex_js::stdlib::EncodeUriComponent> for ServerBuiltins {
 }
 impl From<reflex_js::stdlib::FormatErrorMessage> for ServerBuiltins {
     fn from(value: reflex_js::stdlib::FormatErrorMessage) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::FromEntries> for ServerBuiltins {
-    fn from(value: reflex_js::stdlib::FromEntries) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
@@ -558,11 +521,6 @@ impl From<reflex_js::stdlib::LogArgs> for ServerBuiltins {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
-impl From<reflex_js::stdlib::MapConstructor> for ServerBuiltins {
-    fn from(value: reflex_js::stdlib::MapConstructor) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
 impl From<reflex_js::stdlib::ParseFloat> for ServerBuiltins {
     fn from(value: reflex_js::stdlib::ParseFloat) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
@@ -570,16 +528,6 @@ impl From<reflex_js::stdlib::ParseFloat> for ServerBuiltins {
 }
 impl From<reflex_js::stdlib::ParseInt> for ServerBuiltins {
     fn from(value: reflex_js::stdlib::ParseInt) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::SetConstructor> for ServerBuiltins {
-    fn from(value: reflex_js::stdlib::SetConstructor) -> Self {
-        Self::from(reflex_js::stdlib::Stdlib::from(value))
-    }
-}
-impl From<reflex_js::stdlib::StructTypeFactory> for ServerBuiltins {
-    fn from(value: reflex_js::stdlib::StructTypeFactory) -> Self {
         Self::from(reflex_js::stdlib::Stdlib::from(value))
     }
 }
@@ -606,6 +554,11 @@ impl From<reflex_graphql::stdlib::DynamicQueryBranch> for ServerBuiltins {
 }
 impl From<reflex_graphql::stdlib::FlattenDeep> for ServerBuiltins {
     fn from(value: reflex_graphql::stdlib::FlattenDeep) -> Self {
+        Self::from(reflex_graphql::stdlib::Stdlib::from(value))
+    }
+}
+impl From<reflex_graphql::stdlib::GraphQlResolver> for ServerBuiltins {
+    fn from(value: reflex_graphql::stdlib::GraphQlResolver) -> Self {
         Self::from(reflex_graphql::stdlib::Stdlib::from(value))
     }
 }
@@ -638,12 +591,6 @@ impl From<reflex_handlers::stdlib::IncrementVariable> for ServerBuiltins {
 impl From<reflex_handlers::stdlib::DecrementVariable> for ServerBuiltins {
     fn from(value: reflex_handlers::stdlib::DecrementVariable) -> Self {
         Self::from(reflex_handlers::stdlib::Stdlib::from(value))
-    }
-}
-
-impl From<reflex_server::stdlib::GraphQlResolver> for ServerBuiltins {
-    fn from(value: reflex_server::stdlib::GraphQlResolver) -> Self {
-        Self::from(reflex_server::stdlib::Stdlib::from(value))
     }
 }
 

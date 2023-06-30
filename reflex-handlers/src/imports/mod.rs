@@ -2,61 +2,30 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
 use reflex::core::{Builtin, Expression, ExpressionFactory, HeapAllocator};
-use reflex_json::stdlib::JsonDeserialize;
-use reflex_stdlib::{CollectList, Contains, Effect, Get, If, Lt, Map, ResolveDeep};
+use reflex_macros::blanket_trait;
 
-use crate::stdlib::{
-    DecrementVariable, GetVariable, IncrementVariable, Scan, SetVariable, ToRequest,
+use crate::imports::{
+    http::{import_http, HttpImportBuiltin},
+    loader::{import_loader, LoaderImportBuiltin},
+    state::{import_state, StateImportBuiltin},
+    time::{import_time, TimeImportBuiltin},
 };
 
-pub(crate) mod http;
-pub(crate) mod loader;
-pub(crate) mod state;
-pub(crate) mod time;
+pub mod http;
+pub mod loader;
+pub mod state;
+pub mod time;
 
-pub use self::http::import_http;
-pub use self::loader::import_loader;
-pub use self::state::import_state;
-pub use self::time::import_time;
-
-pub trait HandlerImportsBuiltin:
-    Builtin
-    + From<CollectList>
-    + From<Contains>
-    + From<DecrementVariable>
-    + From<Effect>
-    + From<Get>
-    + From<GetVariable>
-    + From<If>
-    + From<IncrementVariable>
-    + From<JsonDeserialize>
-    + From<Lt>
-    + From<Map>
-    + From<ResolveDeep>
-    + From<Scan>
-    + From<SetVariable>
-    + From<ToRequest>
-{
-}
-impl<T> HandlerImportsBuiltin for T where
-    T: Builtin
-        + From<CollectList>
-        + From<Contains>
-        + From<DecrementVariable>
-        + From<Effect>
-        + From<Get>
-        + From<GetVariable>
-        + From<If>
-        + From<IncrementVariable>
-        + From<JsonDeserialize>
-        + From<Lt>
-        + From<Map>
-        + From<ResolveDeep>
-        + From<Scan>
-        + From<SetVariable>
-        + From<ToRequest>
-{
-}
+blanket_trait!(
+    pub trait HandlerImportsBuiltin:
+        Builtin
+        + HttpImportBuiltin
+        + LoaderImportBuiltin
+        + StateImportBuiltin
+        + TimeImportBuiltin
+    {
+    }
+);
 
 pub fn handler_imports<T: Expression>(
     factory: &impl ExpressionFactory<T>,

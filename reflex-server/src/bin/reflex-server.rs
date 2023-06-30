@@ -17,7 +17,9 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::trace::noop::NoopTracer;
 use reflex_cli::{compile_entry_point, syntax::js::default_js_loaders, Syntax};
 use reflex_dispatcher::{Action, HandlerContext};
-use reflex_graphql::{parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform};
+use reflex_graphql::{
+    imports::graphql_imports, parse_graphql_schema, GraphQlSchema, NoopGraphQlQueryTransform,
+};
 use reflex_handlers::{
     default_handler_actors,
     utils::tls::{create_https_client, hyper_rustls},
@@ -35,7 +37,6 @@ use reflex_server::{
         },
         task::{ServerCliTaskActor, ServerCliTaskFactory},
     },
-    imports::server_imports,
     logger::{
         formatted::FormattedActionLogger, formatter::PrefixedLogFormatter, json::JsonActionLogger,
         messages::DefaultActionFormatter, prometheus::PrometheusLogger, ActionLogger, ChainLogger,
@@ -201,7 +202,7 @@ pub async fn main() -> Result<()> {
         ..InterpreterOptions::default()
     };
     let module_loader =
-        default_js_loaders(server_imports(&factory, &allocator), &factory, &allocator);
+        default_js_loaders(graphql_imports(&factory, &allocator), &factory, &allocator);
     let graph_root = {
         let compiler_start_time = Instant::now();
         let graph_root = compile_entry_point(

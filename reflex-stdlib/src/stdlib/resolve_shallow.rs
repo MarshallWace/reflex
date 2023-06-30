@@ -7,7 +7,7 @@ use reflex::core::{
     RecordTermType, RefType, Uid, Uuid,
 };
 
-use crate::{CollectHashSet, CollectList, CollectRecord, ConstructHashMap};
+use crate::{Apply, CollectHashSet, CollectList, ConstructHashMap};
 
 pub struct ResolveShallow;
 impl ResolveShallow {
@@ -28,11 +28,8 @@ impl Uid for ResolveShallow {
 }
 impl<T: Expression> Applicable<T> for ResolveShallow
 where
-    T::Builtin: Builtin
-        + From<CollectRecord>
-        + From<CollectList>
-        + From<CollectHashSet>
-        + From<ConstructHashMap>,
+    T::Builtin:
+        Builtin + From<Apply> + From<CollectList> + From<CollectHashSet> + From<ConstructHashMap>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -53,8 +50,16 @@ where
                 Ok(target)
             } else {
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(CollectRecord),
-                    allocator.clone_list(value.values()),
+                    factory.create_builtin_term(Apply),
+                    allocator.create_pair(
+                        factory.create_constructor_term(
+                            allocator.clone_struct_prototype(value.prototype()),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(CollectList),
+                            allocator.clone_list(value.values()),
+                        ),
+                    ),
                 ))
             }
         } else if let Some(value) = factory.match_list_term(&target) {

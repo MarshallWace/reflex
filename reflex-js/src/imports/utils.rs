@@ -4,18 +4,15 @@
 use std::iter::once;
 
 use reflex::core::{create_record, Expression, ExpressionFactory, HeapAllocator, SignalType};
-use types::import_types;
 
-use crate::stdlib::{Log, StructTypeFactory};
-
-mod types;
+use crate::stdlib::Log;
 
 pub fn import_utils<T: Expression>(
     factory: &impl ExpressionFactory<T>,
     allocator: &impl HeapAllocator<T>,
 ) -> T
 where
-    T::Builtin: From<Log> + From<StructTypeFactory>,
+    T::Builtin: From<Log>,
 {
     create_record(
         vec![
@@ -42,10 +39,6 @@ where
                         ),
                     ))),
                 ),
-            ),
-            (
-                factory.create_string_term(allocator.create_static_string("Types")),
-                import_types(factory, allocator),
             ),
         ],
         factory,

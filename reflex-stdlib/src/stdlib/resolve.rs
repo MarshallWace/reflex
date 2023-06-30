@@ -1,16 +1,13 @@
 // SPDX-FileCopyrightText: 2023 Marshall Wace <opensource@mwam.com>
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileContributor: Tim Kendrick <t.kendrick@mwam.com> https://github.com/timkendrickmw
-// SPDX-FileContributor: Chris Campbell <c.campbell@mwam.com> https://github.com/c-campbell-mwam
-use std::iter::once;
-
 use reflex::core::{
-    uuid, Applicable, ArgType, Arity, EvaluationCache, Expression, ExpressionFactory,
+    uuid, Applicable, ArgType, Arity, Builtin, EvaluationCache, Expression, ExpressionFactory,
     ExpressionListType, FunctionArity, HashmapTermType, HashsetTermType, HeapAllocator,
     ListTermType, RecordTermType, RefType, Uid, Uuid,
 };
 
-use crate::{CollectHashSet, CollectList, CollectRecord, ConstructHashMap};
+use crate::{Apply, CollectHashSet, CollectList, ConstructHashMap};
 
 pub struct ResolveRecord;
 impl ResolveRecord {
@@ -31,7 +28,7 @@ impl Uid for ResolveRecord {
 }
 impl<T: Expression> Applicable<T> for ResolveRecord
 where
-    T::Builtin: From<CollectRecord>,
+    T::Builtin: Builtin + From<Apply> + From<CollectList>,
 {
     fn arity(&self) -> Option<Arity> {
         Some(Self::arity())
@@ -57,16 +54,16 @@ where
             if !has_dynamic_values {
                 Ok(target)
             } else {
-                let values = value.values();
-                let values = values.as_deref();
                 Ok(factory.create_application_term(
-                    factory.create_builtin_term(CollectRecord),
-                    allocator.create_sized_list(
-                        values.len() + 1,
-                        once(factory.create_constructor_term(
+                    factory.create_builtin_term(Apply),
+                    allocator.create_pair(
+                        factory.create_constructor_term(
                             allocator.clone_struct_prototype(value.prototype()),
-                        ))
-                        .chain(values.iter().map(|item| item.as_deref().clone())),
+                        ),
+                        factory.create_application_term(
+                            factory.create_builtin_term(CollectList),
+                            allocator.clone_list(value.values()),
+                        ),
                     ),
                 ))
             }
