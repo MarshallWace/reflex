@@ -6,12 +6,14 @@ use reflex_macros::blanket_trait;
 
 use crate::imports::{
     http::{import_http, HttpImportBuiltin},
+    invalidation::{import_invalidation, InvalidationImportBuiltin},
     loader::{import_loader, LoaderImportBuiltin},
     state::{import_state, StateImportBuiltin},
     time::{import_time, TimeImportBuiltin},
 };
 
 pub mod http;
+pub mod invalidation;
 pub mod loader;
 pub mod state;
 pub mod time;
@@ -20,6 +22,7 @@ blanket_trait!(
     pub trait HandlerImportsBuiltin:
         Builtin
         + HttpImportBuiltin
+        + InvalidationImportBuiltin
         + LoaderImportBuiltin
         + StateImportBuiltin
         + TimeImportBuiltin
@@ -36,6 +39,10 @@ where
 {
     vec![
         ("reflex::http", import_http(factory, allocator)),
+        (
+            "reflex::invalidation",
+            import_invalidation(factory, allocator),
+        ),
         ("reflex::loader", import_loader(factory, allocator)),
         ("reflex::state", import_state(factory, allocator)),
         ("reflex::time", import_time(factory, allocator)),
