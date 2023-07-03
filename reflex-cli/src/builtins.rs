@@ -160,6 +160,11 @@ impl From<stdlib::CollectList> for CliBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::CollectSignal> for CliBuiltins {
+    fn from(value: stdlib::CollectSignal) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::Concat> for CliBuiltins {
     fn from(value: stdlib::Concat) -> Self {
         Self::from(stdlib::Stdlib::from(value))

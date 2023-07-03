@@ -189,6 +189,11 @@ impl From<reflex_stdlib::stdlib::CollectList> for ServerBuiltins {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
     }
 }
+impl From<reflex_stdlib::stdlib::CollectSignal> for ServerBuiltins {
+    fn from(value: reflex_stdlib::stdlib::CollectSignal) -> Self {
+        Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
+    }
+}
 impl From<reflex_stdlib::stdlib::Concat> for ServerBuiltins {
     fn from(value: reflex_stdlib::stdlib::Concat) -> Self {
         Self::from(reflex_stdlib::stdlib::Stdlib::from(value))
