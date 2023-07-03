@@ -64,6 +64,7 @@ pub trait JsImportsBuiltin:
     + From<Pow>
     + From<Push>
     + From<PushFront>
+    + From<Raise>
     + From<Reduce>
     + From<Remainder>
     + From<Replace>
@@ -136,6 +137,7 @@ impl<T> JsImportsBuiltin for T where
         + From<Pow>
         + From<Push>
         + From<PushFront>
+        + From<Raise>
         + From<Reduce>
         + From<Remainder>
         + From<Replace>

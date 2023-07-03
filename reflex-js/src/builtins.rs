@@ -342,6 +342,11 @@ impl From<stdlib::PushFront> for JsBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::Raise> for JsBuiltins {
+    fn from(value: stdlib::Raise) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::Reduce> for JsBuiltins {
     fn from(value: stdlib::Reduce) -> Self {
         Self::from(stdlib::Stdlib::from(value))

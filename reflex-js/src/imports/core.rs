@@ -58,6 +58,7 @@ where
         + From<Pow>
         + From<Push>
         + From<PushFront>
+        + From<Raise>
         + From<Reduce>
         + From<Remainder>
         + From<Replace>
@@ -271,6 +272,10 @@ where
             (
                 factory.create_string_term(allocator.create_static_string("pushFront")),
                 factory.create_builtin_term(PushFront),
+            ),
+            (
+                factory.create_string_term(allocator.create_static_string("raise")),
+                factory.create_builtin_term(Raise),
             ),
             (
                 factory.create_string_term(allocator.create_static_string("reduce")),

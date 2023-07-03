@@ -55,6 +55,7 @@ pub use pow::*;
 pub use push::*;
 pub use push_front::*;
 pub use r#if::*;
+pub use raise::*;
 pub use reduce::*;
 pub use remainder::*;
 pub use replace::*;
@@ -115,6 +116,7 @@ mod or;
 mod pow;
 mod push;
 mod push_front;
+mod raise;
 mod reduce;
 mod remainder;
 mod replace;
@@ -216,6 +218,7 @@ pub enum Stdlib {
     Pow,
     Push,
     PushFront,
+    Raise,
     Reduce,
     Remainder,
     Replace,
@@ -293,6 +296,7 @@ impl TryFrom<Uuid> for Stdlib {
             Pow::UUID => Ok(Self::Pow),
             Push::UUID => Ok(Self::Push),
             PushFront::UUID => Ok(Self::PushFront),
+            Raise::UUID => Ok(Self::Raise),
             Reduce::UUID => Ok(Self::Reduce),
             Remainder::UUID => Ok(Self::Remainder),
             Replace::UUID => Ok(Self::Replace),
@@ -367,6 +371,7 @@ impl Uid for Stdlib {
             Self::Pow => Uid::uid(&Pow {}),
             Self::Push => Uid::uid(&Push {}),
             Self::PushFront => Uid::uid(&PushFront {}),
+            Self::Raise => Uid::uid(&Raise {}),
             Self::Reduce => Uid::uid(&Reduce {}),
             Self::Remainder => Uid::uid(&Remainder {}),
             Self::Replace => Uid::uid(&Replace {}),
@@ -440,6 +445,7 @@ impl Stdlib {
             Self::Pow => Pow::arity(),
             Self::Push => Push::arity(),
             Self::PushFront => PushFront::arity(),
+            Self::Raise => Raise::arity(),
             Self::Reduce => Reduce::arity(),
             Self::Remainder => Remainder::arity(),
             Self::Replace => Replace::arity(),
@@ -534,6 +540,7 @@ impl Stdlib {
             Self::Pow => Applicable::<T>::apply(&Pow, args, factory, allocator, cache),
             Self::Push => Applicable::<T>::apply(&Push, args, factory, allocator, cache),
             Self::PushFront => Applicable::<T>::apply(&PushFront, args, factory, allocator, cache),
+            Self::Raise => Applicable::<T>::apply(&Raise, args, factory, allocator, cache),
             Self::Reduce => Applicable::<T>::apply(&Reduce, args, factory, allocator, cache),
             Self::Remainder => Applicable::<T>::apply(&Remainder, args, factory, allocator, cache),
             Self::Replace => Applicable::<T>::apply(&Replace, args, factory, allocator, cache),
@@ -624,6 +631,7 @@ impl Stdlib {
             Self::Pow => Applicable::<T>::should_parallelize(&Pow, args),
             Self::Push => Applicable::<T>::should_parallelize(&Push, args),
             Self::PushFront => Applicable::<T>::should_parallelize(&PushFront, args),
+            Self::Raise => Applicable::<T>::should_parallelize(&Raise, args),
             Self::Reduce => Applicable::<T>::should_parallelize(&Reduce, args),
             Self::Remainder => Applicable::<T>::should_parallelize(&Remainder, args),
             Self::Replace => Applicable::<T>::should_parallelize(&Replace, args),
@@ -907,6 +915,11 @@ impl From<Push> for Stdlib {
 impl From<PushFront> for Stdlib {
     fn from(_value: PushFront) -> Self {
         Self::PushFront
+    }
+}
+impl From<Raise> for Stdlib {
+    fn from(_value: Raise) -> Self {
+        Self::Raise
     }
 }
 impl From<Reduce> for Stdlib {

@@ -345,6 +345,11 @@ impl From<stdlib::PushFront> for CliBuiltins {
         Self::from(stdlib::Stdlib::from(value))
     }
 }
+impl From<stdlib::Raise> for CliBuiltins {
+    fn from(value: stdlib::Raise) -> Self {
+        Self::from(stdlib::Stdlib::from(value))
+    }
+}
 impl From<stdlib::Reduce> for CliBuiltins {
     fn from(value: stdlib::Reduce) -> Self {
         Self::from(stdlib::Stdlib::from(value))
