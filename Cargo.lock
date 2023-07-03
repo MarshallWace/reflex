@@ -2122,7 +2122,7 @@ dependencies = [
  "reflex",
  "reflex-stdlib",
  "reflex-utils",
- "rmp-serde 0.15.5",
+ "rmp-serde",
  "serde",
  "serde_json",
 ]
@@ -2313,7 +2313,7 @@ name = "reflex-utils"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "rmp-serde 1.1.1",
+ "rmp-serde",
  "serde",
  "serde_json",
  "tokio",
@@ -2378,17 +2378,6 @@ dependencies = [
  "byteorder",
  "num-traits",
  "paste",
-]
-
-[[package]]
-name = "rmp-serde"
-version = "0.15.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "723ecff9ad04f4ad92fe1c8ca6c20d2196d9286e9c60727c4cb5511629260e9d"
-dependencies = [
- "byteorder",
- "rmp",
- "serde",
 ]
 
 [[package]]
